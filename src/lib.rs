@@ -1,1 +1,2 @@
-pub mod compression;
+pub mod compressor;
+pub mod core;
