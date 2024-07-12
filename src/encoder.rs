@@ -370,7 +370,10 @@ impl<'a, 'b, R: BufRead> ChunkWriter<'a, 'b, R> {
 
 #[cfg(test)]
 mod tests {
-    use format::{ChunkOptionKind, CompressionScheme, FromLeBytes, TryFromLeBytes};
+    use format::{
+        deserialize::{FromLeBytes, TryFromLeBytes},
+        ChunkOptionKind, CompressionScheme,
+    };
 
     use crate::compressor::uncompressed::UncompressedCompressor;
 
