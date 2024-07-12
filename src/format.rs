@@ -72,11 +72,14 @@
 //! }
 //!
 //! #[repr(packed(1))]
+//! pub struct GenericChunkHeader {
+//!     /// The number of bytes of this chunk, including this `number_of_bytes` field
+//!     pub number_of_bytes: u64,
+//! }
+//!
+//! #[repr(packed(1))]
 //! pub struct ChunkHeader<T> {
-//!     /// unaligned
-//!     ///
-//!     /// The number of bytes of this chunk, including this `n_bytes` field
-//!     pub n_bytes: u64,
+//!     pub n_bytes: GenericChunkHeader,
 //!     pub header: T,
 //! }
 //!
@@ -116,6 +119,8 @@
 //! }
 //! ```
 pub mod deserialize;
+pub mod native;
+pub mod serialize;
 // ============== FileHeader ==================
 
 #[repr(packed(1))]
@@ -141,7 +146,7 @@ pub struct FileConfig {
 }
 
 #[repr(u8)]
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum FieldType {
     F64 = 0,
 }
@@ -163,7 +168,7 @@ pub enum ChunkOptionKind {
 
 #[repr(u8)]
 #[non_exhaustive]
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum CompressionScheme {
     BUFF = 0,
     Gorilla,
@@ -178,11 +183,11 @@ pub struct Chunk<T> {
 }
 
 #[repr(packed(1))]
+pub struct GenericChunkHeader {}
+
+#[repr(packed(1))]
 pub struct ChunkHeader<T> {
-    /// unaligned
-    ///
-    /// The number of bytes of this chunk, including this `n_bytes` field
-    pub n_bytes: u64,
+    pub generic_header: GenericChunkHeader,
     pub header: T,
 }
 
@@ -218,15 +223,4 @@ pub struct ChunkFooter {
     /// The number of tuples laid before this chunk.
     pub logical_offset: u64,
     // zone_map: ZoneMap
-}
-
-/// A trait for obtaining a byte slice representation of a struct instance in little-endian byte order.
-/// This trait should be implemented for structs that need to be represented as byte slices.
-pub trait AsLeBytes {
-    /// Returns a byte slice representation of the struct instance in little-endian byte order.
-    ///
-    /// # Panics
-    ///
-    /// Panics if the struct's alignment does not match the expected alignment for its fields.
-    fn as_le_bytes(&self) -> &[u8];
 }

@@ -1,5 +1,7 @@
 use std::mem::size_of;
 
+use thiserror::Error;
+
 use super::{
     ChunkFooter, ChunkOption, ChunkOptionKind, CompressionScheme, FieldType, FileConfig,
     FileFooter0, FileFooter2, FileHeader,
@@ -41,9 +43,11 @@ pub trait TryFromLeBytes {
         Self: Sized;
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Error, Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub enum ConversionError {
+    #[error("Failed to convert FieldType")]
     FieldType,
+    #[error("Failed to convert CompressionScheme")]
     CompressionScheme,
 }
 

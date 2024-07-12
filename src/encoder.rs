@@ -1,6 +1,11 @@
 use crate::{
     compressor::GenericCompressor,
-    format::{self, ChunkFooter, FieldType, FileConfig, FileFooter0, FileFooter2, FileHeader},
+    format::{
+        self,
+        serialize::{AsBytes, ToLe},
+        ChunkFooter, FieldType, FileConfig, FileFooter0, FileFooter2, FileHeader,
+        GenericChunkHeader,
+    },
 };
 use core::slice;
 use std::{
@@ -296,7 +301,7 @@ impl<'a, 'b, R: BufRead> ChunkWriter<'a, 'b, R> {
     }
 
     pub fn write<W: Write>(&'a mut self, mut f: W) -> Result<(), io::Error> {
-        let header_size = self.compressor.header_size();
+        let header_size = size_of::<GenericChunkHeader>() + self.compressor.header_size();
 
         if self.buf.len() < header_size {
             let next_len = header_size.next_power_of_two();
@@ -339,7 +344,10 @@ impl<'a, 'b, R: BufRead> ChunkWriter<'a, 'b, R> {
             return Ok(());
         }
 
-        self.compressor.write_header(&mut self.buf[..header_size]);
+        let mut header = GenericChunkHeader {};
+        self.buf[..size_of::<GenericChunkHeader>()].copy_from_slice(header.to_le().as_bytes());
+        self.compressor
+            .write_header(&mut self.buf[size_of::<GenericChunkHeader>()..header_size]);
 
         // TODO: handle error especially for `f` is too small to write.
         f.write_all(&self.buf[..(header_size + self.compressor.total_bytes_out())])?;
