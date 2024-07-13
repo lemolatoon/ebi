@@ -4,6 +4,11 @@ use std::{
     slice,
 };
 
+use crate::format::{
+    serialize::{AsBytes, ToLe},
+    uncompressed::UncompressedHeader0,
+};
+
 use super::Compressor;
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -61,12 +66,16 @@ impl Compressor for UncompressedCompressor {
     }
 
     fn header_size(&self) -> usize {
-        self.header.as_ref().map_or(0, |h| h.len())
+        size_of::<UncompressedHeader0>() + self.header.as_ref().map_or(0, |h| h.len())
     }
 
     fn write_header(&mut self, output: &mut [u8]) {
+        let header_size = self.header_size() as u8;
+        let mut header0 = UncompressedHeader0 { header_size };
+        output[..size_of::<UncompressedHeader0>()].copy_from_slice(header0.to_le().as_bytes());
         if let Some(header) = self.header.as_ref() {
-            output[..self.header_size()].copy_from_slice(&header[..]);
+            output[size_of::<UncompressedHeader0>()..self.header_size()]
+                .copy_from_slice(&header[..]);
         }
     }
 

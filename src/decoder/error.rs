@@ -12,6 +12,8 @@ pub enum DecoderError {
     ConversionError(#[from] format::deserialize::ConversionError),
     #[error("Buffer too small")]
     BufferTooSmall,
+    #[error("Preconditions not met")]
+    PreconditionsNotMet,
 }
 
 pub type Result<T> = std::result::Result<T, DecoderError>;

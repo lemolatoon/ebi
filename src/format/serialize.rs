@@ -1,4 +1,4 @@
-use super::GenericChunkHeader;
+use super::{uncompressed::UncompressedHeader0, GeneralChunkHeader};
 
 /// A trait for converting the elements of a struct into little-endian byte order.
 pub trait ToLe {
@@ -6,7 +6,13 @@ pub trait ToLe {
     fn to_le(&mut self) -> &mut Self;
 }
 
-impl ToLe for GenericChunkHeader {
+impl ToLe for GeneralChunkHeader {
+    fn to_le(&mut self) -> &mut Self {
+        self
+    }
+}
+
+impl ToLe for UncompressedHeader0 {
     fn to_le(&mut self) -> &mut Self {
         self
     }
@@ -23,8 +29,10 @@ pub trait AsBytes: private::Sealed {
 }
 
 mod private {
-    pub(super) trait Sealed {}
-    impl Sealed for super::GenericChunkHeader {}
+
+    pub trait Sealed {}
+    impl Sealed for super::GeneralChunkHeader {}
+    impl Sealed for super::UncompressedHeader0 {}
 }
 
 impl<T: private::Sealed> AsBytes for T {

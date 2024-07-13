@@ -72,14 +72,14 @@
 //! }
 //!
 //! #[repr(packed(1))]
-//! pub struct GenericChunkHeader {
+//! pub struct GeneralChunkHeader {
 //!     /// The number of bytes of this chunk, including this `number_of_bytes` field
 //!     pub number_of_bytes: u64,
 //! }
 //!
 //! #[repr(packed(1))]
 //! pub struct ChunkHeader<T> {
-//!     pub n_bytes: GenericChunkHeader,
+//!     pub n_bytes: GeneralChunkHeader,
 //!     pub header: T,
 //! }
 //!
@@ -121,6 +121,8 @@
 pub mod deserialize;
 pub mod native;
 pub mod serialize;
+
+pub mod uncompressed;
 // ============== FileHeader ==================
 
 #[repr(packed(1))]
@@ -183,11 +185,11 @@ pub struct Chunk<T> {
 }
 
 #[repr(packed(1))]
-pub struct GenericChunkHeader {}
+pub struct GeneralChunkHeader {}
 
 #[repr(packed(1))]
 pub struct ChunkHeader<T> {
-    pub generic_header: GenericChunkHeader,
+    pub generic_header: GeneralChunkHeader,
     pub header: T,
 }
 

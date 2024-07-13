@@ -4,7 +4,7 @@ use crate::{
         self,
         serialize::{AsBytes, ToLe},
         ChunkFooter, FieldType, FileConfig, FileFooter0, FileFooter2, FileHeader,
-        GenericChunkHeader,
+        GeneralChunkHeader,
     },
 };
 use core::slice;
@@ -301,7 +301,7 @@ impl<'a, 'b, R: BufRead> ChunkWriter<'a, 'b, R> {
     }
 
     pub fn write<W: Write>(&'a mut self, mut f: W) -> Result<(), io::Error> {
-        let header_size = size_of::<GenericChunkHeader>() + self.compressor.header_size();
+        let header_size = size_of::<GeneralChunkHeader>() + self.compressor.header_size();
 
         if self.buf.len() < header_size {
             let next_len = header_size.next_power_of_two();
@@ -344,10 +344,10 @@ impl<'a, 'b, R: BufRead> ChunkWriter<'a, 'b, R> {
             return Ok(());
         }
 
-        let mut header = GenericChunkHeader {};
-        self.buf[..size_of::<GenericChunkHeader>()].copy_from_slice(header.to_le().as_bytes());
+        let mut header = GeneralChunkHeader {};
+        self.buf[..size_of::<GeneralChunkHeader>()].copy_from_slice(header.to_le().as_bytes());
         self.compressor
-            .write_header(&mut self.buf[size_of::<GenericChunkHeader>()..header_size]);
+            .write_header(&mut self.buf[size_of::<GeneralChunkHeader>()..header_size]);
 
         // TODO: handle error especially for `f` is too small to write.
         f.write_all(&self.buf[..(header_size + self.compressor.total_bytes_out())])?;
@@ -380,6 +380,7 @@ impl<'a, 'b, R: BufRead> ChunkWriter<'a, 'b, R> {
 mod tests {
     use format::{
         deserialize::{FromLeBytes, TryFromLeBytes},
+        uncompressed::UncompressedHeader0,
         ChunkOptionKind, CompressionScheme,
     };
 
@@ -477,8 +478,12 @@ mod tests {
         let fifth_chunk_physical_offset = fifth_chunk_footer.physical_offset as usize;
         let fifth_chunk_logical_offset = fifth_chunk_footer.logical_offset as usize;
         let data_in_src = data[fifth_chunk_logical_offset].to_le_bytes();
-        let data_in_dest = &dest_vec
-            [fifth_chunk_physical_offset..(fifth_chunk_physical_offset + size_of::<f64>())];
+
+        let header_head =
+            UncompressedHeader0::from_le_bytes(&dest_vec[fifth_chunk_physical_offset..]);
+        let header_size = header_head.header_size as usize;
+        let val_head = header_size + fifth_chunk_physical_offset;
+        let data_in_dest = &dest_vec[val_head..(val_head + size_of::<f64>())];
         assert_eq!(data_in_src, data_in_dest);
 
         // TODO: check crc here if implemented
