@@ -70,7 +70,7 @@ impl FileReader {
     /// # Errors
     /// Returns an error if the header is not read yet.
     pub fn seek_to_footer<R: Read + Seek>(&mut self, input: &mut R) -> Result<()> {
-        let &footer_offset = self
+        let footer_offset = self
             .header()
             .ok_or(DecoderError::PreconditionsNotMet)?
             .footer_offset();
@@ -132,7 +132,7 @@ impl FileReader {
             return None;
         }
 
-        let n_chunks = *self.footer().unwrap().number_of_chunks() as usize;
+        let n_chunks = self.footer().unwrap().number_of_chunks() as usize;
 
         Some((0..n_chunks).map(move |i| GeneralChunkHandle::new(self, i)))
     }
@@ -178,8 +178,8 @@ impl<'reader> GeneralChunkHandle<'reader> {
     }
 
     pub fn chunk_size(&self) -> u64 {
-        let &physical_offset = self.footer().chunk_footers()[self.chunk_index].physical_offset();
-        let &next_physical_offset = self
+        let physical_offset = self.footer().chunk_footers()[self.chunk_index].physical_offset();
+        let next_physical_offset = self
             .footer()
             .chunk_footers()
             .get(self.chunk_index + 1)
@@ -190,7 +190,7 @@ impl<'reader> GeneralChunkHandle<'reader> {
 
     /// Seeks the input stream to the beginning of the chunk.
     pub fn seek_to_chunk<R: Read + Seek>(&self, input: &mut R) -> Result<()> {
-        let &physical_offset = self.footer().chunk_footers()[self.chunk_index].physical_offset();
+        let physical_offset = self.footer().chunk_footers()[self.chunk_index].physical_offset();
         input.seek(io::SeekFrom::Start(physical_offset))?;
         Ok(())
     }

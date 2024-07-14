@@ -16,8 +16,15 @@ pub struct NativeFileHeader {
     /// major, minor, patch
     version: [u16; 3],
     /// Bytes offset for FileFooter from the file start.
+    #[getter(skip)]
     footer_offset: u64,
     config: NativeFileConfig,
+}
+
+impl NativeFileHeader {
+    pub fn footer_offset(&self) -> u64 {
+        self.footer_offset
+    }
 }
 
 impl From<&FileHeader> for NativeFileHeader {
@@ -60,10 +67,13 @@ impl From<&FileConfig> for NativeFileConfig {
 #[derive(Getters, Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct NativeFileFooter {
     /// The number of records included in this file.
+    #[getter(skip)]
     number_of_records: u64,
     /// The number of chunks included in this file.
+    #[getter(skip)]
     number_of_chunks: u64,
     chunk_footers: Vec<NativeChunkFooter>,
+    #[getter(skip)]
     crc: u32,
 }
 
@@ -84,15 +94,39 @@ impl NativeFileFooter {
             crc,
         }
     }
+
+    pub fn number_of_records(&self) -> u64 {
+        self.number_of_records
+    }
+
+    pub fn number_of_chunks(&self) -> u64 {
+        self.number_of_chunks
+    }
+
+    pub fn crc(&self) -> u32 {
+        self.crc
+    }
 }
 
 #[derive(Getters, Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct NativeChunkFooter {
     /// The byte offset of this chunk.
+    #[getter(skip)]
     physical_offset: u64,
     /// The number of tuples laid before this chunk.
+    #[getter(skip)]
     logical_offset: u64,
     // zone_map: ZoneMap
+}
+
+impl NativeChunkFooter {
+    pub fn physical_offset(&self) -> u64 {
+        self.physical_offset
+    }
+
+    pub fn logical_offset(&self) -> u64 {
+        self.logical_offset
+    }
 }
 
 impl From<&ChunkFooter> for NativeChunkFooter {

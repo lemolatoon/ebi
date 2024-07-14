@@ -27,8 +27,8 @@ impl UncompressedCompressor {
         }
     }
 
-    pub fn header(&mut self, header: Option<Box<[u8]>>) -> &mut Self {
-        self.header = header;
+    pub fn header(mut self, header: Box<[u8]>) -> Self {
+        self.header = Some(header);
         self
     }
 }

@@ -8,6 +8,7 @@ use crate::format::{CompressionScheme, GeneralChunkHeader};
 use super::Result;
 use super::{error::DecoderError, GeneralChunkHandle};
 
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct GeneralChunkReader<'reader, 'chunk> {
     handle: &'reader GeneralChunkHandle<'reader>,
     chunk: &'chunk [u8],
