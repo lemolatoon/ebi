@@ -43,6 +43,7 @@ impl Compressor for UncompressedCompressor {
     fn compress<'a>(&mut self, input: &'a [f64], output: &mut [u8]) -> usize {
         let input_bytes_ptr = input.as_ptr().cast::<u8>();
         let len = size_of_val(input) / size_of::<u8>();
+        dbg!(len);
         // Safety:
         // `input_bytes_ptr` is valid for `len * size_of::<u8>()` -> `size_of::<f64> * input.len()`.
         // `input_bytes_ptr` is non null because it is originated from slice.
@@ -55,6 +56,7 @@ impl Compressor for UncompressedCompressor {
         let copyable_bytes = min(input_bytes_slice.len(), output.len());
         let number_of_tuples_copied = copyable_bytes / size_of::<f64>();
         let number_of_bytes_copied = number_of_tuples_copied * size_of::<f64>();
+        dbg!(number_of_bytes_copied);
 
         output[0..number_of_bytes_copied]
             .copy_from_slice(&input_bytes_slice[0..number_of_bytes_copied]);

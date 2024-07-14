@@ -82,10 +82,6 @@ mod tests {
         write_file(file_writer, &mut out_f).unwrap();
 
         let compressed_buf = out_f.into_inner();
-        println!(
-            "compressed_buf: {:x?}",
-            &compressed_buf[..size_of::<FileHeader>()]
-        );
         let mut in_f = io::Cursor::new(compressed_buf);
 
         let mut file_reader = FileReader::new();
@@ -121,6 +117,7 @@ mod tests {
         );
 
         let chunk_footers = file_footer.chunk_footers();
+        dbg!(&chunk_footers);
         assert_eq!(
             chunk_footers.len(),
             ((record_count + RECORD_COUNT - 1) / RECORD_COUNT) as usize,
@@ -161,7 +158,11 @@ mod tests {
                 "chunk header must be equal to the header written"
             );
 
-            let written_data = &random_values[i * RECORD_COUNT..(i + 1) * RECORD_COUNT];
+            let written_data = if random_values.len() < (i + 1) * RECORD_COUNT {
+                &random_values[i * RECORD_COUNT..]
+            } else {
+                &random_values[i * RECORD_COUNT..(i + 1) * RECORD_COUNT]
+            };
             let decompressed_data = chunk_reader.decompress();
 
             assert_eq!(

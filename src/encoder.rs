@@ -90,6 +90,15 @@ impl<'a, R: BufRead> BufWrapper<'a, R> {
         ))
     }
 
+    pub fn n_bytes(&self) -> usize {
+        size_of_val(self.buf)
+    }
+
+    pub fn shrink(&mut self, len: usize) {
+        self.buf = &self.buf[..len];
+        self.n_consumed_bytes = len * size_of::<f64>();
+    }
+
     pub fn set_n_consumed_bytes(&mut self, consumed: usize) {
         self.n_consumed_bytes = consumed;
     }
@@ -302,6 +311,7 @@ impl<'a, 'b, R: BufRead> ChunkWriter<'a, 'b, R> {
 
     pub fn write<W: Write>(&'a mut self, mut f: W) -> Result<(), io::Error> {
         let header_size = size_of::<GeneralChunkHeader>() + self.compressor.header_size();
+        let chunk_option = *self.file_writer.chunk_option();
 
         if self.buf.len() < header_size {
             let next_len = header_size.next_power_of_two();
@@ -311,8 +321,9 @@ impl<'a, 'b, R: BufRead> ChunkWriter<'a, 'b, R> {
             self.buf.resize(next_len, 0);
         }
 
+        println!("START!!!!!!!!!!!!!!");
         loop {
-            let reaches_limit = self.file_writer.chunk_option().reach_limit(
+            let reaches_limit = chunk_option.reach_limit(
                 self.compressor.total_bytes_in(),
                 self.compressor.total_bytes_out(),
             );
@@ -326,11 +337,23 @@ impl<'a, 'b, R: BufRead> ChunkWriter<'a, 'b, R> {
                 break;
             }
 
+            if let ChunkOption::RecordCount(count) = chunk_option {
+                dbg!(count * size_of::<f64>());
+                dbg!(buf.n_bytes());
+                dbg!(self.compressor.total_bytes_in());
+                dbg!(self.compressor.total_bytes_in() + buf.n_bytes());
+                if count * size_of::<f64>() <= self.compressor.total_bytes_in() + buf.n_bytes() {
+                    buf.shrink(count - self.compressor.total_bytes_in() / size_of::<f64>());
+                }
+                dbg!(buf.n_bytes());
+            }
+
             let total_bytes_out = self.compressor.total_bytes_out();
             let n_bytes_compressed = self.compressor.compress(
                 buf.as_ref(),
                 &mut self.buf[(header_size + total_bytes_out)..],
             );
+            dbg!(n_bytes_compressed);
             buf.set_n_consumed_bytes(n_bytes_compressed);
 
             if n_bytes_compressed == 0 {
@@ -339,6 +362,8 @@ impl<'a, 'b, R: BufRead> ChunkWriter<'a, 'b, R> {
                 self.buf.resize(buf_len * 2, 0);
             }
         }
+        println!("END!!!!!!!!!!!!!!");
+        dbg!(self.compressor.total_bytes_in());
 
         if self.compressor.total_bytes_in() == 0 {
             return Ok(());
