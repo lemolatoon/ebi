@@ -1,6 +1,6 @@
 pub mod uncompressed;
 
-use std::mem::size_of;
+use std::mem::{align_of, size_of};
 
 use crate::format::native::{NativeFileFooter, NativeFileHeader};
 use crate::format::{CompressionScheme, GeneralChunkHeader};
@@ -15,8 +15,18 @@ pub struct GeneralChunkReader<'reader, 'chunk> {
 }
 
 impl<'reader, 'chunk> GeneralChunkReader<'reader, 'chunk> {
+    /// Create a new GeneralChunkReader.
+    /// Caller must guarantee that the input chunk is valid.
+    /// # chunk format
+    /// ```text
+    /// GeneralChunkHeader | MethodSpecificHeader | (padding for 64bit alignment) | Data
+    /// ```
+    /// The chunk begins with the header including the method specific header.
+    /// The header is followed by the data.
+    /// The data is 64bit aligned, so there may be padding between the header and the data.
     pub fn new(handle: &'reader GeneralChunkHandle<'reader>, chunk: &'chunk [u8]) -> Result<Self> {
-        if chunk.len() < handle.chunk_size() as usize {
+        let chunk_size = handle.chunk_size() as usize;
+        if chunk.len() < chunk_size.next_multiple_of(align_of::<u64>()) / size_of::<u64>() + 1 {
             return Err(DecoderError::BufferTooSmall);
         }
 
