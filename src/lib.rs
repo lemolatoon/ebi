@@ -21,7 +21,6 @@ mod tests {
             FileReader,
         },
         encoder::{ChunkOption, FileWriter},
-        format::FileHeader,
     };
 
     fn generate_and_write_random_f64<W: Write>(mut f: W, n: usize) -> io::Result<Vec<f64>> {
