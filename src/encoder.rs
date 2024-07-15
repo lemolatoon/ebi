@@ -405,7 +405,7 @@ mod tests {
         };
         const RECORD_COUNT: usize = 100;
         let compressor = GenericCompressor::Uncompressed(UncompressedCompressor::new());
-        let mut in_f = BufReader::new(&u8_data[..]);
+        let mut in_f = BufReader::new(u8_data);
         let mut out_f = Cursor::new(Vec::new());
         let chunk_option = ChunkOption::RecordCount(RECORD_COUNT);
         let mut file_writer = FileWriter::new(&mut in_f, compressor, chunk_option);
