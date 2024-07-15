@@ -7,16 +7,6 @@ use super::{
     FileFooter0, FileFooter2, FileHeader,
 };
 
-impl ChunkFooter {
-    #[must_use]
-    pub fn to_le(mut self) -> Self {
-        self.physical_offset = self.physical_offset.to_le();
-        self.logical_offset = self.logical_offset.to_le();
-
-        self
-    }
-}
-
 /// A trait for converting a byte slice into a struct instance, assuming little-endian byte order.
 /// This trait should be implemented for structs that need to be constructed from byte slices.
 pub trait FromLeBytes: Sized {

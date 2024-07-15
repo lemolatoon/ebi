@@ -199,8 +199,6 @@ impl<R: BufRead> FileWriter<R> {
             let next_len = header_size.next_power_of_two();
             buf.resize(next_len, 0);
         }
-        let slice = &mut buf[..header_size];
-        let header_ptr = slice.as_mut_ptr().cast::<FileHeader>();
 
         // can be static?
         let version: [u16; 3] = [
@@ -209,7 +207,7 @@ impl<R: BufRead> FileWriter<R> {
             env!("CARGO_PKG_VERSION_PATCH"),
         ]
         .map(|v| v.parse().unwrap_or(u16::MAX).to_le());
-        let header = FileHeader {
+        let mut header = FileHeader {
             magic_number: *Self::MAGIC_NUMBER,
             version,
             // leave footer_offset blank
@@ -220,11 +218,7 @@ impl<R: BufRead> FileWriter<R> {
                 compression_scheme: self.compressor.compression_scheme(),
             },
         };
-        // Safety:
-        // these memory regions are allocated as Vec<u8>
-        unsafe {
-            header_ptr.write(header);
-        };
+        buf[..header_size].copy_from_slice(header.to_le().as_bytes());
 
         f.write_all(&buf[..header_size])
     }
@@ -239,45 +233,30 @@ impl<R: BufRead> FileWriter<R> {
             buf.resize(next_len, 0);
         }
 
-        let footer0_ptr = buf.as_mut_ptr().cast::<FileFooter0>();
         let number_of_chunks = (self.n_chunks() as u64).to_le();
         let number_of_records = self
             .chunk_footers_with_next_chunk_footer()
             .last()
             .map_or(0, |f| f.logical_offset);
-        let footer0 = FileFooter0 {
+        let mut footer0 = FileFooter0 {
             number_of_chunks,
             number_of_records,
         };
-        // Safety:
-        // the pointer destination is valid, this is originated from `buf`.
-        unsafe {
-            footer0_ptr.write_unaligned(footer0);
-        }
+        buf[..size_of::<FileFooter0>()].copy_from_slice(footer0.to_le().as_bytes());
 
-        // Safety:
-        // the pointer will be in bounds of `buf`.
-        let footer1_ptr = unsafe { footer0_ptr.offset(1).cast::<ChunkFooter>() };
         for (i, chunk_footer) in self.chunk_footers().iter().enumerate() {
             let mut chunk_footer = *chunk_footer;
-            chunk_footer = chunk_footer.to_le();
-            // Safety:
-            //  - The pointer will be in bounds of `buf`.
-            //  - Also that's why the pointer is valid.
-            unsafe { footer1_ptr.add(i).write_unaligned(chunk_footer) }
+            let buf_head = size_of::<FileFooter0>() + i * size_of::<ChunkFooter>();
+            buf[buf_head..(buf_head + size_of::<ChunkFooter>())]
+                .copy_from_slice(chunk_footer.to_le().as_bytes());
         }
 
-        // Safety:
-        // The pointer will be in bounds in `buf`.
-        let footer2_ptr = unsafe { footer1_ptr.add(self.n_chunks()).cast::<FileFooter2>() };
         // TODO: calculate `crc` here.
-        let footer2 = FileFooter2 { crc: 0u32.to_le() };
-        // Safety:
-        //  - The pointer will be in bounds of `buf`.
-        //  - Also that's why the pointer is valid.
-        unsafe {
-            footer2_ptr.write_unaligned(footer2);
-        }
+        let crc = 0u32;
+        let mut footer2 = FileFooter2 { crc };
+        let buf_head = size_of::<FileFooter0>() + size_of::<ChunkFooter>() * self.n_chunks();
+        buf[buf_head..(buf_head + size_of::<FileFooter2>())]
+            .copy_from_slice(footer2.to_le().as_bytes());
 
         f.write_all(&buf[..footer_size])
     }
