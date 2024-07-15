@@ -116,15 +116,15 @@ fn main() {
             "logical offset of chunk {i}: {}",
             chunk_handle.chunk_footer().logical_offset()
         );
-        println!("{i}th chunk data[3]: {:?}", chunk_reader.decompress()[3]);
+        println!("{i}th chunk data[2]: {:?}", chunk_reader.decompress()[2]);
         let mut in_f = File::open("uncompressed.bin").unwrap();
         in_f.seek(SeekFrom::Start(
-            (chunk_handle.chunk_footer().logical_offset() + 3) * std::mem::size_of::<f64>() as u64,
+            (chunk_handle.chunk_footer().logical_offset() + 2) * std::mem::size_of::<f64>() as u64,
         ))
         .unwrap();
         let mut buf: [u8; std::mem::size_of::<f64>()] = [0; std::mem::size_of::<f64>()];
         in_f.read_exact(&mut buf).unwrap();
-        println!("expected data[3]: {:?}", f64::from_ne_bytes(buf));
+        println!("expected data[2]: {:?}", f64::from_ne_bytes(buf));
         // Compression Method Specific Operations
     }
 }
