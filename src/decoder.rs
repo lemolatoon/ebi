@@ -228,8 +228,7 @@ impl<'reader> GeneralChunkHandle<'reader> {
         let header_size = self.fetch_header(&mut input, buf)?;
         let data_offset = header_size.next_multiple_of(align_of::<u64>());
 
-        input
-            .read_exact(&mut buf[data_offset..(data_offset + chunk_size - header_size) as usize])?;
+        input.read_exact(&mut buf[data_offset..data_offset + chunk_size - header_size])?;
 
         Ok(())
     }
