@@ -119,10 +119,16 @@ impl TryFromLeBytes for FieldType {
 impl TryFromLeBytes for CompressionScheme {
     type Error = ConversionError;
     fn try_from_le_bytes(bytes: &[u8]) -> Result<Self, Self::Error> {
+        const UNCOMPRESSED: u8 = CompressionScheme::Uncompressed as u8;
+        const RLE: u8 = CompressionScheme::RLE as u8;
+        const GORILLA: u8 = CompressionScheme::Gorilla as u8;
+        const BUFF: u8 = CompressionScheme::BUFF as u8;
+
         match bytes[0] {
-            0 => Ok(Self::BUFF),
-            1 => Ok(Self::Gorilla),
-            2 => Ok(Self::Uncompressed),
+            UNCOMPRESSED => Ok(Self::Uncompressed),
+            RLE => Ok(Self::RLE),
+            GORILLA => Ok(Self::Gorilla),
+            BUFF => Ok(Self::BUFF),
             _ => Err(ConversionError::CompressionScheme),
         }
     }

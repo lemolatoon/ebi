@@ -1,6 +1,6 @@
 use super::{
-    uncompressed::UncompressedHeader0, ChunkFooter, FileConfig, FileFooter0, FileFooter2,
-    FileHeader, GeneralChunkHeader,
+    run_length::RunLengthHeader, uncompressed::UncompressedHeader0, ChunkFooter, FileConfig,
+    FileFooter0, FileFooter2, FileHeader, GeneralChunkHeader,
 };
 
 /// A trait for converting the elements of a struct into little-endian byte order.
@@ -67,7 +67,7 @@ impl ToLe for ChunkFooter {
 }
 
 /// A trait for obtaining a byte slice representation of a struct instance.
-pub trait AsBytes: private::Sealed {
+pub trait AsBytes {
     /// Returns a byte slice representation of the struct instance.
     fn as_bytes(&self) -> &[u8];
 }
@@ -79,15 +79,31 @@ mod private {
     impl Sealed for super::FileConfig {}
     impl Sealed for super::GeneralChunkHeader {}
     impl Sealed for super::UncompressedHeader0 {}
+    impl Sealed for super::RunLengthHeader {}
     impl Sealed for super::FileFooter0 {}
     impl Sealed for super::FileFooter2 {}
     impl Sealed for super::ChunkFooter {}
+
+    impl Sealed for f32 {}
+    impl Sealed for f64 {}
+    impl Sealed for u8 {}
+    impl Sealed for u16 {}
+    impl Sealed for u32 {}
+    impl Sealed for u64 {}
 }
 
 impl<T: private::Sealed> AsBytes for T {
     fn as_bytes(&self) -> &[u8] {
         unsafe {
             std::slice::from_raw_parts(self as *const T as *const u8, std::mem::size_of::<T>())
+        }
+    }
+}
+
+impl<T: private::Sealed> AsBytes for [T] {
+    fn as_bytes(&self) -> &[u8] {
+        unsafe {
+            std::slice::from_raw_parts(self.as_ptr() as *const u8, std::mem::size_of_val(self))
         }
     }
 }

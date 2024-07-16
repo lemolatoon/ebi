@@ -6,7 +6,7 @@ use std::{
 };
 
 use ebi::{
-    compressor::{uncompressed::UncompressedCompressor, GenericCompressor},
+    compressor::{run_length::RunLengthCompressor, GenericCompressor},
     decoder::{
         chunk_reader::{GeneralChunkReaderInner, Reader},
         FileReader,
@@ -32,25 +32,29 @@ fn generate_and_write_random_f64(path: impl AsRef<Path>, n: usize) -> io::Result
 fn main() {
     const RECORD_COUNT: usize = 100;
     generate_and_write_random_f64("uncompressed.bin", RECORD_COUNT * 3 + 3).unwrap();
-    let compressor = GenericCompressor::Uncompressed(UncompressedCompressor::new());
+    // let compressor = GenericCompressor::Uncompressed(UncompressedCompressor::new(100));
+    let compressor = GenericCompressor::RLE(RunLengthCompressor::new());
     let in_f = File::open("uncompressed.bin").unwrap();
     let mut in_f = BufReader::new(in_f);
     let mut out_f = File::create("compressed.bin").unwrap();
     let chunk_option = ChunkOption::RecordCount(RECORD_COUNT);
     let mut file_context = FileWriter::new(&mut in_f, compressor, chunk_option);
 
-    let mut buf = Vec::<u8>::new();
     // write header leaving footer offset blank
-    file_context.write_header(&mut out_f, &mut buf).unwrap();
+    file_context.write_header(&mut out_f).unwrap();
 
     // loop until there are no data left
-    while let Some(mut chunk_context) = file_context.chunk_writer(&mut buf) {
-        chunk_context.write(&mut out_f).unwrap();
+    let mut compressor = None;
+    while let Some(mut chunk_writer) = file_context.chunk_writer_with_compressor(compressor.take())
+    {
+        chunk_writer.write(&mut out_f).unwrap();
         // you can flush if you want
         out_f.flush().unwrap();
+
+        compressor = Some(chunk_writer.into_compressor());
     }
 
-    file_context.write_footer(&mut out_f, &mut buf).unwrap();
+    file_context.write_footer(&mut out_f).unwrap();
     let footer_offset_slot_offset = file_context.footer_offset_slot_offset();
     out_f
         .seek(SeekFrom::Start(footer_offset_slot_offset as u64))
@@ -81,11 +85,17 @@ fn main() {
     println!("chunk_footer[1]: {:?}", chunk_footers[1]);
 
     // reading chunk in given buffer
-    let chunk_handles = file_reader.chunks_iter().unwrap();
+    let mut chunk_handles = file_reader.chunks_iter().unwrap().peekable();
+    chunk_handles
+        .peek()
+        .unwrap()
+        .seek_to_chunk(&mut in_f)
+        .unwrap();
     let mut buf = Vec::new();
     for (i, mut chunk_handle) in chunk_handles.enumerate() {
         // you can skip this chunk if you like
         if i == 1 {
+            chunk_handle.seek_to_chunk_end(&mut in_f).unwrap();
             continue;
         }
         let chunk_size = chunk_handle.chunk_size() as usize;
@@ -96,35 +106,32 @@ fn main() {
             );
         }
 
-        chunk_handle.seek_to_chunk(&mut in_f).unwrap();
         chunk_handle.fetch(&mut in_f, &mut buf[..]).unwrap();
         let mut chunk_reader = chunk_handle.make_chunk_reader(&buf[..]).unwrap();
         #[allow(irrefutable_let_patterns)]
-        let GeneralChunkReaderInner::Uncompressed(ref mut chunk_reader) = chunk_reader.inner_mut() else {
-            panic!("expect uncompressed chunk");
+        if let GeneralChunkReaderInner::Uncompressed(ref mut chunk_reader) =
+            chunk_reader.inner_mut()
+        {
+            println!(
+                "{i}: chunk_header: {:?}",
+                chunk_reader
+                    .read_header()
+                    .header()
+                    .iter()
+                    .map(|x| *x as char)
+                    .collect::<String>()
+            );
+            println!("{i}th chunk data[2]: {:?}", chunk_reader.decompress()[2]);
+            let mut in_f = File::open("uncompressed.bin").unwrap();
+            in_f.seek(SeekFrom::Start(
+                (chunk_handle.chunk_footer().logical_offset() + 2)
+                    * std::mem::size_of::<f64>() as u64,
+            ))
+            .unwrap();
+            let mut buf: [u8; std::mem::size_of::<f64>()] = [0; std::mem::size_of::<f64>()];
+            in_f.read_exact(&mut buf).unwrap();
+            println!("expected data[2]: {:?}", f64::from_ne_bytes(buf));
         };
-        println!(
-            "{i}: chunk_header: {:?}",
-            chunk_reader
-                .read_header()
-                .header()
-                .iter()
-                .map(|x| *x as char)
-                .collect::<String>()
-        );
-        println!(
-            "logical offset of chunk {i}: {}",
-            chunk_handle.chunk_footer().logical_offset()
-        );
-        println!("{i}th chunk data[2]: {:?}", chunk_reader.decompress()[2]);
-        let mut in_f = File::open("uncompressed.bin").unwrap();
-        in_f.seek(SeekFrom::Start(
-            (chunk_handle.chunk_footer().logical_offset() + 2) * std::mem::size_of::<f64>() as u64,
-        ))
-        .unwrap();
-        let mut buf: [u8; std::mem::size_of::<f64>()] = [0; std::mem::size_of::<f64>()];
-        in_f.read_exact(&mut buf).unwrap();
-        println!("expected data[2]: {:?}", f64::from_ne_bytes(buf));
         // Compression Method Specific Operations
     }
 }

@@ -1,5 +1,4 @@
 use std::{
-    cmp::min,
     mem::{size_of, size_of_val},
     slice,
 };
@@ -9,20 +8,22 @@ use crate::format::{
     uncompressed::UncompressedHeader0,
 };
 
-use super::Compressor;
+use super::{Compressor, MAX_BUFFERS};
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, PartialEq, PartialOrd)]
 pub struct UncompressedCompressor {
     total_bytes_in: usize,
-    total_bytes_out: usize,
+    header0: UncompressedHeader0,
+    buffer: Vec<f64>,
     header: Option<Box<[u8]>>,
 }
 
 impl UncompressedCompressor {
-    pub fn new() -> Self {
+    pub fn new(capacity: usize) -> Self {
         Self {
             total_bytes_in: 0,
-            total_bytes_out: 0,
+            buffer: Vec::with_capacity(capacity),
+            header0: UncompressedHeader0 { header_size: 0 },
             header: None,
         }
     }
@@ -33,59 +34,53 @@ impl UncompressedCompressor {
     }
 }
 
-impl Default for UncompressedCompressor {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 impl Compressor for UncompressedCompressor {
-    fn compress<'a>(&mut self, input: &'a [f64], output: &mut [u8]) -> usize {
-        let input_bytes_ptr = input.as_ptr().cast::<u8>();
-        let len = size_of_val(input) / size_of::<u8>();
-        dbg!(len);
-        // Safety:
-        // `input_bytes_ptr` is valid for `len * size_of::<u8>()` -> `size_of::<f64> * input.len()`.
-        // `input_bytes_ptr` is non null because it is originated from slice.
-        // `input_bytes_slice`'s lifetime is the same as `input`.
-        // Consecutive `len` u8 memory is properly initialized, since u8 is valid whatever values it has as a memory representation.
-        // `len * size_of::<u8>()` -> `size_of::<f64> * input.len()` is no larger than `isize::MAX`
-        debug_assert!(size_of::<u8>() * len <= isize::MAX as usize);
-        let input_bytes_slice: &'a [u8] = unsafe { slice::from_raw_parts(input_bytes_ptr, len) };
-
-        let copyable_bytes = min(input_bytes_slice.len(), output.len());
-        let number_of_tuples_copied = copyable_bytes / size_of::<f64>();
-        let number_of_bytes_copied = number_of_tuples_copied * size_of::<f64>();
-        dbg!(number_of_bytes_copied);
-
-        output[0..number_of_bytes_copied]
-            .copy_from_slice(&input_bytes_slice[0..number_of_bytes_copied]);
-
-        self.total_bytes_in += number_of_bytes_copied;
-        self.total_bytes_out += number_of_bytes_copied;
-
-        number_of_bytes_copied
-    }
-
-    fn header_size(&self) -> usize {
-        size_of::<UncompressedHeader0>() + self.header.as_ref().map_or(0, |h| h.len())
-    }
-
-    fn write_header(&mut self, output: &mut [u8]) {
-        let header_size = self.header_size() as u8;
-        let mut header0 = UncompressedHeader0 { header_size };
-        output[..size_of::<UncompressedHeader0>()].copy_from_slice(header0.to_le().as_bytes());
-        if let Some(header) = self.header.as_ref() {
-            output[size_of::<UncompressedHeader0>()..self.header_size()]
-                .copy_from_slice(&header[..]);
+    fn compress(&mut self, input: &[f64]) -> usize {
+        for &value in input {
+            self.buffer.push(value);
         }
+
+        let size = size_of_val(input);
+        self.total_bytes_in += size;
+
+        size
     }
 
     fn total_bytes_in(&self) -> usize {
         self.total_bytes_in
     }
 
-    fn total_bytes_out(&self) -> usize {
-        self.total_bytes_out
+    fn total_bytes_buffered(&self) -> usize {
+        size_of::<UncompressedHeader0>()
+            + self.header.as_ref().map_or(0, |h| h.len())
+            + size_of_val(&self.buffer[..])
+    }
+
+    fn prepare(&mut self) {
+        let header0_size = size_of_val(&self.header0);
+        let flexible_header_size = self.header.as_ref().map(|h| h.len()).unwrap_or(0);
+        let mut header0 = UncompressedHeader0 {
+            header_size: header0_size as u8 + flexible_header_size as u8,
+        };
+        header0.to_le();
+        self.header0 = header0;
+    }
+
+    fn buffers<'a>(&'a self) -> [&'a [u8]; MAX_BUFFERS] {
+        let header0 = self.header0.as_bytes();
+        const EMPTY: &[u8] = &[];
+        let header = self.header.as_ref().map_or(EMPTY, |h| h.as_ref());
+
+        let f64buf: &'a [f64] = &self.buffer[..];
+        let buffer: &'a [u8] = unsafe {
+            slice::from_raw_parts(self.buffer.as_ptr().cast::<u8>(), size_of_val(f64buf))
+        };
+
+        [header0, header, buffer, EMPTY, EMPTY]
+    }
+
+    fn reset(&mut self) {
+        self.total_bytes_in = 0;
+        self.buffer.clear();
     }
 }

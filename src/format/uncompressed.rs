@@ -17,6 +17,7 @@ use derive_getters::Getters;
 
 use super::deserialize::FromLeBytes;
 
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 #[repr(packed(1))]
 pub struct UncompressedHeader0 {
     pub header_size: u8,
