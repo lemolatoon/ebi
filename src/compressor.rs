@@ -1,52 +1,48 @@
+// use run_length::RunLengthCompressor;
 use uncompressed::UncompressedCompressor;
 
 use crate::format;
 
+// pub mod run_length;
 pub mod uncompressed;
 
+const MAX_BUFFERS: usize = 5;
 pub trait Compressor {
-    /// Take as many values from input, and compress and write it to output as possible.
+    /// Take as many values from input, and compress and write it to the internal buffer as possible.
     /// Returns the number of bytes consumed from input.
-    fn compress(&mut self, input: &[f64], output: &mut [u8]) -> usize;
-
-    /// Returns the number of bytes of the method specific header.
-    fn header_size(&self) -> usize;
-
-    /// Write header bytes into output buffer.
-    /// # Panics
-    /// If `output.len()` < `Self::HEADER_SIZE()`, panics.
-    fn write_header(&mut self, output: &mut [u8]);
+    fn compress(&mut self, input: &[f64]) -> usize;
 
     /// Returns the total number of input bytes which have been processed by this Compressor.
     fn total_bytes_in(&self) -> usize;
 
-    /// Returns the total number of output bytes which have been produced by this Compressor.
-    fn total_bytes_out(&self) -> usize;
+    /// Returns the total bytes buffered in the compressor.
+    fn total_bytes_buffered(&self) -> usize; // NOTE: used for stop compression for the chunk with ChunkOption::ByteSize(usize)
+
+    /// Prepare the internal buffer for reading.
+    /// This method should be called before reading the compressed data using `buffers`.
+    /// Typically, this method is used to write the header to the internal buffer.
+    fn prepare(&mut self);
+
+    /// Returns the buffered data as an array of the write order.
+    /// MAX_BUFFERS can be changed, do not rely on the exact number of buffers.
+    fn buffers(&self) -> [&[u8]; MAX_BUFFERS];
+
+    /// Reset the internal state of the compressor.
+    fn reset(&mut self);
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, PartialEq, PartialOrd)]
 pub enum GenericCompressor {
     Uncompressed(UncompressedCompressor),
+    // RLE(RunLengthCompressor),
 }
 
 macro_rules! impl_generic_compressor {
     ($enum_name:ident, $($variant:ident),*) => {
         impl $enum_name {
-            pub fn compress(&mut self, input: &[f64], output: &mut [u8]) -> usize {
+            pub fn compress(&mut self, input: &[f64]) -> usize {
                 match self {
-                    $( $enum_name::$variant(c) => c.compress(input, output), )*
-                }
-            }
-
-            pub fn header_size(&self) -> usize {
-                match self {
-                    $( $enum_name::$variant(c) => c.header_size(), )*
-                }
-            }
-
-            pub fn write_header(&mut self, output: &mut [u8]) {
-                match self {
-                    $( $enum_name::$variant(c) => c.write_header(output), )*
+                    $( $enum_name::$variant(c) => c.compress(input), )*
                 }
             }
 
@@ -56,9 +52,27 @@ macro_rules! impl_generic_compressor {
                 }
             }
 
-            pub fn total_bytes_out(&self) -> usize {
+            pub fn total_bytes_buffered(&self) -> usize {
                 match self {
-                    $( $enum_name::$variant(c) => c.total_bytes_out(), )*
+                    $( $enum_name::$variant(c) => c.total_bytes_buffered(), )*
+                }
+            }
+
+            pub fn prepare(&mut self) {
+                match self {
+                    $( $enum_name::$variant(c) => c.prepare(), )*
+                }
+            }
+
+            pub fn buffers(&mut self) -> [&[u8]; MAX_BUFFERS] {
+                match self {
+                    $( $enum_name::$variant(c) => c.buffers(), )*
+                }
+            }
+
+            pub fn reset(&mut self) {
+                match self {
+                    $( $enum_name::$variant(c) => c.reset(), )*
                 }
             }
         }
@@ -69,6 +83,7 @@ impl GenericCompressor {
     pub fn compression_scheme(&self) -> format::CompressionScheme {
         match self {
             GenericCompressor::Uncompressed(_) => format::CompressionScheme::Uncompressed,
+            // GenericCompressor::RLE(_) => format::CompressionScheme::RLE,
         }
     }
 }

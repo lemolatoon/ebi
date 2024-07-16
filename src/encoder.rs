@@ -134,6 +134,16 @@ impl<R: BufRead> FileWriter<R> {
         }
     }
 
+    pub fn file_header_size(&self) -> usize {
+        size_of::<FileHeader>()
+    }
+
+    pub fn file_footer_size(&self) -> usize {
+        size_of::<FileFooter0>()
+            + size_of::<ChunkFooter>() * self.n_chunks()
+            + size_of::<FileFooter2>()
+    }
+
     /// Returns the wrapper of the contents of the internal buffer, filling it with more data from the inner reader.
     /// If input has already reached EOF, the second element of tuple will be set.
     fn f64_buf(&mut self) -> Result<(BufWrapper<'_, R>, bool), io::Error> {
@@ -175,14 +185,20 @@ impl<R: BufRead> FileWriter<R> {
     /// Returns the ChunkWriter unless input `Read` stream reaches EOF.
     /// If it is the first time of calling this method for this `FileWriter`,
     /// it is guaranteed that returned `Option` is `Some`.
-    pub fn chunk_writer<'a, 'b>(
-        &'a mut self,
-        buf: &'b mut Vec<u8>,
-    ) -> Option<ChunkWriter<'a, 'b, R>> {
+    pub fn chunk_writer(&mut self) -> Option<ChunkWriter<'_, R>> {
+        self.chunk_writer_with_compressor(None)
+    }
+
+    pub fn chunk_writer_with_compressor(
+        &mut self,
+        compressor: Option<GenericCompressor>,
+    ) -> Option<ChunkWriter<'_, R>> {
         if self.reaches_eof {
             return None;
         }
-        Some(ChunkWriter::new(self, self.compressor.clone(), buf))
+        let mut compressor = compressor.unwrap_or_else(|| self.compressor.clone());
+        compressor.reset();
+        Some(ChunkWriter::new(self, compressor))
     }
 
     fn increment_total_bytes_in_by(&mut self, incremented: usize) {
@@ -224,9 +240,11 @@ impl<R: BufRead> FileWriter<R> {
     }
 
     pub fn write_footer<W: Write>(&mut self, mut f: W, buf: &mut Vec<u8>) -> io::Result<()> {
-        let footer_size = size_of::<FileFooter0>()
-            + size_of::<ChunkFooter>() * self.n_chunks()
-            + size_of::<FileFooter2>();
+        let footer_size = self.file_footer_size();
+        if buf.len() < footer_size {
+            let next_len = footer_size.next_power_of_two();
+            buf.resize(next_len, 0);
+        }
 
         if buf.len() < footer_size {
             let next_len = buf.len().next_power_of_two();
@@ -269,42 +287,30 @@ impl<R: BufRead> FileWriter<R> {
     }
 }
 
-pub struct ChunkWriter<'a, 'b, R: BufRead> {
+pub struct ChunkWriter<'a, R: BufRead> {
     file_writer: &'a mut FileWriter<R>,
     compressor: GenericCompressor,
-    buf: &'b mut Vec<u8>,
 }
 
-impl<'a, 'b, R: BufRead> ChunkWriter<'a, 'b, R> {
-    fn new(
-        file_writer: &'a mut FileWriter<R>,
-        compressor: GenericCompressor,
-        buf: &'b mut Vec<u8>,
-    ) -> Self {
+impl<'a, R: BufRead> ChunkWriter<'a, R> {
+    fn new(file_writer: &'a mut FileWriter<R>, compressor: GenericCompressor) -> Self {
         Self {
             file_writer,
             compressor,
-            buf,
         }
     }
 
-    pub fn write<W: Write>(&'a mut self, mut f: W) -> Result<(), io::Error> {
-        let header_size = size_of::<GeneralChunkHeader>() + self.compressor.header_size();
+    pub fn into_compressor(self) -> GenericCompressor {
+        self.compressor
+    }
+
+    pub fn write<W: Write>(&mut self, mut f: W) -> Result<(), io::Error> {
         let chunk_option = *self.file_writer.chunk_option();
 
-        if self.buf.len() < header_size {
-            let next_len = header_size.next_power_of_two();
-            self.buf.resize(next_len, 0);
-        } else if !self.buf.len().is_power_of_two() {
-            let next_len = self.buf.len().next_power_of_two();
-            self.buf.resize(next_len, 0);
-        }
-
-        println!("START!!!!!!!!!!!!!!");
         loop {
             let reaches_limit = chunk_option.reach_limit(
                 self.compressor.total_bytes_in(),
-                self.compressor.total_bytes_out(),
+                self.compressor.total_bytes_buffered(),
             );
             if reaches_limit {
                 break;
@@ -317,49 +323,40 @@ impl<'a, 'b, R: BufRead> ChunkWriter<'a, 'b, R> {
             }
 
             if let ChunkOption::RecordCount(count) = chunk_option {
-                dbg!(count * size_of::<f64>());
-                dbg!(buf.n_bytes());
-                dbg!(self.compressor.total_bytes_in());
-                dbg!(self.compressor.total_bytes_in() + buf.n_bytes());
                 if count * size_of::<f64>() <= self.compressor.total_bytes_in() + buf.n_bytes() {
                     buf.shrink(count - self.compressor.total_bytes_in() / size_of::<f64>());
                 }
-                dbg!(buf.n_bytes());
             }
 
-            let total_bytes_out = self.compressor.total_bytes_out();
-            let n_bytes_compressed = self.compressor.compress(
-                buf.as_ref(),
-                &mut self.buf[(header_size + total_bytes_out)..],
-            );
-            dbg!(n_bytes_compressed);
+            let n_bytes_compressed = self
+                .compressor
+                .compress(&buf.as_ref()[self.compressor.total_bytes_in()..]);
             buf.set_n_consumed_bytes(n_bytes_compressed);
-
-            if n_bytes_compressed == 0 {
-                // expand `self.buf` x2.
-                let buf_len = self.buf.len();
-                self.buf.resize(buf_len * 2, 0);
-            }
         }
-        println!("END!!!!!!!!!!!!!!");
-        dbg!(self.compressor.total_bytes_in());
 
         if self.compressor.total_bytes_in() == 0 {
             return Ok(());
         }
 
-        let mut header = GeneralChunkHeader {};
-        self.buf[..size_of::<GeneralChunkHeader>()].copy_from_slice(header.to_le().as_bytes());
-        self.compressor
-            .write_header(&mut self.buf[size_of::<GeneralChunkHeader>()..header_size]);
+        self.compressor.prepare();
+
+        let mut general_header = GeneralChunkHeader {};
+
+        let mut total_bytes_out = 0;
 
         // TODO: handle error especially for `f` is too small to write.
-        f.write_all(&self.buf[..(header_size + self.compressor.total_bytes_out())])?;
+        f.write_all(general_header.to_le().as_bytes())?;
+        total_bytes_out += size_of::<GeneralChunkHeader>();
+
+        for bytes in self.compressor.buffers() {
+            total_bytes_out += bytes.len();
+            f.write_all(bytes)?;
+        }
 
         self.file_writer
             .increment_total_bytes_in_by(self.compressor.total_bytes_in());
         self.file_writer
-            .increment_total_bytes_out_by(header_size + self.compressor.total_bytes_out());
+            .increment_total_bytes_out_by(total_bytes_out);
 
         let next_physical_offset =
             (size_of::<FileHeader>() + self.file_writer.total_bytes_out()) as u64;
@@ -404,7 +401,7 @@ mod tests {
             slice::from_raw_parts(ptr, data.len() * size_of::<f64>())
         };
         const RECORD_COUNT: usize = 100;
-        let compressor = GenericCompressor::Uncompressed(UncompressedCompressor::new());
+        let compressor = GenericCompressor::Uncompressed(UncompressedCompressor::new(data.len()));
         let mut in_f = BufReader::new(u8_data);
         let mut out_f = Cursor::new(Vec::new());
         let chunk_option = ChunkOption::RecordCount(RECORD_COUNT);
@@ -415,7 +412,7 @@ mod tests {
         file_writer.write_header(&mut out_f, &mut buf)?;
 
         // loop until there are no data left
-        while let Some(mut chunk_context) = file_writer.chunk_writer(&mut buf) {
+        while let Some(mut chunk_context) = file_writer.chunk_writer() {
             chunk_context.write(&mut out_f)?;
             // you can flush if you want
             out_f.flush()?;

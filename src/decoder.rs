@@ -189,7 +189,7 @@ impl<'reader> GeneralChunkHandle<'reader> {
     }
 
     /// Seeks the input stream to the beginning of the chunk.
-    pub fn seek_to_chunk<R: Read + Seek>(&self, input: &mut R) -> Result<()> {
+    pub fn seek_to_chunk<R: Read + Seek>(&self, input: &mut R) -> io::Result<()> {
         let physical_offset = self.footer().chunk_footers()[self.chunk_index].physical_offset();
         input.seek(io::SeekFrom::Start(physical_offset))?;
         Ok(())

@@ -172,9 +172,10 @@ pub enum ChunkOptionKind {
 #[non_exhaustive]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum CompressionScheme {
-    BUFF = 0,
-    Gorilla,
-    Uncompressed,
+    Uncompressed = 0,
+    RLE = 1,
+    BUFF = 2,
+    Gorilla = 3,
 }
 
 // =============== Chunk ===================
