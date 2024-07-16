@@ -39,9 +39,8 @@ mod tests {
         mut file_writer: FileWriter<R>,
         mut out_f: W,
     ) -> io::Result<()> {
-        let mut buf = Vec::<u8>::new();
         // write header leaving footer offset blank
-        file_writer.write_header(&mut out_f, &mut buf)?;
+        file_writer.write_header(&mut out_f)?;
 
         let mut compressor = None;
         // loop until there are no data left
@@ -54,7 +53,7 @@ mod tests {
             compressor = Some(chunk_writer.into_compressor());
         }
 
-        file_writer.write_footer(&mut out_f, &mut buf)?;
+        file_writer.write_footer(&mut out_f)?;
         let footer_offset_slot_offset = file_writer.footer_offset_slot_offset();
         out_f.seek(SeekFrom::Start(footer_offset_slot_offset as u64))?;
         file_writer.write_footer_offset(&mut out_f)?;

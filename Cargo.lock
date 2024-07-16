@@ -23,6 +23,7 @@ dependencies = [
 name = "ebi"
 version = "0.1.0"
 dependencies = [
+ "cfg-if",
  "derive-getters",
  "rand",
  "thiserror",

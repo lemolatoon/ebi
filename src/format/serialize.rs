@@ -67,7 +67,7 @@ impl ToLe for ChunkFooter {
 }
 
 /// A trait for obtaining a byte slice representation of a struct instance.
-pub trait AsBytes: private::Sealed {
+pub trait AsBytes {
     /// Returns a byte slice representation of the struct instance.
     fn as_bytes(&self) -> &[u8];
 }
@@ -88,6 +88,14 @@ impl<T: private::Sealed> AsBytes for T {
     fn as_bytes(&self) -> &[u8] {
         unsafe {
             std::slice::from_raw_parts(self as *const T as *const u8, std::mem::size_of::<T>())
+        }
+    }
+}
+
+impl<T: private::Sealed> AsBytes for [T] {
+    fn as_bytes(&self) -> &[u8] {
+        unsafe {
+            std::slice::from_raw_parts(self.as_ptr() as *const u8, std::mem::size_of_val(self))
         }
     }
 }

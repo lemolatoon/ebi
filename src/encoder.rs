@@ -1,3 +1,5 @@
+use cfg_if::cfg_if;
+
 use crate::{
     compressor::GenericCompressor,
     format::{
@@ -209,13 +211,7 @@ impl<R: BufRead> FileWriter<R> {
         self.total_bytes_out += incremented;
     }
 
-    pub fn write_header<W: Write>(&mut self, mut f: W, buf: &mut Vec<u8>) -> io::Result<()> {
-        let header_size = size_of::<FileHeader>();
-        if buf.len() * size_of::<u8>() < header_size {
-            let next_len = header_size.next_power_of_two();
-            buf.resize(next_len, 0);
-        }
-
+    pub fn write_header<W: Write>(&mut self, mut f: W) -> io::Result<()> {
         // can be static?
         let version: [u16; 3] = [
             env!("CARGO_PKG_VERSION_MAJOR"),
@@ -234,24 +230,12 @@ impl<R: BufRead> FileWriter<R> {
                 compression_scheme: self.compressor.compression_scheme(),
             },
         };
-        buf[..header_size].copy_from_slice(header.to_le().as_bytes());
 
-        f.write_all(&buf[..header_size])
+        f.write_all(header.to_le().as_bytes())
     }
 
-    pub fn write_footer<W: Write>(&mut self, mut f: W, buf: &mut Vec<u8>) -> io::Result<()> {
-        let footer_size = self.file_footer_size();
-        if buf.len() < footer_size {
-            let next_len = footer_size.next_power_of_two();
-            buf.resize(next_len, 0);
-        }
-
-        if buf.len() < footer_size {
-            let next_len = buf.len().next_power_of_two();
-            buf.resize(next_len, 0);
-        }
-
-        let number_of_chunks = (self.n_chunks() as u64).to_le();
+    pub fn write_footer<W: Write>(&mut self, mut f: W) -> io::Result<()> {
+        let number_of_chunks = self.n_chunks() as u64;
         let number_of_records = self
             .chunk_footers_with_next_chunk_footer()
             .last()
@@ -260,23 +244,26 @@ impl<R: BufRead> FileWriter<R> {
             number_of_chunks,
             number_of_records,
         };
-        buf[..size_of::<FileFooter0>()].copy_from_slice(footer0.to_le().as_bytes());
+        f.write_all(footer0.to_le().as_bytes())?;
 
-        for (i, chunk_footer) in self.chunk_footers().iter().enumerate() {
-            let mut chunk_footer = *chunk_footer;
-            let buf_head = size_of::<FileFooter0>() + i * size_of::<ChunkFooter>();
-            buf[buf_head..(buf_head + size_of::<ChunkFooter>())]
-                .copy_from_slice(chunk_footer.to_le().as_bytes());
+        cfg_if! {
+            if #[cfg(target_endian = "little")] {
+                // We can write all chunk footers at once.
+                f.write_all(self.chunk_footers().as_bytes())?
+            } else {
+                // We need to write chunk footers one by one.
+                for (i, chunk_footer) in self.chunk_footers().iter().enumerate() {
+                    let mut chunk_footer = *chunk_footer;
+                    f.write_all(chunk_footer.to_le().as_bytes())?;
+                }
+            }
         }
 
         // TODO: calculate `crc` here.
         let crc = 0u32;
         let mut footer2 = FileFooter2 { crc };
-        let buf_head = size_of::<FileFooter0>() + size_of::<ChunkFooter>() * self.n_chunks();
-        buf[buf_head..(buf_head + size_of::<FileFooter2>())]
-            .copy_from_slice(footer2.to_le().as_bytes());
 
-        f.write_all(&buf[..footer_size])
+        f.write_all(footer2.to_le().as_bytes())
     }
 
     pub fn write_footer_offset<W: Write>(&mut self, mut f: W) -> io::Result<()> {
@@ -407,9 +394,8 @@ mod tests {
         let chunk_option = ChunkOption::RecordCount(RECORD_COUNT);
         let mut file_writer = FileWriter::new(&mut in_f, compressor, chunk_option);
 
-        let mut buf = Vec::<u8>::new();
         // write header leaving footer offset blank
-        file_writer.write_header(&mut out_f, &mut buf)?;
+        file_writer.write_header(&mut out_f)?;
 
         // loop until there are no data left
         while let Some(mut chunk_context) = file_writer.chunk_writer() {
@@ -418,7 +404,7 @@ mod tests {
             out_f.flush()?;
         }
 
-        file_writer.write_footer(&mut out_f, &mut buf)?;
+        file_writer.write_footer(&mut out_f)?;
         let footer_offset_slot_offset = file_writer.footer_offset_slot_offset();
         let mut dest_vec = out_f.into_inner();
         file_writer.write_footer_offset(&mut dest_vec[footer_offset_slot_offset..])?;

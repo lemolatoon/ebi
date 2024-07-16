@@ -39,9 +39,8 @@ fn main() {
     let chunk_option = ChunkOption::RecordCount(RECORD_COUNT);
     let mut file_context = FileWriter::new(&mut in_f, compressor, chunk_option);
 
-    let mut buf = vec![0; file_context.file_header_size()];
     // write header leaving footer offset blank
-    file_context.write_header(&mut out_f, &mut buf).unwrap();
+    file_context.write_header(&mut out_f).unwrap();
 
     // loop until there are no data left
     let mut compressor = None;
@@ -54,7 +53,7 @@ fn main() {
         compressor = Some(chunk_writer.into_compressor());
     }
 
-    file_context.write_footer(&mut out_f, &mut buf).unwrap();
+    file_context.write_footer(&mut out_f).unwrap();
     let footer_offset_slot_offset = file_context.footer_offset_slot_offset();
     out_f
         .seek(SeekFrom::Start(footer_offset_slot_offset as u64))
