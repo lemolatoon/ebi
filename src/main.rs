@@ -6,7 +6,7 @@ use std::{
 };
 
 use ebi::{
-    compressor::{uncompressed::UncompressedCompressor, GenericCompressor},
+    compressor::{run_length::RunLengthCompressor, GenericCompressor},
     decoder::{
         chunk_reader::{GeneralChunkReaderInner, Reader},
         FileReader,
@@ -32,7 +32,8 @@ fn generate_and_write_random_f64(path: impl AsRef<Path>, n: usize) -> io::Result
 fn main() {
     const RECORD_COUNT: usize = 100;
     generate_and_write_random_f64("uncompressed.bin", RECORD_COUNT * 3 + 3).unwrap();
-    let compressor = GenericCompressor::Uncompressed(UncompressedCompressor::new(100));
+    // let compressor = GenericCompressor::Uncompressed(UncompressedCompressor::new(100));
+    let compressor = GenericCompressor::RLE(RunLengthCompressor::new());
     let in_f = File::open("uncompressed.bin").unwrap();
     let mut in_f = BufReader::new(in_f);
     let mut out_f = File::create("compressed.bin").unwrap();

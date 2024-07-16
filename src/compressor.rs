@@ -1,9 +1,10 @@
+use run_length::RunLengthCompressor;
 // use run_length::RunLengthCompressor;
 use uncompressed::UncompressedCompressor;
 
 use crate::format;
 
-// pub mod run_length;
+pub mod run_length;
 pub mod uncompressed;
 
 const MAX_BUFFERS: usize = 5;
@@ -34,7 +35,7 @@ pub trait Compressor {
 #[derive(Debug, Clone, PartialEq, PartialOrd)]
 pub enum GenericCompressor {
     Uncompressed(UncompressedCompressor),
-    // RLE(RunLengthCompressor),
+    RLE(RunLengthCompressor),
 }
 
 macro_rules! impl_generic_compressor {
@@ -83,9 +84,9 @@ impl GenericCompressor {
     pub fn compression_scheme(&self) -> format::CompressionScheme {
         match self {
             GenericCompressor::Uncompressed(_) => format::CompressionScheme::Uncompressed,
-            // GenericCompressor::RLE(_) => format::CompressionScheme::RLE,
+            GenericCompressor::RLE(_) => format::CompressionScheme::RLE,
         }
     }
 }
 
-impl_generic_compressor!(GenericCompressor, Uncompressed);
+impl_generic_compressor!(GenericCompressor, Uncompressed, RLE);

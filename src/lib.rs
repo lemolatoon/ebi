@@ -15,7 +15,10 @@ mod tests {
     use rand::Rng;
 
     use crate::{
-        compressor::{uncompressed::UncompressedCompressor, GenericCompressor},
+        compressor::{
+            run_length::RunLengthCompressor, uncompressed::UncompressedCompressor,
+            GenericCompressor,
+        },
         decoder::{
             chunk_reader::{GeneralChunkReaderInner, Reader},
             FileReader,
@@ -64,15 +67,18 @@ mod tests {
     }
 
     #[test]
-    fn test_round_trip() {
+    fn test_round_trip_uncompressed() {
         let header = b"my_header".to_vec().into_boxed_slice();
         let compressor = GenericCompressor::Uncompressed(
             UncompressedCompressor::new(8000).header(header.clone()),
         );
         test_round_trip_for_compressor(compressor);
+    }
 
-        // let compressor = GenericCompressor::RLE(RunLengthCompressor::new());
-        // test_round_trip_for_compressor(compressor);
+    #[test]
+    fn test_round_trip_rle() {
+        let compressor = GenericCompressor::RLE(RunLengthCompressor::new());
+        test_round_trip_for_compressor(compressor);
     }
 
     fn test_round_trip_for_compressor(compressor: GenericCompressor) {
@@ -128,7 +134,6 @@ mod tests {
         );
 
         let chunk_footers = file_footer.chunk_footers();
-        dbg!(&chunk_footers);
         assert_eq!(
             chunk_footers.len(),
             (record_count + RECORD_COUNT - 1) / RECORD_COUNT,

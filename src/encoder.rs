@@ -73,13 +73,14 @@ impl<'a, R: BufRead> BufWrapper<'a, R> {
     /// Tuple's first element is the `BufWrapper`, the second element indicates
     /// reader reaches EOF or not.
     pub fn new(input: &'a mut R) -> Result<(Self, bool), io::Error> {
-        let buf = input.fill_buf()?;
+        let buf: &[u8] = input.fill_buf()?;
         let reaches_eof = buf.is_empty();
         let buf_ptr = buf.as_ptr().cast::<f64>();
         let len = size_of_val(buf) / size_of::<f64>();
         // Safety:
         // input buffer is safely interpreted because the user of this struct guarantees
         // this byte stream is a f64 array.
+        debug_assert!(buf_ptr.is_aligned(), "buf_ptr is not aligned");
         debug_assert!(size_of::<f64>() * len <= isize::MAX as usize);
         let buf: &'a [f64] = unsafe { slice::from_raw_parts(buf_ptr, len) };
         Ok((
