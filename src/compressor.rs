@@ -90,3 +90,108 @@ impl GenericCompressor {
 }
 
 impl_generic_compressor!(GenericCompressor, Uncompressed, RLE);
+
+#[cfg(test)]
+mod tests {
+    use std::mem::size_of_val;
+
+    use super::GenericCompressor;
+
+    fn test_total_bytes_in(compressor: &mut GenericCompressor) {
+        let mut floats: Vec<f64> = (0..10).map(|x| (x / 2) as f64).collect();
+        assert_eq!(
+            compressor.total_bytes_in(),
+            0,
+            "total_bytes_in() should be 0 before compressing"
+        );
+
+        let bytes0 = compressor.compress(&floats);
+
+        assert_eq!(
+            bytes0,
+            size_of_val(&floats[..]),
+            "the return value of compress() should be the size of the input"
+        );
+
+        assert_eq!(
+            compressor.total_bytes_in(),
+            size_of_val(&floats[..]),
+            "total_bytes_in() should be the size of the input after compressing"
+        );
+
+        floats.reverse();
+        let bytes1 = compressor.compress(&floats[..3]);
+
+        assert_eq!(
+            bytes1,
+            size_of_val(&floats[..3]),
+            "the return value of compress() should be the size of the input"
+        );
+
+        assert_eq!(
+            compressor.total_bytes_in(),
+            size_of_val(&floats[..]) + size_of_val(&floats[..3]),
+            "total_bytes_in() should be the size of the total bytes of input"
+        );
+    }
+
+    fn test_total_bytes_buffered(compressor: &mut GenericCompressor) {
+        let mut floats: Vec<f64> = (0..10).map(|x| (x / 2) as f64).collect();
+
+        compressor.compress(&floats);
+
+        floats.reverse();
+        compressor.compress(&floats[..3]);
+
+        let total_bytes_buffered = compressor.total_bytes_buffered();
+
+        let mut total_bytes_buffered_calculated = 0;
+
+        compressor.prepare();
+        for b in compressor.buffers() {
+            total_bytes_buffered_calculated += b.len();
+        }
+
+        assert_eq!(
+            total_bytes_buffered, total_bytes_buffered_calculated,
+            "total_bytes_buffered() should be the sum of the buffer sizes"
+        );
+    }
+
+    fn test_reset(compressor: &mut GenericCompressor) {
+        compressor.reset();
+
+        assert_eq!(
+            compressor.total_bytes_in(),
+            0,
+            "total_bytes_in() should be 0 after reset"
+        );
+    }
+
+    #[test]
+    fn test_uncompressed() {
+        let mut compressor =
+            GenericCompressor::Uncompressed(super::uncompressed::UncompressedCompressor::new(10));
+
+        test_total_bytes_in(&mut compressor);
+        test_total_bytes_buffered(&mut compressor);
+
+        test_reset(&mut compressor);
+
+        test_total_bytes_in(&mut compressor);
+        test_total_bytes_buffered(&mut compressor);
+    }
+
+    #[test]
+    fn test_rle() {
+        let mut compressor = GenericCompressor::RLE(super::run_length::RunLengthCompressor::new());
+
+        test_total_bytes_in(&mut compressor);
+        test_total_bytes_buffered(&mut compressor);
+
+        test_reset(&mut compressor);
+
+        test_total_bytes_in(&mut compressor);
+        test_total_bytes_buffered(&mut compressor);
+    }
+}

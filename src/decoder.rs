@@ -13,6 +13,7 @@ use std::{
 use crate::format::{
     deserialize::{FromLeBytes, TryFromLeBytes},
     native::{NativeChunkFooter, NativeFileFooter, NativeFileHeader},
+    run_length::RunLengthHeader,
     uncompressed::UncompressedHeader0,
     ChunkFooter, CompressionScheme, FileFooter0, FileFooter2, FileHeader, GeneralChunkHeader,
 };
@@ -188,10 +189,34 @@ impl<'reader> GeneralChunkHandle<'reader> {
         next_physical_offset - physical_offset
     }
 
+    pub fn number_of_records(&self) -> u64 {
+        let logical_offset = self.chunk_footer().logical_offset();
+        let next_physical_offset = self
+            .footer()
+            .chunk_footers()
+            .get(self.chunk_index + 1)
+            .map(|footer| footer.logical_offset())
+            .unwrap_or_else(|| self.footer().number_of_records());
+
+        next_physical_offset - logical_offset
+    }
+
     /// Seeks the input stream to the beginning of the chunk.
     pub fn seek_to_chunk<R: Read + Seek>(&self, input: &mut R) -> io::Result<()> {
         let physical_offset = self.footer().chunk_footers()[self.chunk_index].physical_offset();
         input.seek(io::SeekFrom::Start(physical_offset))?;
+        Ok(())
+    }
+
+    /// Seeks the input stream to the end of the chunk.
+    pub fn seek_to_chunk_end<R: Read + Seek>(&self, input: &mut R) -> io::Result<()> {
+        let next_physical_offset = self
+            .footer()
+            .chunk_footers()
+            .get(self.chunk_index + 1)
+            .map(|footer| footer.physical_offset())
+            .unwrap_or_else(|| self.header().footer_offset());
+        input.seek(io::SeekFrom::Start(next_physical_offset))?;
         Ok(())
     }
 
@@ -205,10 +230,12 @@ impl<'reader> GeneralChunkHandle<'reader> {
     /// Especially, even if buffer size(bytes) are the same as chunk size, it can return an error if the buffer size is not a multiple of 8.
     /// You can resize the buffer like this:
     /// ```no_run
+    /// use std::mem::{align_of, size_of};
     /// let mut buf = Vec::new();
-    /// let chunk_size = 1017/* = chunk_handle.chunk_size() as usize */;
-    /// if buf.len() * std::mem::size_of::<u64>() < chunk_size {
-    ///    buf.resize(chunk_size.next_multiple_of(std::mem::align_of::<u64>()) / std::mem::size_of::<u64>() + 1, 0);
+    /// let chunk_size: usize = 1017/* = chunk_handle.chunk_size() as usize */;
+    /// let expected_chunk_size = chunk_size.next_multiple_of(align_of::<u64>()) + 1;
+    /// if buf.len() * size_of::<u64>() < expected_chunk_size {
+    ///     buf.resize(expected_chunk_size.next_power_of_two(), 0);
     /// }
     /// ```
     /// This size of buffer is guaranteed to be enough for `fetch`.
@@ -221,7 +248,7 @@ impl<'reader> GeneralChunkHandle<'reader> {
             slice::from_raw_parts_mut(buf.as_mut_ptr().cast::<u8>(), mem::size_of_val(buf))
         };
 
-        if buf.len() < chunk_size.next_multiple_of(align_of::<u64>()) / size_of::<u64>() + 1 {
+        if buf.len() < chunk_size.next_multiple_of(align_of::<u64>()) + 1 {
             return Err(DecoderError::BufferTooSmall);
         }
 
@@ -252,6 +279,12 @@ impl<'reader> GeneralChunkHandle<'reader> {
                 );
                 let header_size = header_head.header_size as usize;
                 input.read_exact(&mut buf[size_of::<UncompressedHeader0>()..header_size])?;
+                header_size
+            }
+            CompressionScheme::RLE => {
+                let header_size = size_of::<RunLengthHeader>();
+                input.read_exact(&mut buf[size_of::<GeneralChunkHeader>()..header_size])?;
+
                 header_size
             }
             c => unimplemented!("Unimplemented compression scheme: {:?}", c),

@@ -1,6 +1,6 @@
 use super::{
-    uncompressed::UncompressedHeader0, ChunkFooter, FileConfig, FileFooter0, FileFooter2,
-    FileHeader, GeneralChunkHeader,
+    run_length::RunLengthHeader, uncompressed::UncompressedHeader0, ChunkFooter, FileConfig,
+    FileFooter0, FileFooter2, FileHeader, GeneralChunkHeader,
 };
 
 /// A trait for converting the elements of a struct into little-endian byte order.
@@ -79,6 +79,7 @@ mod private {
     impl Sealed for super::FileConfig {}
     impl Sealed for super::GeneralChunkHeader {}
     impl Sealed for super::UncompressedHeader0 {}
+    impl Sealed for super::RunLengthHeader {}
     impl Sealed for super::FileFooter0 {}
     impl Sealed for super::FileFooter2 {}
     impl Sealed for super::ChunkFooter {}

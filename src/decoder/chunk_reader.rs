@@ -1,3 +1,4 @@
+pub mod run_length;
 pub mod uncompressed;
 
 use std::mem::{align_of, size_of};
@@ -8,7 +9,7 @@ use crate::format::{CompressionScheme, GeneralChunkHeader};
 use super::Result;
 use super::{error::DecoderError, GeneralChunkHandle};
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, PartialEq, PartialOrd)]
 pub struct GeneralChunkReader<'reader, 'chunk> {
     handle: &'reader GeneralChunkHandle<'reader>,
     chunk: &'chunk [u8],
@@ -71,9 +72,10 @@ impl<'reader, 'chunk> GeneralChunkReader<'reader, 'chunk> {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, PartialEq, PartialOrd)]
 pub enum GeneralChunkReaderInner<'chunk> {
     Uncompressed(uncompressed::UncompressedReader<'chunk>),
+    RLE(run_length::RunLengthReader<'chunk>),
 }
 
 impl<'chunk> GeneralChunkReaderInner<'chunk> {
@@ -86,6 +88,9 @@ impl<'chunk> GeneralChunkReaderInner<'chunk> {
             CompressionScheme::Uncompressed => GeneralChunkReaderInner::Uncompressed(
                 uncompressed::UncompressedReader::new(handle, chunk),
             ),
+            CompressionScheme::RLE => {
+                GeneralChunkReaderInner::RLE(run_length::RunLengthReader::new(handle, chunk))
+            }
             c => unimplemented!("Unimplemented compression scheme: {:?}", c),
         }
     }
@@ -95,6 +100,7 @@ impl From<&GeneralChunkReaderInner<'_>> for CompressionScheme {
     fn from(value: &GeneralChunkReaderInner<'_>) -> Self {
         match value {
             GeneralChunkReaderInner::Uncompressed(_) => CompressionScheme::Uncompressed,
+            GeneralChunkReaderInner::RLE(_) => CompressionScheme::RLE,
         }
     }
 }
@@ -131,4 +137,4 @@ macro_rules! impl_generic_reader {
     };
 }
 
-impl_generic_reader!(GeneralChunkReaderInner, Uncompressed);
+impl_generic_reader!(GeneralChunkReaderInner, Uncompressed, RLE);

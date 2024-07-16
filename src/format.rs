@@ -122,6 +122,7 @@ pub mod deserialize;
 pub mod native;
 pub mod serialize;
 
+pub mod run_length;
 pub mod uncompressed;
 // ============== FileHeader ==================
 

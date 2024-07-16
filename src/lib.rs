@@ -19,16 +19,21 @@ mod tests {
             run_length::RunLengthCompressor, uncompressed::UncompressedCompressor,
             GenericCompressor,
         },
-        decoder::{
-            chunk_reader::{GeneralChunkReaderInner, Reader},
-            FileReader,
-        },
+        decoder::FileReader,
         encoder::{ChunkOption, FileWriter},
     };
 
     fn generate_and_write_random_f64<W: Write>(mut f: W, n: usize) -> io::Result<Vec<f64>> {
         let mut rng = rand::thread_rng();
-        let random_values: Vec<f64> = (0..n).map(|_| rng.gen()).collect();
+        let mut random_values: Vec<f64> = Vec::with_capacity(n);
+
+        for i in 0..n {
+            if rng.gen_bool(0.5) && random_values.last().is_some() {
+                random_values.push(random_values[i - 1]);
+            } else {
+                random_values.push(rng.gen());
+            }
+        }
 
         for value in random_values.clone() {
             let bytes = value.to_ne_bytes();
@@ -83,6 +88,7 @@ mod tests {
 
     fn test_round_trip_for_compressor(compressor: GenericCompressor) {
         let record_count = 1003;
+        const RECORD_COUNT: usize = 100;
 
         let buf = Vec::<u8>::new();
         let mut in_f = io::Cursor::new(buf);
@@ -92,7 +98,6 @@ mod tests {
         let mut in_f = io::Cursor::new(in_f.into_inner());
         let mut out_f = io::Cursor::new(Vec::<u8>::new());
 
-        const RECORD_COUNT: usize = 100;
         let chunk_option = ChunkOption::RecordCount(RECORD_COUNT);
         let file_writer = FileWriter::new(&mut in_f, compressor, chunk_option);
 
@@ -152,29 +157,22 @@ mod tests {
         let mut buf = Vec::new();
         for (i, mut chunk_handle) in chunk_handles.enumerate() {
             let chunk_size = chunk_handle.chunk_size() as usize;
-            let expected_chunk_size =
-                chunk_size.next_multiple_of(align_of::<u64>()) / size_of::<u64>() + 1;
+            let expected_chunk_size = chunk_size.next_multiple_of(align_of::<u64>()) + 1;
             if buf.len() * size_of::<u64>() < expected_chunk_size {
-                buf.resize(expected_chunk_size, 0);
+                buf.resize(expected_chunk_size.next_power_of_two(), 0);
             }
 
             chunk_handle.seek_to_chunk(&mut in_f).unwrap();
             chunk_handle.fetch(&mut in_f, &mut buf[..]).unwrap();
             let mut chunk_reader = chunk_handle.make_chunk_reader(&buf[..]).unwrap();
-            #[allow(irrefutable_let_patterns)]
-            let GeneralChunkReaderInner::Uncompressed(ref mut chunk_reader) =
-                chunk_reader.inner_mut()
-            else {
-                panic!("expect uncompressed chunk, but got: {:?}", chunk_reader);
-            };
-            let _chunk_header = chunk_reader.read_header();
 
             let written_data = if random_values.len() < (i + 1) * RECORD_COUNT {
                 &random_values[i * RECORD_COUNT..]
             } else {
                 &random_values[i * RECORD_COUNT..(i + 1) * RECORD_COUNT]
             };
-            let decompressed_data = chunk_reader.decompress();
+
+            let decompressed_data = chunk_reader.inner_mut().decompress();
 
             assert_eq!(
                 written_data, decompressed_data,
