@@ -1,11 +1,11 @@
 //! Uncompressed Compression Scheme Header format
 //! ```rust
-//! #[repr(packed(1))]
+//! #[repr(C, packed(1))]
 //! pub struct UncompressedHeader0 {
 //!     header_size: u8,
 //! }
 //!
-//! #[repr(packed(1))]
+//! #[repr(C, packed(1))]
 //! pub struct UncompressedHeader1 {
 //!     header: [u8],
 //! }
@@ -18,7 +18,7 @@ use derive_getters::Getters;
 use super::deserialize::FromLeBytes;
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
-#[repr(packed(1))]
+#[repr(C, packed(1))]
 pub struct UncompressedHeader0 {
     pub header_size: u8,
 }
@@ -30,7 +30,7 @@ impl FromLeBytes for UncompressedHeader0 {
     }
 }
 
-#[repr(packed(1))]
+#[repr(C, packed(1))]
 pub struct UncompressedHeader1 {
     pub header: [u8],
 }
