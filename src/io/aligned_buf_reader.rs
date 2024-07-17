@@ -10,6 +10,10 @@ use std::{
 /// A trait for reading bytes from a buffer that is guaranteed to be aligned.
 /// The internal buffer must be aligned to 8 bytes.
 /// Unless you read the bytes of not multiple of 8 bytes, the buffer is always aligned.
+/// # Safety
+/// - The implementation must ensure the buffer must be aligned to 8 bytes as long as the internal cursor is 8 byte aligned.
+/// - e.g. If you read 4 bytes from the buffer, the buffer can be not aligned.
+/// - Unless you read the bytes of not multiple of 8 bytes, the buffer must be always aligned.
 pub unsafe trait AlignedBufRead {
     fn fill_buf(&mut self) -> io::Result<&[u8]>;
     fn consume(&mut self, amt: usize);
@@ -315,6 +319,7 @@ impl<R: ?Sized + Seek> AlignedBufReader<R> {
     pub fn seek_relative(&mut self, offset: i64) -> io::Result<()> {
         let pos = self.buf.pos() as u64;
         if offset < 0 {
+            #[allow(clippy::redundant_pattern_matching)]
             if let Some(_) = pos.checked_sub((-offset) as u64) {
                 self.buf.unconsume((-offset) as usize);
                 return Ok(());

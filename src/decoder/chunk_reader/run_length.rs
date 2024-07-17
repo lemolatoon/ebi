@@ -94,6 +94,8 @@ impl<'chunk> Reader for RunLengthReader<'chunk> {
 
         let mut buf = Vec::with_capacity(self.number_of_records());
 
+        // self.run_counts is Vec<u32> on big endian.
+        #[allow(clippy::redundant_slicing)]
         for (&value, &count) in self.values.iter().zip(&self.run_counts[..]) {
             for _ in 0..count {
                 buf.push(value);
