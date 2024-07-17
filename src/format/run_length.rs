@@ -1,6 +1,6 @@
 //! Run Length Compression Scheme Header format
 //! ```rust
-//! #[repr(packed(1))]
+//! #[repr(C, packed(1))]
 //! pub struct RunLengthHeader {
 //!     /// number of fields in the chunk
 //!     number_of_fields: u8,
@@ -10,7 +10,7 @@
 use super::{deserialize::FromLeBytes, serialize::ToLe};
 
 #[derive(Default, Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
-#[repr(packed(1))]
+#[repr(C, packed(1))]
 pub struct RunLengthHeader {
     /// number of fields in the chunk
     number_of_fields: u64,
