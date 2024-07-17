@@ -1,6 +1,6 @@
 use std::{
     fs::File,
-    io::{self, BufReader, Read, Seek, SeekFrom, Write},
+    io::{self, Read, Seek, SeekFrom, Write},
     mem::{align_of, size_of},
     path::Path,
 };
@@ -12,12 +12,21 @@ use ebi::{
         FileReader,
     },
     encoder::{ChunkOption, FileWriter},
+    io::aligned_buf_reader::AlignedBufReader,
 };
 use rand::Rng;
 
 fn generate_and_write_random_f64(path: impl AsRef<Path>, n: usize) -> io::Result<()> {
     let mut rng = rand::thread_rng();
-    let random_values: Vec<f64> = (0..n).map(|_| rng.gen()).collect();
+    let mut random_values: Vec<f64> = Vec::with_capacity(n);
+
+    for i in 0..n {
+        if rng.gen_bool(0.5) && random_values.last().is_some() {
+            random_values.push(random_values[i - 1]);
+        } else {
+            random_values.push(rng.gen());
+        }
+    }
 
     let mut file = File::create(path)?;
 
@@ -35,7 +44,7 @@ fn main() {
     // let compressor = GenericCompressor::Uncompressed(UncompressedCompressor::new(100));
     let compressor = GenericCompressor::RLE(RunLengthCompressor::new());
     let in_f = File::open("uncompressed.bin").unwrap();
-    let mut in_f = BufReader::new(in_f);
+    let mut in_f = AlignedBufReader::new(in_f);
     let mut out_f = File::create("compressed.bin").unwrap();
     let chunk_option = ChunkOption::RecordCount(RECORD_COUNT);
     let mut file_context = FileWriter::new(&mut in_f, compressor, chunk_option);

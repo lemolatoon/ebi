@@ -3,12 +3,13 @@ pub mod core;
 pub mod decoder;
 pub mod encoder;
 pub mod format;
+pub mod io;
 
 #[cfg(test)]
 mod tests {
     use std::{
         env,
-        io::{self, BufRead, Seek, SeekFrom, Write},
+        io::{self, Seek, SeekFrom, Write},
         mem::{align_of, size_of},
     };
 
@@ -21,6 +22,7 @@ mod tests {
         },
         decoder::FileReader,
         encoder::{ChunkOption, FileWriter},
+        io::aligned_buf_reader::{AlignedBufRead, AlignedBufReader},
     };
 
     fn generate_and_write_random_f64<W: Write>(mut f: W, n: usize) -> io::Result<Vec<f64>> {
@@ -43,7 +45,7 @@ mod tests {
         Ok(random_values)
     }
 
-    fn write_file<R: BufRead, W: Write + Seek>(
+    fn write_file<R: AlignedBufRead, W: Write + Seek>(
         mut file_writer: FileWriter<R>,
         mut out_f: W,
     ) -> io::Result<()> {
@@ -95,7 +97,7 @@ mod tests {
 
         let random_values = generate_and_write_random_f64(&mut in_f, record_count).unwrap();
 
-        let mut in_f = io::Cursor::new(in_f.into_inner());
+        let mut in_f = AlignedBufReader::new(io::Cursor::new(in_f.into_inner()));
         let mut out_f = io::Cursor::new(Vec::<u8>::new());
 
         let chunk_option = ChunkOption::RecordCount(RECORD_COUNT);

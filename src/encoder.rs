@@ -8,10 +8,11 @@ use crate::{
         ChunkFooter, FieldType, FileConfig, FileFooter0, FileFooter2, FileHeader,
         GeneralChunkHeader,
     },
+    io::aligned_buf_reader::AlignedBufRead,
 };
 use core::slice;
 use std::{
-    io::{self, BufRead, Write},
+    io::{self, Write},
     mem::{offset_of, size_of, size_of_val},
 };
 
@@ -51,7 +52,7 @@ impl ChunkOption {
     }
 }
 
-pub struct FileWriter<R: BufRead> {
+pub struct FileWriter<R: AlignedBufRead> {
     input: R,
     chunk_option: ChunkOption,
     compressor: GenericCompressor,
@@ -62,13 +63,13 @@ pub struct FileWriter<R: BufRead> {
     reaches_eof: bool,
 }
 
-struct BufWrapper<'a, R: BufRead> {
+struct BufWrapper<'a, R: AlignedBufRead> {
     input: &'a mut R,
     buf: &'a [f64],
     n_consumed_bytes: usize,
 }
 
-impl<'a, R: BufRead> BufWrapper<'a, R> {
+impl<'a, R: AlignedBufRead> BufWrapper<'a, R> {
     /// Provides the wrapper of internal buffer of BufRead.
     /// Tuple's first element is the `BufWrapper`, the second element indicates
     /// reader reaches EOF or not.
@@ -107,19 +108,19 @@ impl<'a, R: BufRead> BufWrapper<'a, R> {
     }
 }
 
-impl<'a, R: BufRead> AsRef<[f64]> for BufWrapper<'a, R> {
+impl<'a, R: AlignedBufRead> AsRef<[f64]> for BufWrapper<'a, R> {
     fn as_ref(&self) -> &'a [f64] {
         self.buf
     }
 }
 
-impl<'a, R: BufRead> Drop for BufWrapper<'a, R> {
+impl<'a, R: AlignedBufRead> Drop for BufWrapper<'a, R> {
     fn drop(&mut self) {
         self.input.consume(self.n_consumed_bytes);
     }
 }
 
-impl<R: BufRead> FileWriter<R> {
+impl<R: AlignedBufRead> FileWriter<R> {
     const MAGIC_NUMBER: &'static [u8; 4] = b"EBI1";
     pub fn new(input: R, compressor: GenericCompressor, chunk_option: ChunkOption) -> Self {
         let chunk_footer = ChunkFooter {
@@ -253,7 +254,7 @@ impl<R: BufRead> FileWriter<R> {
                 f.write_all(self.chunk_footers().as_bytes())?
             } else {
                 // We need to write chunk footers one by one.
-                for (i, chunk_footer) in self.chunk_footers().iter().enumerate() {
+                for chunk_footer in self.chunk_footers().iter() {
                     let mut chunk_footer = *chunk_footer;
                     f.write_all(chunk_footer.to_le().as_bytes())?;
                 }
@@ -275,12 +276,12 @@ impl<R: BufRead> FileWriter<R> {
     }
 }
 
-pub struct ChunkWriter<'a, R: BufRead> {
+pub struct ChunkWriter<'a, R: AlignedBufRead> {
     file_writer: &'a mut FileWriter<R>,
     compressor: GenericCompressor,
 }
 
-impl<'a, R: BufRead> ChunkWriter<'a, R> {
+impl<'a, R: AlignedBufRead> ChunkWriter<'a, R> {
     fn new(file_writer: &'a mut FileWriter<R>, compressor: GenericCompressor) -> Self {
         Self {
             file_writer,
@@ -373,11 +374,13 @@ mod tests {
         ChunkOptionKind, CompressionScheme,
     };
 
-    use crate::compressor::uncompressed::UncompressedCompressor;
+    use crate::{
+        compressor::uncompressed::UncompressedCompressor, io::aligned_buf_reader::AlignedBufReader,
+    };
 
     use super::*;
     use std::{
-        io::{self, BufReader, Cursor},
+        io::{self, Cursor},
         ptr::addr_of,
     };
 
@@ -390,7 +393,7 @@ mod tests {
         };
         const RECORD_COUNT: usize = 100;
         let compressor = GenericCompressor::Uncompressed(UncompressedCompressor::new(data.len()));
-        let mut in_f = BufReader::new(u8_data);
+        let mut in_f = AlignedBufReader::new(u8_data);
         let mut out_f = Cursor::new(Vec::new());
         let chunk_option = ChunkOption::RecordCount(RECORD_COUNT);
         let mut file_writer = FileWriter::new(&mut in_f, compressor, chunk_option);
@@ -420,7 +423,7 @@ mod tests {
         let file_header = file_header.unwrap();
         assert_eq!(
             file_header.magic_number,
-            *FileWriter::<BufReader<Cursor<Vec<u8>>>>::MAGIC_NUMBER
+            *FileWriter::<AlignedBufReader<Cursor<Vec<u8>>>>::MAGIC_NUMBER
         );
         assert_eq!(
             unsafe { addr_of!(file_header.version).read_unaligned() },
