@@ -4,6 +4,7 @@ use uncompressed::UncompressedCompressor;
 
 use crate::format;
 
+pub mod gorilla;
 pub mod run_length;
 pub mod uncompressed;
 

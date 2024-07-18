@@ -187,6 +187,7 @@ dependencies = [
  "rand",
  "rand_chacha",
  "thiserror",
+ "tsz",
 ]
 
 [[package]]
@@ -512,6 +513,15 @@ checksum = "be4d6b5f19ff7664e8c98d03e2139cb510db9b0a60b55f8e8709b689d939b6bc"
 dependencies = [
  "serde",
  "serde_json",
+]
+
+[[package]]
+name = "tsz"
+version = "0.1.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "789624517ed689bfd295209450db6c3b15dadcd576ca30eace4619fa7cc82d37"
+dependencies = [
+ "serde",
 ]
 
 [[package]]
