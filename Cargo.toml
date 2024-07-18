@@ -18,5 +18,10 @@ rand_chacha = "0.3"
 name = "bench"
 harness = false
 
+[[bin]]
+name = "ebi"
+path = "src/main.rs"
+bench = false
+
 [lib]
 bench = false
