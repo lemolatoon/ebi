@@ -25,7 +25,7 @@ mod tests {
         io::aligned_buf_reader::{AlignedBufRead, AlignedBufReader},
     };
 
-    fn generate_and_write_random_f64<W: Write>(mut f: W, n: usize) -> io::Result<Vec<f64>> {
+    fn generate_and_write_random_f64(n: usize) -> Vec<f64> {
         let mut rng = rand::thread_rng();
         let mut random_values: Vec<f64> = Vec::with_capacity(n);
 
@@ -37,12 +37,7 @@ mod tests {
             }
         }
 
-        for value in random_values.clone() {
-            let bytes = value.to_ne_bytes();
-            f.write_all(&bytes)?;
-        }
-
-        Ok(random_values)
+        random_values
     }
 
     fn write_file<R: AlignedBufRead, W: Write + Seek>(
@@ -79,28 +74,50 @@ mod tests {
         let compressor = GenericCompressor::Uncompressed(
             UncompressedCompressor::new(8000).header(header.clone()),
         );
-        test_round_trip_for_compressor(compressor);
+        for n in [1003, 10003, 100004, 100005] {
+            #[cfg(miri)] // miri is too slow
+            if n > 1003 {
+                continue;
+            }
+
+            let random_values = generate_and_write_random_f64(n);
+            test_round_trip_for_compressor(&random_values, compressor.clone());
+        }
     }
 
     #[test]
     fn test_round_trip_rle() {
         let compressor = GenericCompressor::RLE(RunLengthCompressor::new());
-        test_round_trip_for_compressor(compressor);
+
+        for n in [1003, 10003, 100004, 100005] {
+            #[cfg(miri)] // miri is too slow
+            if n > 1003 {
+                continue;
+            }
+            let random_values = generate_and_write_random_f64(n);
+            test_round_trip_for_compressor(&random_values, compressor.clone());
+
+            let one_value = vec![1.0; n];
+            test_round_trip_for_compressor(&one_value, compressor.clone());
+        }
     }
 
-    fn test_round_trip_for_compressor(compressor: GenericCompressor) {
-        let record_count = 1003;
-        const RECORD_COUNT: usize = 100;
+    fn test_round_trip_for_compressor(values: &[f64], compressor: GenericCompressor) {
+        let record_count = values.len();
+        const RECORD_COUNT_PER_CHUNK: usize = 1024;
 
         let buf = Vec::<u8>::new();
         let mut in_f = io::Cursor::new(buf);
 
-        let random_values = generate_and_write_random_f64(&mut in_f, record_count).unwrap();
+        for v in values {
+            let bytes = v.to_ne_bytes();
+            in_f.write_all(&bytes).unwrap();
+        }
 
         let mut in_f = AlignedBufReader::new(io::Cursor::new(in_f.into_inner()));
         let mut out_f = io::Cursor::new(Vec::<u8>::new());
 
-        let chunk_option = ChunkOption::RecordCount(RECORD_COUNT);
+        let chunk_option = ChunkOption::RecordCount(RECORD_COUNT_PER_CHUNK);
         let file_writer = FileWriter::new(&mut in_f, compressor, chunk_option);
 
         write_file(file_writer, &mut out_f).unwrap();
@@ -143,13 +160,13 @@ mod tests {
         let chunk_footers = file_footer.chunk_footers();
         assert_eq!(
             chunk_footers.len(),
-            (record_count + RECORD_COUNT - 1) / RECORD_COUNT,
+            (record_count + RECORD_COUNT_PER_CHUNK - 1) / RECORD_COUNT_PER_CHUNK,
             "number of chunk footers must be equal to the number of chunks, which is the number of records divided by the record count"
         );
         for (i, chunk_footer) in chunk_footers.iter().enumerate() {
             assert_eq!(
                 chunk_footer.logical_offset(),
-                (i * RECORD_COUNT) as u64,
+                (i * RECORD_COUNT_PER_CHUNK) as u64,
                 "logical offset of chunk must be equal to the offset of the chunk in the file"
             )
         }
@@ -168,10 +185,10 @@ mod tests {
             chunk_handle.fetch(&mut in_f, &mut buf[..]).unwrap();
             let mut chunk_reader = chunk_handle.make_chunk_reader(&buf[..]).unwrap();
 
-            let written_data = if random_values.len() < (i + 1) * RECORD_COUNT {
-                &random_values[i * RECORD_COUNT..]
+            let written_data = if values.len() < (i + 1) * RECORD_COUNT_PER_CHUNK {
+                &values[i * RECORD_COUNT_PER_CHUNK..]
             } else {
-                &random_values[i * RECORD_COUNT..(i + 1) * RECORD_COUNT]
+                &values[i * RECORD_COUNT_PER_CHUNK..(i + 1) * RECORD_COUNT_PER_CHUNK]
             };
 
             let decompressed_data = chunk_reader.inner_mut().decompress();

@@ -317,9 +317,7 @@ impl<'a, R: AlignedBufRead> ChunkWriter<'a, R> {
                 }
             }
 
-            let n_bytes_compressed = self
-                .compressor
-                .compress(&buf.as_ref()[self.compressor.total_bytes_in()..]);
+            let n_bytes_compressed = self.compressor.compress(buf.as_ref());
             buf.set_n_consumed_bytes(n_bytes_compressed);
         }
 
