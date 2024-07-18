@@ -17,3 +17,6 @@ rand_chacha = "0.3"
 [[bench]]
 name = "bench"
 harness = false
+
+[lib]
+bench = false
