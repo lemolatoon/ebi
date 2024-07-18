@@ -37,6 +37,16 @@ impl RunLengthCompressor {
             values: Vec::with_capacity(capacity),
         }
     }
+
+    pub fn reset_capacity(&mut self, capacity: usize) {
+        self.run_counts.reserve(capacity);
+        self.values.reserve(capacity);
+    }
+
+    pub fn reset_capacity_to_default(&mut self) {
+        self.run_counts.shrink_to(DEFAULT_CAPACITY);
+        self.values.shrink_to(DEFAULT_CAPACITY);
+    }
 }
 
 impl Default for RunLengthCompressor {
