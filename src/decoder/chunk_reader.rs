@@ -1,3 +1,4 @@
+pub mod gorilla;
 pub mod run_length;
 pub mod uncompressed;
 
@@ -76,6 +77,7 @@ impl<'reader, 'chunk> GeneralChunkReader<'reader, 'chunk> {
 pub enum GeneralChunkReaderInner<'chunk> {
     Uncompressed(uncompressed::UncompressedReader<'chunk>),
     RLE(run_length::RunLengthReader<'chunk>),
+    Gorilla(gorilla::GorillaReader<'chunk>),
 }
 
 impl<'chunk> GeneralChunkReaderInner<'chunk> {
@@ -91,6 +93,9 @@ impl<'chunk> GeneralChunkReaderInner<'chunk> {
             CompressionScheme::RLE => {
                 GeneralChunkReaderInner::RLE(run_length::RunLengthReader::new(handle, chunk))
             }
+            CompressionScheme::Gorilla => {
+                GeneralChunkReaderInner::Gorilla(gorilla::GorillaReader::new(handle, chunk))
+            }
             c => unimplemented!("Unimplemented compression scheme: {:?}", c),
         }
     }
@@ -101,6 +106,7 @@ impl From<&GeneralChunkReaderInner<'_>> for CompressionScheme {
         match value {
             GeneralChunkReaderInner::Uncompressed(_) => CompressionScheme::Uncompressed,
             GeneralChunkReaderInner::RLE(_) => CompressionScheme::RLE,
+            GeneralChunkReaderInner::Gorilla(_) => CompressionScheme::Gorilla,
         }
     }
 }
@@ -137,4 +143,4 @@ macro_rules! impl_generic_reader {
     };
 }
 
-impl_generic_reader!(GeneralChunkReaderInner, Uncompressed, RLE);
+impl_generic_reader!(GeneralChunkReaderInner, Uncompressed, RLE, Gorilla);

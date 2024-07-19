@@ -17,8 +17,8 @@ mod tests {
 
     use crate::{
         compressor::{
-            run_length::RunLengthCompressor, uncompressed::UncompressedCompressor,
-            GenericCompressor,
+            gorilla::GorillaCompressor, run_length::RunLengthCompressor,
+            uncompressed::UncompressedCompressor, GenericCompressor,
         },
         decoder::FileReader,
         encoder::{ChunkOption, FileWriter},
@@ -99,6 +99,39 @@ mod tests {
 
             let one_value = vec![1.0; n];
             test_round_trip_for_compressor(&one_value, compressor.clone());
+        }
+    }
+
+    #[test]
+    fn test_round_trip_gorilla() {
+        let compressor = GenericCompressor::Gorilla(GorillaCompressor::new());
+
+        for n in [1003, 10003, 100004, 100005] {
+            #[cfg(miri)] // miri is too slow
+            if n > 1003 {
+                continue;
+            }
+            {
+                let random_values = generate_and_write_random_f64(n);
+                test_round_trip_for_compressor(&random_values, compressor.clone());
+            }
+
+            {
+                let one_value = vec![1.0; n];
+                test_round_trip_for_compressor(&one_value, compressor.clone());
+            }
+
+            {
+                let mut doubleing_values = Vec::with_capacity(n);
+                for i in 0..n {
+                    if i == 0 {
+                        doubleing_values.push(1.1);
+                        continue;
+                    }
+                    doubleing_values.push(doubleing_values[i - 1] * 2.0);
+                }
+                test_round_trip_for_compressor(&doubleing_values, compressor.clone());
+            }
         }
     }
 

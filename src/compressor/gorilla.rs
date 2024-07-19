@@ -2,6 +2,7 @@ use std::mem::size_of_val;
 
 use super::Compressor;
 
+#[derive(Debug, Clone, PartialEq, PartialOrd)]
 pub struct GorillaCompressor {
     encoder: modified_tsz::GorillaFloatEncoder,
 }
@@ -101,7 +102,7 @@ mod modified_tsz {
     /// StdEncoder
     ///
     /// StdEncoder is used to encode `DataPoint`s
-    #[derive(Debug)]
+    #[derive(Debug, Clone, PartialEq, PartialOrd)]
     pub struct GorillaFloatEncoder {
         /// current float value as bits
         value_bits: u64,
@@ -348,7 +349,6 @@ mod modified_tsz {
         }
 
         fn write_bits(&mut self, mut bits: u64, mut num: u32) {
-            println!("write_bits: {} {}", bits, num);
             // we should never write more than 64 bits for a u64
             if num > 64 {
                 num = 64;
@@ -462,9 +462,12 @@ mod modified_tsz {
                 0x00,
                 0x00,
                 0x00,
-                0x00,            /* 12.0 as double */
+                0x00, /* 12.0 as double */
+                #[allow(clippy::unusual_byte_groupings)]
                 0b11__0_1011__0, /* control bit 11, # of leading zeros (11 (5 bits)) */
+                #[allow(clippy::unusual_byte_groupings)]
                 0b0_0000__1__11, /* # of meaning bits (1 (6 bits)), actual meaning bits 1, END_MARKER starts (2 bits) */
+                #[allow(clippy::unusual_byte_groupings)]
                 0b11__00_0000,
                 0,
                 0,

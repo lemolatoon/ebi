@@ -1,3 +1,4 @@
+use gorilla::GorillaCompressor;
 use run_length::RunLengthCompressor;
 // use run_length::RunLengthCompressor;
 use uncompressed::UncompressedCompressor;
@@ -37,6 +38,7 @@ pub trait Compressor {
 pub enum GenericCompressor {
     Uncompressed(UncompressedCompressor),
     RLE(RunLengthCompressor),
+    Gorilla(GorillaCompressor),
 }
 
 macro_rules! impl_generic_compressor {
@@ -86,17 +88,18 @@ impl GenericCompressor {
         match self {
             GenericCompressor::Uncompressed(_) => format::CompressionScheme::Uncompressed,
             GenericCompressor::RLE(_) => format::CompressionScheme::RLE,
+            GenericCompressor::Gorilla(_) => format::CompressionScheme::Gorilla,
         }
     }
 }
 
-impl_generic_compressor!(GenericCompressor, Uncompressed, RLE);
+impl_generic_compressor!(GenericCompressor, Uncompressed, RLE, Gorilla);
 
 #[cfg(test)]
 mod tests {
     use std::mem::size_of_val;
 
-    use super::GenericCompressor;
+    use super::{gorilla::GorillaCompressor, GenericCompressor};
 
     fn test_total_bytes_in(compressor: &mut GenericCompressor) {
         let mut floats: Vec<f64> = (0..10).map(|x| (x / 2) as f64).collect();
@@ -186,6 +189,19 @@ mod tests {
     #[test]
     fn test_rle() {
         let mut compressor = GenericCompressor::RLE(super::run_length::RunLengthCompressor::new());
+
+        test_total_bytes_in(&mut compressor);
+        test_total_bytes_buffered(&mut compressor);
+
+        test_reset(&mut compressor);
+
+        test_total_bytes_in(&mut compressor);
+        test_total_bytes_buffered(&mut compressor);
+    }
+
+    #[test]
+    fn test_gorilla() {
+        let mut compressor = GenericCompressor::Gorilla(GorillaCompressor::new());
 
         test_total_bytes_in(&mut compressor);
         test_total_bytes_buffered(&mut compressor);
