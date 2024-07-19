@@ -1,0 +1,28 @@
+[package]
+name = "ebi"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+derive-getters = "0.4.0"
+rand = "0.8.5"
+thiserror = "1.0.62"
+cfg-if = "1.0"
+tsz = "0.1.4"
+
+[dev-dependencies]
+criterion = "0.5"
+rand_chacha = "0.3"
+
+
+[[bench]]
+name = "bench"
+harness = false
+
+[[bin]]
+name = "ebi"
+path = "src/main.rs"
+bench = false
+
+[lib]
+bench = false
