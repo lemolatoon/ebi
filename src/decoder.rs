@@ -287,6 +287,7 @@ impl<'reader> GeneralChunkHandle<'reader> {
 
                 header_size
             }
+            CompressionScheme::Gorilla => 0,
             c => unimplemented!("Unimplemented compression scheme: {:?}", c),
         };
 
