@@ -62,6 +62,10 @@ mod tests {
         let footer_offset_slot_offset = file_writer.footer_offset_slot_offset();
         out_f.seek(SeekFrom::Start(footer_offset_slot_offset as u64))?;
         file_writer.write_footer_offset(&mut out_f)?;
+
+        let elapsed_time_slot_offset = file_writer.elapsed_time_slot_offset();
+        out_f.seek(SeekFrom::Start(elapsed_time_slot_offset as u64))?;
+        file_writer.write_elapsed_time(&mut out_f)?;
         // you can flush if you want
         out_f.flush()?;
 

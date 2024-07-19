@@ -9,7 +9,7 @@ use super::{
     ChunkFooter, CompressionScheme, FieldType, FileConfig, FileFooter0, FileFooter2, FileHeader,
 };
 
-#[derive(Getters, Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Getters, Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct NativeFileHeader {
     /// EBI1
     magic_number: [u8; 4],
@@ -39,7 +39,7 @@ impl From<&FileHeader> for NativeFileHeader {
     }
 }
 
-#[derive(Getters, Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Getters, Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct NativeFileConfig {
     pub field_type: FieldType, // = u8
     pub chunk_option: ChunkOption,
@@ -74,6 +74,8 @@ pub struct NativeFileFooter {
     number_of_chunks: u64,
     chunk_footers: Vec<NativeChunkFooter>,
     #[getter(skip)]
+    compression_elapsed_time_nano_secs: u128,
+    #[getter(skip)]
     crc: u32,
 }
 
@@ -86,11 +88,13 @@ impl NativeFileFooter {
         let number_of_records = footer0.number_of_records;
         let number_of_chunks = footer0.number_of_chunks;
         let chunk_footers = chunk_footers.iter().map(NativeChunkFooter::from).collect();
+        let compression_elapsed_time_nano_secs = footer2.compression_elapsed_time_nano_secs;
         let crc = footer2.crc;
         Self {
             number_of_records,
             number_of_chunks,
             chunk_footers,
+            compression_elapsed_time_nano_secs,
             crc,
         }
     }
@@ -101,6 +105,10 @@ impl NativeFileFooter {
 
     pub fn number_of_chunks(&self) -> u64 {
         self.number_of_chunks
+    }
+
+    pub fn compression_elapsed_time_nano_secs(&self) -> u128 {
+        self.compression_elapsed_time_nano_secs
     }
 
     pub fn crc(&self) -> u32 {

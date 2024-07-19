@@ -1,12 +1,18 @@
 use std::{
     fs::File,
     io::{self, Read, Seek, SeekFrom, Write},
-    mem::{align_of, size_of},
+    mem::align_of,
     path::Path,
 };
 
+#[allow(unused_imports)]
+use ebi::compressor::{
+    gorilla::GorillaCompressor, run_length::RunLengthCompressor,
+    uncompressed::UncompressedCompressor,
+};
+
 use ebi::{
-    compressor::{run_length::RunLengthCompressor, GenericCompressor},
+    compressor::GenericCompressor,
     decoder::{
         chunk_reader::{GeneralChunkReaderInner, Reader},
         FileReader,
@@ -40,9 +46,10 @@ fn generate_and_write_random_f64(path: impl AsRef<Path>, n: usize) -> io::Result
 
 fn main() {
     const RECORD_COUNT: usize = 100;
-    generate_and_write_random_f64("uncompressed.bin", RECORD_COUNT * 3 + 3).unwrap();
+    generate_and_write_random_f64("uncompressed.bin", RECORD_COUNT * 300 + 3).unwrap();
     // let compressor = GenericCompressor::Uncompressed(UncompressedCompressor::new(100));
-    let compressor = GenericCompressor::RLE(RunLengthCompressor::new());
+    // let compressor = GenericCompressor::RLE(RunLengthCompressor::new());
+    let compressor = GenericCompressor::Gorilla(GorillaCompressor::new());
     let in_f = File::open("uncompressed.bin").unwrap();
     let mut in_f = AlignedBufReader::new(in_f);
     let mut out_f = File::create("compressed.bin").unwrap();
@@ -69,6 +76,11 @@ fn main() {
         .seek(SeekFrom::Start(footer_offset_slot_offset as u64))
         .unwrap();
     file_context.write_footer_offset(&mut out_f).unwrap();
+    let elapsed_time_slot_offset = file_context.elapsed_time_slot_offset();
+    out_f
+        .seek(SeekFrom::Start(elapsed_time_slot_offset as u64))
+        .unwrap();
+    file_context.write_elapsed_time(&mut out_f).unwrap();
     // you can flush if you want
     out_f.flush().unwrap();
 
@@ -76,8 +88,14 @@ fn main() {
     drop(out_f);
     // ================== DECODING ==================
     let mut in_f = File::open("compressed.bin").unwrap(); // in_f: Read
+    println!(
+        "compressed.bin: {} Bytes, {} KiB, {} MiB",
+        in_f.metadata().unwrap().len(),
+        in_f.metadata().unwrap().len() as f64 / 1024.0,
+        in_f.metadata().unwrap().len() as f64 / 1024.0 / 1024.0
+    );
     let mut file_reader = FileReader::new();
-    let file_header = file_reader.fetch_header(&mut in_f).unwrap();
+    let file_header = *file_reader.fetch_header(&mut in_f).unwrap();
     // All fields can be gotten by getter
     println!(
         "magic_number: {:?}",
@@ -90,8 +108,15 @@ fn main() {
 
     // Also they are getters for footer.
     println!("number_of_records: {}", file_footer.number_of_records());
-    let chunk_footers = file_footer.chunk_footers();
-    println!("chunk_footer[1]: {:?}", chunk_footers[1]);
+    println!(
+        "compression scheme: {:?}",
+        file_header.config().compression_scheme()
+    );
+    println!(
+        "compressed in {} ns, {} ms",
+        file_footer.compression_elapsed_time_nano_secs(),
+        file_footer.compression_elapsed_time_nano_secs() as f64 / 1_000_000.0
+    );
 
     // reading chunk in given buffer
     let mut chunk_handles = file_reader.chunks_iter().unwrap().peekable();
@@ -108,11 +133,8 @@ fn main() {
             continue;
         }
         let chunk_size = chunk_handle.chunk_size() as usize;
-        if buf.len() * size_of::<u64>() < chunk_size {
-            buf.resize(
-                chunk_size.next_multiple_of(align_of::<u64>()) / size_of::<u64>() + 1,
-                0,
-            );
+        if buf.len() < chunk_size.next_multiple_of(align_of::<u64>()) + 1 {
+            buf.resize(chunk_size.next_multiple_of(align_of::<u64>()) + 1, 0);
         }
 
         chunk_handle.fetch(&mut in_f, &mut buf[..]).unwrap();
@@ -121,16 +143,6 @@ fn main() {
         if let GeneralChunkReaderInner::Uncompressed(ref mut chunk_reader) =
             chunk_reader.inner_mut()
         {
-            println!(
-                "{i}: chunk_header: {:?}",
-                chunk_reader
-                    .read_header()
-                    .header()
-                    .iter()
-                    .map(|x| *x as char)
-                    .collect::<String>()
-            );
-            println!("{i}th chunk data[2]: {:?}", chunk_reader.decompress()[2]);
             let mut in_f = File::open("uncompressed.bin").unwrap();
             in_f.seek(SeekFrom::Start(
                 (chunk_handle.chunk_footer().logical_offset() + 2)
@@ -139,7 +151,7 @@ fn main() {
             .unwrap();
             let mut buf: [u8; std::mem::size_of::<f64>()] = [0; std::mem::size_of::<f64>()];
             in_f.read_exact(&mut buf).unwrap();
-            println!("expected data[2]: {:?}", f64::from_ne_bytes(buf));
+            assert_eq!(chunk_reader.decompress()[2], f64::from_ne_bytes(buf));
         };
         // Compression Method Specific Operations
     }

@@ -130,22 +130,18 @@ pub mod uncompressed;
 pub struct FileHeader {
     /// EBI1
     pub magic_number: [u8; 4],
-    /// unaligned
-    ///
-    /// major, minor, patch
-    pub version: [u16; 3],
-    /// unaligned
-    ///
+    pub config: FileConfig,
     /// Bytes offset for FileFooter from the file start.
     pub footer_offset: u64,
-    pub config: FileConfig,
+    /// major, minor, patch
+    pub version: [u16; 3],
 }
 
 #[repr(C, packed(1))]
 pub struct FileConfig {
-    pub field_type: FieldType, // = u8
-    pub chunk_option: ChunkOption,
+    pub field_type: FieldType,                 // = u8
     pub compression_scheme: CompressionScheme, // = u8
+    pub chunk_option: ChunkOption,
 }
 
 #[repr(u8)]
@@ -157,7 +153,7 @@ pub enum FieldType {
 #[repr(C, packed(1))]
 pub struct ChunkOption {
     pub kind: ChunkOptionKind, // u8
-    /// unaligned
+    pub reserved: u8,
     pub value: u64,
 }
 
@@ -216,6 +212,8 @@ pub struct FileFooter1 {
 
 #[repr(C, packed(1))]
 pub struct FileFooter2 {
+    /// Compression Elapsed Time (nano seconds)
+    pub compression_elapsed_time_nano_secs: u128,
     pub crc: u32,
 }
 
