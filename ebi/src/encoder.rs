@@ -14,6 +14,7 @@ use core::slice;
 use std::{
     io::{self, Write},
     mem::{offset_of, size_of, size_of_val},
+    time::Instant,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -28,15 +29,18 @@ impl From<&ChunkOption> for format::ChunkOption {
         match value {
             ChunkOption::Full => format::ChunkOption {
                 kind: format::ChunkOptionKind::Full,
+                reserved: 0,
                 value: 0,
             },
             ChunkOption::RecordCount(value) => format::ChunkOption {
                 kind: format::ChunkOptionKind::RecordCount,
-                value: (*value as u64).to_le(),
+                reserved: 0,
+                value: *value as u64,
             },
             ChunkOption::ByteSize(value) => format::ChunkOption {
                 kind: format::ChunkOptionKind::ByteSize,
-                value: (*value as u64).to_le(),
+                reserved: 0,
+                value: *value as u64,
             },
         }
     }
@@ -54,6 +58,7 @@ impl ChunkOption {
 
 pub struct FileWriter<R: AlignedBufRead> {
     input: R,
+    start_time: Instant,
     chunk_option: ChunkOption,
     compressor: GenericCompressor,
     total_bytes_in: usize,
@@ -123,12 +128,14 @@ impl<'a, R: AlignedBufRead> Drop for BufWrapper<'a, R> {
 impl<R: AlignedBufRead> FileWriter<R> {
     const MAGIC_NUMBER: &'static [u8; 4] = b"EBI1";
     pub fn new(input: R, compressor: GenericCompressor, chunk_option: ChunkOption) -> Self {
+        let start_time = Instant::now();
         let chunk_footer = ChunkFooter {
             physical_offset: size_of::<FileHeader>() as u64,
             logical_offset: 0,
         };
         Self {
             input,
+            start_time,
             compressor,
             chunk_option,
             chunk_footers: vec![chunk_footer],
@@ -263,7 +270,11 @@ impl<R: AlignedBufRead> FileWriter<R> {
 
         // TODO: calculate `crc` here.
         let crc = 0u32;
-        let mut footer2 = FileFooter2 { crc };
+
+        let mut footer2 = FileFooter2 {
+            compression_elapsed_time_nano_secs: 0, // must be written later
+            crc,
+        };
 
         f.write_all(footer2.to_le().as_bytes())
     }
@@ -272,6 +283,27 @@ impl<R: AlignedBufRead> FileWriter<R> {
         let footer_offset: u64 = (size_of::<FileHeader>() + self.total_bytes_out()) as u64;
         f.write_all(&footer_offset.to_le_bytes())?;
 
+        Ok(())
+    }
+
+    pub fn elapsed_time(&self) -> std::time::Duration {
+        self.start_time.elapsed()
+    }
+
+    pub fn elapsed_time_slot_offset(&self) -> usize {
+        let footer_offset = size_of::<FileHeader>() + self.total_bytes_out();
+        let slot_offset = size_of::<FileFooter0>()
+            + self.n_chunks() * size_of::<ChunkFooter>()
+            + offset_of!(FileFooter2, compression_elapsed_time_nano_secs);
+
+        footer_offset + slot_offset
+    }
+
+    /// Writes the elapsed time from the start of the compression to the given writer.
+    /// Caller must ensure that the writer has already seeked to the elapsed_time_slot
+    pub fn write_elapsed_time<W: Write>(&self, mut f: W) -> io::Result<()> {
+        let elapsed_time = self.elapsed_time();
+        f.write_all(&elapsed_time.as_nanos().to_le_bytes())?;
         Ok(())
     }
 }
@@ -410,6 +442,8 @@ mod tests {
         let footer_offset_slot_offset = file_writer.footer_offset_slot_offset();
         let mut dest_vec = out_f.into_inner();
         file_writer.write_footer_offset(&mut dest_vec[footer_offset_slot_offset..])?;
+        let elapsed_time_slot_offset = file_writer.elapsed_time_slot_offset();
+        file_writer.write_elapsed_time(&mut dest_vec[elapsed_time_slot_offset..])?;
 
         let file_header = FileHeader::try_from_le_bytes(&dest_vec[..]);
         match file_header {
@@ -423,8 +457,9 @@ mod tests {
             file_header.magic_number,
             *FileWriter::<AlignedBufReader<Cursor<Vec<u8>>>>::MAGIC_NUMBER
         );
+        let version = file_header.version;
         assert_eq!(
-            unsafe { addr_of!(file_header.version).read_unaligned() },
+            version,
             [
                 env!("CARGO_PKG_VERSION_MAJOR"),
                 env!("CARGO_PKG_VERSION_MINOR"),

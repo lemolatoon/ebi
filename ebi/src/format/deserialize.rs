@@ -59,12 +59,10 @@ impl TryFromLeBytes for FileHeader {
             bytes[buf_cursor + 3],
         ];
         buf_cursor += size_of::<[u8; 4]>();
-        let version = [
-            u16::from_le_bytes([bytes[buf_cursor], bytes[buf_cursor + 1]]),
-            u16::from_le_bytes([bytes[buf_cursor + 2], bytes[buf_cursor + 3]]),
-            u16::from_le_bytes([bytes[buf_cursor + 4], bytes[buf_cursor + 5]]),
-        ];
-        buf_cursor += size_of::<[u16; 3]>();
+
+        let config = FileConfig::try_from_le_bytes(&bytes[buf_cursor..])?;
+        buf_cursor += size_of::<FileConfig>();
+
         let footer_offset = u64::from_le_bytes([
             bytes[buf_cursor],
             bytes[buf_cursor + 1],
@@ -76,7 +74,12 @@ impl TryFromLeBytes for FileHeader {
             bytes[buf_cursor + 7],
         ]);
         buf_cursor += size_of::<u64>();
-        let config = FileConfig::try_from_le_bytes(&bytes[buf_cursor..])?;
+
+        let version = [
+            u16::from_le_bytes([bytes[buf_cursor], bytes[buf_cursor + 1]]),
+            u16::from_le_bytes([bytes[buf_cursor + 2], bytes[buf_cursor + 3]]),
+            u16::from_le_bytes([bytes[buf_cursor + 4], bytes[buf_cursor + 5]]),
+        ];
 
         Ok(Self {
             magic_number,
@@ -93,9 +96,11 @@ impl TryFromLeBytes for FileConfig {
         let mut buf_cursor = 0;
         let field_type = FieldType::try_from_le_bytes(&bytes[buf_cursor..])?;
         buf_cursor += size_of::<FieldType>();
-        let chunk_option = ChunkOption::try_from_le_bytes(&bytes[buf_cursor..])?;
-        buf_cursor += size_of::<ChunkOption>();
+
         let compression_scheme = CompressionScheme::try_from_le_bytes(&bytes[buf_cursor..])?;
+        buf_cursor += size_of::<CompressionScheme>();
+
+        let chunk_option = ChunkOption::try_from_le_bytes(&bytes[buf_cursor..])?;
 
         Ok(Self {
             field_type,
@@ -141,6 +146,9 @@ impl TryFromLeBytes for ChunkOption {
         let kind = ChunkOptionKind::try_from_le_bytes(&bytes[buf_cursor..])?;
         buf_cursor += size_of::<ChunkOptionKind>();
 
+        // Skip reserved field
+        buf_cursor += 1;
+
         let value = u64::from_le_bytes([
             bytes[buf_cursor],
             bytes[buf_cursor + 1],
@@ -152,7 +160,11 @@ impl TryFromLeBytes for ChunkOption {
             bytes[buf_cursor + 7],
         ]);
 
-        Ok(Self { kind, value })
+        Ok(Self {
+            kind,
+            reserved: 0,
+            value,
+        })
     }
 }
 
@@ -205,9 +217,16 @@ impl FromLeBytes for FileFooter0 {
 
 impl FromLeBytes for FileFooter2 {
     fn from_le_bytes(bytes: &[u8]) -> Self {
+        let compression_elapsed_time_nano_secs = u128::from_le_bytes([
+            bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5], bytes[6], bytes[7],
+            bytes[8], bytes[9], bytes[10], bytes[11], bytes[12], bytes[13], bytes[14], bytes[15],
+        ]);
         let crc = u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]);
 
-        Self { crc }
+        Self {
+            compression_elapsed_time_nano_secs,
+            crc,
+        }
     }
 }
 
