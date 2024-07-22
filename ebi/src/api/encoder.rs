@@ -1,6 +1,6 @@
 use std::{
     fs::File,
-    io::{Cursor, Read, Seek, Write},
+    io::{Cursor, Read, Seek, SeekFrom, Write},
     mem::size_of_val,
     path::Path,
 };
@@ -9,7 +9,7 @@ use thiserror::Error;
 
 use crate::{
     compressor::CompressorConfig,
-    encoder::ChunkOption,
+    encoder::{ChunkOption, FileWriter},
     io::aligned_buf_reader::{AlignedBufRead, AlignedBufReader, AlignedByteSliceBufReader},
 };
 
@@ -76,6 +76,14 @@ pub struct EncoderOutput<W: Write + Seek> {
 impl<W: Write + Seek> EncoderOutput<W> {
     pub fn from_writer(writer: W) -> Self {
         Self { inner: writer }
+    }
+
+    fn writer_mut(&mut self) -> &mut W {
+        &mut self.inner
+    }
+
+    pub fn into_inner(self) -> W {
+        self.inner
     }
 }
 
@@ -152,7 +160,7 @@ impl<R: AlignedBufRead> AppendableEncoderInput<R> {
     }
 }
 
-unsafe impl AlignedBufRead for AppendableEncoderInput<AlignedBufReader<File>> {
+unsafe impl<R: AlignedBufRead> AlignedBufRead for AppendableEncoderInput<R> {
     fn fill_buf(&mut self) -> std::io::Result<&[u8]> {
         let Self {
             inner,
@@ -197,10 +205,8 @@ unsafe impl AlignedBufRead for AppendableEncoderInput<AlignedBufReader<File>> {
 }
 
 pub struct Encoder<R: AlignedBufRead, W: Write + Seek> {
-    input: AppendableEncoderInput<R>,
+    file_writer: FileWriter<AppendableEncoderInput<R>>,
     output: EncoderOutput<W>,
-    chunk_option: ChunkOption,
-    compressor_config: CompressorConfig,
 }
 
 impl<R: AlignedBufRead, W: Write + Seek> Encoder<R, W> {
@@ -220,20 +226,132 @@ impl<R: AlignedBufRead, W: Write + Seek> Encoder<R, W> {
         compressor_config: impl Into<CompressorConfig>,
         capacity: usize,
     ) -> Self {
+        let input = AppendableEncoderInput::with_capacity(input.inner, capacity);
         let compressor_config = compressor_config.into();
+        let file_writer = FileWriter::new(input, compressor_config, chunk_option);
         Self {
-            input: AppendableEncoderInput::with_capacity(input.inner, capacity),
+            file_writer,
             output,
-            chunk_option,
-            compressor_config,
         }
     }
 
     pub fn append(&mut self, additional_data: f64) -> Result<(), AppendError> {
-        self.input.append(additional_data)
+        self.file_writer.input_mut().append(additional_data)
     }
 
     pub fn bulk_append(&mut self, additional_data: &[f64]) -> Result<(), AppendError> {
-        self.input.bulk_append(additional_data)
+        self.file_writer.input_mut().bulk_append(additional_data)
+    }
+
+    /// Encode the data.
+    /// This will write the data to the Output.
+    /// # Errors
+    /// This function will return an error if I/O Error happends.
+    /// The output will be in an invalid state if an error occurs.
+    pub fn encode(&mut self) -> std::io::Result<()> {
+        let Self {
+            file_writer,
+            output,
+        } = self;
+        // write header leaving footer offset blank
+        file_writer.write_header(output.writer_mut())?;
+
+        let mut compressor = None;
+        // loop until there are no data left
+        while let Some(mut chunk_writer) =
+            file_writer.chunk_writer_with_compressor(compressor.take())
+        {
+            chunk_writer.write(output.writer_mut())?;
+            output.writer_mut().flush()?;
+
+            compressor = Some(chunk_writer.into_compressor());
+        }
+
+        file_writer.write_footer(output.writer_mut())?;
+        let footer_offset_slot_offset = file_writer.footer_offset_slot_offset();
+        output
+            .writer_mut()
+            .seek(SeekFrom::Start(footer_offset_slot_offset as u64))?;
+        file_writer.write_footer_offset(output.writer_mut())?;
+
+        let elapsed_time_slot_offset = file_writer.elapsed_time_slot_offset();
+        output
+            .writer_mut()
+            .seek(SeekFrom::Start(elapsed_time_slot_offset as u64))?;
+        file_writer.write_elapsed_time(output.writer_mut())?;
+        // you can flush if you want
+        output.writer_mut().flush()?;
+
+        Ok(())
+    }
+
+    pub fn output(&self) -> &EncoderOutput<W> {
+        &self.output
+    }
+
+    pub fn into_output(self) -> EncoderOutput<W> {
+        self.output
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::mem::size_of;
+
+    use rand::Rng;
+
+    use crate::{compressor::CompressorConfig, encoder::ChunkOption};
+
+    use super::{Encoder, EncoderInput, EncoderOutput};
+
+    fn generate_and_write_random_f64(n: usize) -> Vec<f64> {
+        let mut rng = rand::thread_rng();
+        let mut random_values: Vec<f64> = Vec::with_capacity(n);
+
+        for i in 0..n {
+            if rng.gen_bool(0.5) && random_values.last().is_some() {
+                random_values.push(random_values[i - 1]);
+            } else {
+                random_values.push(rng.gen());
+            }
+        }
+
+        random_values
+    }
+
+    #[test]
+    fn encode_test() {
+        let header = b"my_header".to_vec().into_boxed_slice();
+        let compressor_config = CompressorConfig::uncompressed()
+            .capacity(8000)
+            .header(header)
+            .build();
+        for n in [1003, 10003, 100004, 100005] {
+            #[cfg(miri)] // miri is too slow
+            if n > 1003 {
+                continue;
+            }
+
+            let random_values = generate_and_write_random_f64(n);
+
+            let input = EncoderInput::from_f64_slice(&random_values);
+            let output = EncoderOutput::from_vec(Vec::with_capacity(n));
+            let chunk_option = ChunkOption::RecordCount(1024 * 3);
+            let mut encoder = Encoder::new(input, output, chunk_option, compressor_config.clone());
+
+            for v in generate_and_write_random_f64(1000) {
+                encoder.append(v).unwrap();
+            }
+            encoder.bulk_append(&[1.0, 2.0, 3.0]).unwrap();
+
+            encoder.encode().unwrap();
+
+            let output = encoder.into_output().into_vec();
+
+            assert!(
+                (random_values.len() + 1000) * size_of::<f64>() < output.len() * size_of::<u8>() ,
+                "output must be bigger than input because this is uncompressed: input({}), output({})", (random_values.len() + 1000) * size_of::<f64>(), output.len() * size_of::<u8>()
+            );
+        }
     }
 }

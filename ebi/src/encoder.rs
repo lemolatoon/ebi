@@ -81,6 +81,18 @@ impl<'a, R: AlignedBufRead> BufWrapper<'a, R> {
     pub fn new(input: &'a mut R) -> Result<(Self, bool), io::Error> {
         let buf: &[u8] = input.fill_buf()?;
         let reaches_eof = buf.is_empty();
+
+        if reaches_eof {
+            return Ok((
+                Self {
+                    input,
+                    buf: &[],
+                    n_consumed_bytes: 0,
+                },
+                true,
+            ));
+        }
+
         let buf_ptr = buf.as_ptr().cast::<f64>();
         let len = size_of_val(buf) / size_of::<f64>();
         // Safety:
@@ -143,6 +155,14 @@ impl<R: AlignedBufRead> FileWriter<R> {
             total_bytes_out: 0,
             reaches_eof: false,
         }
+    }
+
+    pub fn input(&self) -> &R {
+        &self.input
+    }
+
+    pub fn input_mut(&mut self) -> &mut R {
+        &mut self.input
     }
 
     pub fn file_header_size(&self) -> usize {
