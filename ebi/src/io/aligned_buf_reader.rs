@@ -15,7 +15,46 @@ use std::{
 /// - e.g. If you read 4 bytes from the buffer, the buffer can be not aligned.
 /// - Unless you read the bytes of not multiple of 8 bytes, the buffer must be always aligned.
 pub unsafe trait AlignedBufRead {
+    /// Returns the contents of the internal buffer, filling it with more data
+    /// from the inner reader if it is empty.
+    ///
+    /// This function is a lower-level call. It needs to be paired with the
+    /// [`consume`] method to function properly. When calling this
+    /// method, none of the contents will be "read" in the sense that later
+    /// calling `read` may return the same contents. As such, [`consume`] must
+    /// be called with the number of bytes that are consumed from this buffer to
+    /// ensure that the bytes are never returned twice.
+    ///
+    /// [`consume`]: BufRead::consume
+    ///
+    /// An empty buffer returned indicates that the stream has reached EOF.
+    ///
+    /// # Errors
+    ///
+    /// This function will return an I/O error if the underlying reader was
+    /// read, but returned an error.
+    ///
     fn fill_buf(&mut self) -> io::Result<&[u8]>;
+
+    /// Tells this buffer that `amt` bytes have been consumed from the buffer,
+    /// so they should no longer be returned in calls to `read`.
+    ///
+    /// This function is a lower-level call. It needs to be paired with the
+    /// [`fill_buf`] method to function properly. This function does
+    /// not perform any I/O, it simply informs this object that some amount of
+    /// its buffer, returned from [`fill_buf`], has been consumed and should
+    /// no longer be returned. As such, this function may do odd things if
+    /// [`fill_buf`] isn't called before calling it.
+    ///
+    /// The `amt` must be `<=` the number of bytes in the buffer returned by
+    /// [`fill_buf`].
+    ///
+    /// # Examples
+    ///
+    /// Since `consume()` is meant to be used with [`fill_buf`],
+    /// that method's example includes an example of `consume()`.
+    ///
+    /// [`fill_buf`]: BufRead::fill_buf
     fn consume(&mut self, amt: usize);
 }
 
@@ -475,6 +514,103 @@ impl<R: ?Sized + Read> Read for AlignedBufReader<R> {
         let nread = inner_buf.len();
         self.discard_buffer();
         Ok(nread + self.inner.read_to_end(buf)?)
+    }
+}
+
+pub struct AlignedByteSliceBufReader<'a> {
+    inner: &'a [u8],
+}
+
+impl AlignedByteSliceBufReader<'_> {
+    /// Creates a new `AlignedByteSliceBufReader` from a byte slice.
+    /// If the slice is not aligned to 8 bytes, it returns `None`.
+    /// Otherwise, it returns `Some(AlignedByteSliceBufReader)`.
+    pub fn new(inner: &[u8]) -> Option<AlignedByteSliceBufReader> {
+        if inner.as_ptr().cast::<u64>().is_aligned() {
+            Some(AlignedByteSliceBufReader { inner })
+        } else {
+            None
+        }
+    }
+
+    pub fn new_from_u64_slice<'a>(u64_slice: &'a [u64]) -> AlignedByteSliceBufReader {
+        // Safety:
+        // u64 slice always can be interpreted as u8 slice.
+        let u8_slice: &'a [u8] =
+            unsafe { slice::from_raw_parts(u64_slice.as_ptr().cast::<u8>(), u64_slice.len() * 8) };
+
+        // Safety:
+        // u8_slice is aligned to 8 bytes because u64 slice is aligned to 8 bytes.
+        unsafe { AlignedByteSliceBufReader::new_unchecked(u8_slice) }
+    }
+
+    pub fn new_from_f64_slice<'a>(f64_slice: &'a [f64]) -> AlignedByteSliceBufReader {
+        // Safety:
+        // f64 slice always can be interpreted as u8 slice.
+        let u8_slice: &'a [u8] =
+            unsafe { slice::from_raw_parts(f64_slice.as_ptr().cast::<u8>(), f64_slice.len() * 8) };
+
+        // Safety:
+        // u8_slice is aligned to 8 bytes because f64 slice is aligned to 8 bytes.
+        unsafe { AlignedByteSliceBufReader::new_unchecked(u8_slice) }
+    }
+
+    /// Creates a new `AlignedByteSliceBufReader` from a byte slice without checking alignment.
+    /// # Safety
+    /// The caller must ensure that the slice is aligned to 8 bytes.
+    pub unsafe fn new_unchecked(inner: &[u8]) -> AlignedByteSliceBufReader {
+        debug_assert!(
+            inner.as_ptr().cast::<u64>().is_aligned(),
+            "inner must be aligned to 8 bytes, but it is not.({:p})",
+            inner.as_ptr()
+        );
+        AlignedByteSliceBufReader { inner }
+    }
+}
+
+impl<'a> Read for AlignedByteSliceBufReader<'a> {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        Read::read(&mut self.inner, buf)
+    }
+
+    fn read_vectored(&mut self, bufs: &mut [IoSliceMut<'_>]) -> io::Result<usize> {
+        Read::read_vectored(&mut self.inner, bufs)
+    }
+
+    fn read_to_end(&mut self, buf: &mut Vec<u8>) -> io::Result<usize> {
+        Read::read_to_end(&mut self.inner, buf)
+    }
+
+    fn read_to_string(&mut self, buf: &mut String) -> io::Result<usize> {
+        Read::read_to_string(&mut self.inner, buf)
+    }
+
+    fn read_exact(&mut self, buf: &mut [u8]) -> io::Result<()> {
+        Read::read_exact(&mut self.inner, buf)
+    }
+}
+
+impl<'a> BufRead for AlignedByteSliceBufReader<'a> {
+    #[inline]
+    fn fill_buf(&mut self) -> io::Result<&[u8]> {
+        BufRead::fill_buf(&mut self.inner)
+    }
+
+    #[inline]
+    fn consume(&mut self, amt: usize) {
+        BufRead::consume(&mut self.inner, amt);
+    }
+}
+
+// Safety:
+// AlignedByteSliceBufReader's constructor ensures that buffer is aligned.
+unsafe impl<'a> AlignedBufRead for AlignedByteSliceBufReader<'a> {
+    fn fill_buf(&mut self) -> io::Result<&[u8]> {
+        BufRead::fill_buf(self)
+    }
+
+    fn consume(&mut self, amt: usize) {
+        BufRead::consume(self, amt)
     }
 }
 

@@ -1,9 +1,11 @@
+use derive_builder::Builder;
 use gorilla::GorillaCompressor;
+use quick_impl::QuickImpl;
 use run_length::RunLengthCompressor;
 // use run_length::RunLengthCompressor;
 use uncompressed::UncompressedCompressor;
 
-use crate::format;
+use crate::format::{self, CompressionScheme};
 
 pub mod gorilla;
 pub mod run_length;
@@ -94,6 +96,130 @@ impl GenericCompressor {
 }
 
 impl_generic_compressor!(GenericCompressor, Uncompressed, RLE, Gorilla);
+
+#[derive(QuickImpl, Debug, Clone)]
+pub enum CompressorConfig {
+    #[quick_impl(impl From)]
+    Uncompressed(UncompressedCompressorConfig),
+    #[quick_impl(impl From)]
+    RLE(RunLengthCompressorConfig),
+    #[quick_impl(impl From)]
+    Gorilla(GorillaCompressorConfig),
+}
+
+impl CompressorConfig {
+    pub fn build(self) -> GenericCompressor {
+        match self {
+            CompressorConfig::Uncompressed(c) => GenericCompressor::Uncompressed({
+                let mut comp = UncompressedCompressor::new(c.capacity.0);
+                if let Some(header) = c.header {
+                    comp = comp.header(header);
+                }
+                comp
+            }),
+            CompressorConfig::RLE(c) => {
+                GenericCompressor::RLE(RunLengthCompressor::with_capacity(c.capacity.0))
+            }
+            CompressorConfig::Gorilla(c) => {
+                GenericCompressor::Gorilla(GorillaCompressor::with_capacity(c.capacity.0))
+            }
+        }
+    }
+
+    pub fn compression_scheme(&self) -> CompressionScheme {
+        CompressionScheme::from(self)
+    }
+}
+
+impl From<&CompressorConfig> for CompressionScheme {
+    fn from(value: &CompressorConfig) -> Self {
+        match value {
+            CompressorConfig::Uncompressed(_) => Self::Uncompressed,
+            CompressorConfig::RLE(_) => Self::RLE,
+            CompressorConfig::Gorilla(_) => Self::Gorilla,
+        }
+    }
+}
+
+impl CompressorConfig {
+    pub fn uncompressed() -> UncompressedCompressorConfigBuilder {
+        UncompressedCompressorConfigBuilder::default()
+    }
+
+    pub fn rle() -> RunLengthCompressorConfigBuilder {
+        RunLengthCompressorConfigBuilder::default()
+    }
+
+    pub fn gorilla() -> GorillaCompressorConfigBuilder {
+        GorillaCompressorConfigBuilder::default()
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+struct Capacity(usize);
+
+const DEFAULT_CAPACITY: usize = 1024 * 8;
+impl Default for Capacity {
+    fn default() -> Self {
+        Capacity(DEFAULT_CAPACITY)
+    }
+}
+impl From<usize> for Capacity {
+    fn from(value: usize) -> Self {
+        Capacity(value)
+    }
+}
+
+#[derive(Builder, Debug, Clone)]
+#[builder(pattern = "owned", build_fn(skip))]
+pub struct UncompressedCompressorConfig {
+    #[builder(setter(into), default)]
+    capacity: Capacity,
+    #[builder(setter(into, strip_option), default)]
+    header: Option<Box<[u8]>>,
+}
+
+impl UncompressedCompressorConfigBuilder {
+    pub fn build(self) -> UncompressedCompressorConfig {
+        let Self { capacity, header } = self;
+        UncompressedCompressorConfig {
+            capacity: capacity.unwrap_or(Capacity::default()),
+            header: header.unwrap_or(None),
+        }
+    }
+}
+
+#[derive(Builder, Debug, Clone, Copy)]
+#[builder(pattern = "owned", build_fn(skip))]
+pub struct RunLengthCompressorConfig {
+    #[builder(setter(into), default)]
+    capacity: Capacity,
+}
+
+impl RunLengthCompressorConfigBuilder {
+    pub fn build(self) -> RunLengthCompressorConfig {
+        let Self { capacity } = self;
+        RunLengthCompressorConfig {
+            capacity: capacity.unwrap_or(Capacity::default()),
+        }
+    }
+}
+
+#[derive(Builder, Debug, Clone, Copy)]
+#[builder(pattern = "owned", build_fn(skip))]
+pub struct GorillaCompressorConfig {
+    #[builder(setter(into), default)]
+    capacity: Capacity,
+}
+
+impl GorillaCompressorConfigBuilder {
+    pub fn build(self) -> GorillaCompressorConfig {
+        let Self { capacity } = self;
+        GorillaCompressorConfig {
+            capacity: capacity.unwrap_or(Capacity::default()),
+        }
+    }
+}
 
 #[cfg(test)]
 mod tests {

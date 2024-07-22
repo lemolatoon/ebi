@@ -1,7 +1,7 @@
 use cfg_if::cfg_if;
 
 use crate::{
-    compressor::GenericCompressor,
+    compressor::{CompressorConfig, GenericCompressor},
     format::{
         self,
         serialize::{AsBytes, ToLe},
@@ -60,7 +60,7 @@ pub struct FileWriter<R: AlignedBufRead> {
     input: R,
     start_time: Instant,
     chunk_option: ChunkOption,
-    compressor: GenericCompressor,
+    compressor: CompressorConfig,
     total_bytes_in: usize,
     total_bytes_out: usize,
     /// The vector of `ChunkFooter`, including the next `ChunkFooter`
@@ -127,7 +127,7 @@ impl<'a, R: AlignedBufRead> Drop for BufWrapper<'a, R> {
 
 impl<R: AlignedBufRead> FileWriter<R> {
     const MAGIC_NUMBER: &'static [u8; 4] = b"EBI1";
-    pub fn new(input: R, compressor: GenericCompressor, chunk_option: ChunkOption) -> Self {
+    pub fn new(input: R, compressor: CompressorConfig, chunk_option: ChunkOption) -> Self {
         let start_time = Instant::now();
         let chunk_footer = ChunkFooter {
             physical_offset: size_of::<FileHeader>() as u64,
@@ -207,7 +207,7 @@ impl<R: AlignedBufRead> FileWriter<R> {
         if self.reaches_eof {
             return None;
         }
-        let mut compressor = compressor.unwrap_or_else(|| self.compressor.clone());
+        let mut compressor = compressor.unwrap_or_else(|| self.compressor.clone().build());
         compressor.reset();
         Some(ChunkWriter::new(self, compressor))
     }
@@ -404,9 +404,7 @@ mod tests {
         ChunkOptionKind, CompressionScheme,
     };
 
-    use crate::{
-        compressor::uncompressed::UncompressedCompressor, io::aligned_buf_reader::AlignedBufReader,
-    };
+    use crate::io::aligned_buf_reader::AlignedBufReader;
 
     use super::*;
     use std::{
@@ -422,11 +420,14 @@ mod tests {
             slice::from_raw_parts(ptr, data.len() * size_of::<f64>())
         };
         const RECORD_COUNT: usize = 100;
-        let compressor = GenericCompressor::Uncompressed(UncompressedCompressor::new(data.len()));
+        let compressor_config = CompressorConfig::uncompressed()
+            .capacity(data.len())
+            .build()
+            .into();
         let mut in_f = AlignedBufReader::new(u8_data);
         let mut out_f = Cursor::new(Vec::new());
         let chunk_option = ChunkOption::RecordCount(RECORD_COUNT);
-        let mut file_writer = FileWriter::new(&mut in_f, compressor, chunk_option);
+        let mut file_writer = FileWriter::new(&mut in_f, compressor_config, chunk_option);
 
         // write header leaving footer offset blank
         file_writer.write_header(&mut out_f)?;
