@@ -1,7 +1,7 @@
 use std::mem::align_of;
 
 use crate::{
-    decoder::GeneralChunkHandle,
+    decoder::{FileMetadataLike, GeneralChunkHandle},
     format::{
         deserialize::FromLeBytes,
         uncompressed::{NativeUncompressedHeader, UncompressedHeader0},
@@ -19,7 +19,7 @@ pub struct UncompressedReader<'chunk> {
 impl<'chunk> UncompressedReader<'chunk> {
     /// Create a new UncompressedReader.
     /// Caller must guarantee that the input chunk is valid for Uncompressed Chunk.
-    pub fn new(handle: &GeneralChunkHandle, chunk: &'chunk [u8]) -> Self {
+    pub fn new<T: FileMetadataLike>(handle: &GeneralChunkHandle<T>, chunk: &'chunk [u8]) -> Self {
         let chunk_size = handle.chunk_size() as usize;
         let header_head = UncompressedHeader0::from_le_bytes(chunk);
         let header = NativeUncompressedHeader::new(header_head, chunk);

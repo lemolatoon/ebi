@@ -1,4 +1,4 @@
-use crate::decoder::GeneralChunkHandle;
+use crate::decoder::{FileMetadataLike, GeneralChunkHandle};
 
 use super::Reader;
 
@@ -10,7 +10,7 @@ pub struct GorillaReader<'chunk> {
 }
 
 impl<'chunk> GorillaReader<'chunk> {
-    pub fn new(handle: &GeneralChunkHandle, chunk: &'chunk [u8]) -> Self {
+    pub fn new<T: FileMetadataLike>(handle: &GeneralChunkHandle<T>, chunk: &'chunk [u8]) -> Self {
         let number_of_records = handle.number_of_records() as usize;
         let decoder = modified_tsz::GorillaDecoder::new(
             modified_tsz::BufferRefReader::new(chunk),

@@ -118,8 +118,10 @@ fn main() {
         file_footer.compression_elapsed_time_nano_secs() as f64 / 1_000_000.0
     );
 
+    let file_metadata = file_reader.into_metadata().unwrap();
+
     // reading chunk in given buffer
-    let mut chunk_handles = file_reader.chunks_iter().unwrap().peekable();
+    let mut chunk_handles = file_metadata.chunks_iter().peekable();
     chunk_handles
         .peek()
         .unwrap()

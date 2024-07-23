@@ -18,6 +18,73 @@ use crate::format::{
     ChunkFooter, CompressionScheme, FileFooter0, FileFooter2, FileHeader, GeneralChunkHeader,
 };
 
+pub trait FileMetadataLike {
+    fn header(&self) -> &NativeFileHeader;
+    fn footer(&self) -> &NativeFileFooter;
+}
+
+impl<T: FileMetadataLike> FileMetadataLike for &T {
+    fn header(&self) -> &NativeFileHeader {
+        (*self).header()
+    }
+
+    fn footer(&self) -> &NativeFileFooter {
+        (*self).footer()
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub struct Metadata {
+    header: NativeFileHeader,
+    footer: NativeFileFooter,
+}
+
+impl FileMetadataLike for Metadata {
+    fn header(&self) -> &NativeFileHeader {
+        &self.header
+    }
+
+    fn footer(&self) -> &NativeFileFooter {
+        &self.footer
+    }
+}
+
+impl Metadata {
+    /// Returns an iterator over the chunks in the file.
+    /// If the header or the footer is not read yet, returns `None`.
+    pub fn chunks_iter(&self) -> impl Iterator<Item = GeneralChunkHandle<&Self>> {
+        let n_chunks = self.footer().number_of_chunks() as usize;
+
+        (0..n_chunks).map(move |i| GeneralChunkHandle::new(self, i))
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub struct MetadataRef<'a, 'b> {
+    header: &'a NativeFileHeader,
+    footer: &'b NativeFileFooter,
+}
+
+impl<'a, 'b> MetadataRef<'a, 'b> {
+    /// Returns an iterator over the chunks in the file.
+    /// If the header or the footer is not read yet, returns `None`.
+    pub fn chunks_iter(&self) -> impl Iterator<Item = GeneralChunkHandle<&Self>> {
+        let n_chunks = self.footer().number_of_chunks() as usize;
+
+        (0..n_chunks).map(move |i| GeneralChunkHandle::new(self, i))
+    }
+}
+
+impl FileMetadataLike for MetadataRef<'_, '_> {
+    fn header(&self) -> &NativeFileHeader {
+        self.header
+    }
+
+    fn footer(&self) -> &NativeFileFooter {
+        self.footer
+    }
+}
+
 /// A reader for the file format.
 /// This struct reads the file format from the input stream.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -126,48 +193,41 @@ impl FileReader {
         self.footer.as_ref()
     }
 
-    /// Returns an iterator over the chunks in the file.
+    /// Converts the `FileReader` into `Metadata`.
     /// If the header or the footer is not read yet, returns `None`.
-    pub fn chunks_iter(&self) -> Option<impl Iterator<Item = GeneralChunkHandle<'_>>> {
-        if self.header.is_none() || self.footer.is_none() {
-            return None;
-        }
-
-        let n_chunks = self.footer().unwrap().number_of_chunks() as usize;
-
-        Some((0..n_chunks).map(move |i| GeneralChunkHandle::new(self, i)))
+    pub fn into_metadata(self) -> Option<Metadata> {
+        Some(Metadata {
+            header: self.header?,
+            footer: self.footer?,
+        })
     }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
-pub struct GeneralChunkHandle<'reader> {
-    file_reader: &'reader FileReader,
+pub struct GeneralChunkHandle<T: FileMetadataLike> {
+    file_metadata: T,
     chunk_index: usize,
 }
 
-impl<'reader> GeneralChunkHandle<'reader> {
+impl<T: FileMetadataLike> GeneralChunkHandle<T> {
     /// Creates a new `GeneralChunkHandle`.
     /// Caller must guarantee that the `chunk_index` is valid.
     /// `chunk_index` is valid if `0 <= chunk_index < number_of_chunks`.
     ///     
     /// Caller must fetch the header and the footer before creating `GeneralChunkHandle`.
-    fn new(file_reader: &'reader FileReader, chunk_index: usize) -> Self {
+    fn new(file_metadata: T, chunk_index: usize) -> Self {
         Self {
-            file_reader,
+            file_metadata,
             chunk_index,
         }
     }
 
     pub fn header(&self) -> &NativeFileHeader {
-        // Safety:
-        // `header` is always read before `GenericChunkHandle` is created.
-        unsafe { self.file_reader.header().unwrap_unchecked() }
+        self.file_metadata.header()
     }
 
     pub fn footer(&self) -> &NativeFileFooter {
-        // Safety:
-        // `footer` is always read before `GenericChunkHandle` is created.
-        unsafe { self.file_reader.footer().unwrap_unchecked() }
+        self.file_metadata.footer()
     }
 
     pub fn chunk_footer(&self) -> &NativeChunkFooter {
@@ -294,10 +354,10 @@ impl<'reader> GeneralChunkHandle<'reader> {
         Ok(size_of::<GeneralChunkHeader>() + header_size)
     }
 
-    pub fn make_chunk_reader<'chunk>(
-        &'reader self,
+    pub fn make_chunk_reader<'handle, 'chunk>(
+        &'handle self,
         input: &'chunk [u64],
-    ) -> Result<GeneralChunkReader<'reader, 'chunk>> {
+    ) -> Result<GeneralChunkReader<'handle, 'chunk, T>> {
         // Safety:
         // - we can transmute u64 slice as u8 slice safely.
         let input: &'chunk [u8] =

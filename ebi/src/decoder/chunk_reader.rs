@@ -7,17 +7,17 @@ use std::mem::{align_of, size_of};
 use crate::format::native::{NativeFileFooter, NativeFileHeader};
 use crate::format::{CompressionScheme, GeneralChunkHeader};
 
-use super::Result;
 use super::{error::DecoderError, GeneralChunkHandle};
+use super::{FileMetadataLike, Result};
 
 #[derive(Debug, Clone, PartialEq, PartialOrd)]
-pub struct GeneralChunkReader<'reader, 'chunk> {
-    handle: &'reader GeneralChunkHandle<'reader>,
+pub struct GeneralChunkReader<'handle, 'chunk, T: FileMetadataLike> {
+    handle: &'handle GeneralChunkHandle<T>,
     chunk: &'chunk [u8],
     reader: GeneralChunkReaderInner<'chunk>,
 }
 
-impl<'reader, 'chunk> GeneralChunkReader<'reader, 'chunk> {
+impl<'handle, 'chunk, T: FileMetadataLike> GeneralChunkReader<'handle, 'chunk, T> {
     /// Create a new GeneralChunkReader.
     /// Caller must guarantee that the input chunk is valid.
     /// # chunk format
@@ -27,7 +27,7 @@ impl<'reader, 'chunk> GeneralChunkReader<'reader, 'chunk> {
     /// The chunk begins with the header including the method specific header.
     /// The header is followed by the data.
     /// The data is 64bit aligned, so there may be padding between the header and the data.
-    pub fn new(handle: &'reader GeneralChunkHandle<'reader>, chunk: &'chunk [u8]) -> Result<Self> {
+    pub fn new(handle: &'handle GeneralChunkHandle<T>, chunk: &'chunk [u8]) -> Result<Self> {
         let chunk_size = handle.chunk_size() as usize;
         if chunk.len() < chunk_size.next_multiple_of(align_of::<u64>()) / size_of::<u64>() + 1 {
             return Err(DecoderError::BufferTooSmall);
@@ -81,8 +81,8 @@ pub enum GeneralChunkReaderInner<'chunk> {
 }
 
 impl<'chunk> GeneralChunkReaderInner<'chunk> {
-    pub fn new(
-        handle: &GeneralChunkHandle,
+    pub fn new<T: FileMetadataLike>(
+        handle: &GeneralChunkHandle<T>,
         chunk: &'chunk [u8],
         compression_scheme: CompressionScheme,
     ) -> Self {

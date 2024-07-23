@@ -207,8 +207,10 @@ mod tests {
             )
         }
 
+        let metadata = file_reader.into_metadata().unwrap();
+
         // reading chunk in given buffer
-        let chunk_handles = file_reader.chunks_iter().unwrap();
+        let chunk_handles = metadata.chunks_iter();
         let mut buf = Vec::new();
         for (i, mut chunk_handle) in chunk_handles.enumerate() {
             let chunk_size = chunk_handle.chunk_size() as usize;
