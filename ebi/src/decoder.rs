@@ -1,5 +1,6 @@
 pub mod chunk_reader;
 pub mod error;
+pub mod query;
 
 use chunk_reader::GeneralChunkReader;
 use error::DecoderError;
@@ -259,6 +260,30 @@ impl<T: FileMetadataLike> GeneralChunkHandle<T> {
             .unwrap_or_else(|| self.footer().number_of_records());
 
         next_physical_offset - logical_offset
+    }
+
+    pub fn logical_record_range(&self) -> std::ops::Range<u64> {
+        let logical_offset = self.chunk_footer().logical_offset();
+        let next_logical_offset = self
+            .footer()
+            .chunk_footers()
+            .get(self.chunk_index + 1)
+            .map(|footer| footer.logical_offset())
+            .unwrap_or_else(|| self.footer().number_of_records());
+
+        logical_offset..next_logical_offset
+    }
+
+    pub fn logical_record_range_u32(&self) -> std::ops::Range<u32> {
+        let logical_offset = self.chunk_footer().logical_offset() as u32;
+        let next_logical_offset =
+            self.footer()
+                .chunk_footers()
+                .get(self.chunk_index + 1)
+                .map(|footer| footer.logical_offset())
+                .unwrap_or_else(|| self.footer().number_of_records()) as u32;
+
+        logical_offset..next_logical_offset
     }
 
     /// Seeks the input stream to the beginning of the chunk.

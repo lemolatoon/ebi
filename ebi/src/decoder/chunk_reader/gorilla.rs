@@ -1,4 +1,4 @@
-use crate::decoder::{FileMetadataLike, GeneralChunkHandle};
+use crate::decoder::{query::QueryExecutor, FileMetadataLike, GeneralChunkHandle};
 
 use super::Reader;
 
@@ -51,6 +51,8 @@ impl<'chunk> Reader for GorillaReader<'chunk> {
         &()
     }
 }
+
+impl QueryExecutor for GorillaReader<'_> {}
 
 mod modified_tsz {
     //! This original implementation is from tsz crate. It is modified to just use the floating point values compression.

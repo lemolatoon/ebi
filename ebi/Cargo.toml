@@ -11,6 +11,7 @@ cfg-if = "1.0"
 tsz = "0.1.4"
 derive_builder = "0.20.0"
 quick-impl = "0.1.0"
+roaring = "0.10.6"
 
 [dev-dependencies]
 criterion = "0.5"

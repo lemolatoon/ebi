@@ -1,7 +1,7 @@
 use std::mem::align_of;
 
 use crate::{
-    decoder::{FileMetadataLike, GeneralChunkHandle},
+    decoder::{query::QueryExecutor, FileMetadataLike, GeneralChunkHandle},
     format::{
         deserialize::FromLeBytes,
         uncompressed::{NativeUncompressedHeader, UncompressedHeader0},
@@ -63,3 +63,5 @@ impl<'a> Reader for UncompressedReader<'a> {
         &self.header
     }
 }
+
+impl QueryExecutor for UncompressedReader<'_> {}

@@ -2,11 +2,15 @@ pub mod gorilla;
 pub mod run_length;
 pub mod uncompressed;
 
+use std::io::{self, Write};
 use std::mem::{align_of, size_of};
+
+use roaring::RoaringBitmap;
 
 use crate::format::native::{NativeFileFooter, NativeFileHeader};
 use crate::format::{CompressionScheme, GeneralChunkHeader};
 
+use super::query::{Predicate, QueryExecutor};
 use super::{error::DecoderError, GeneralChunkHandle};
 use super::{FileMetadataLike, Result};
 
@@ -70,6 +74,52 @@ impl<'handle, 'chunk, T: FileMetadataLike> GeneralChunkReader<'handle, 'chunk, T
 
     pub fn inner_mut(&mut self) -> &mut GeneralChunkReaderInner<'chunk> {
         &mut self.reader
+    }
+
+    /// Scan the values filtered by the bitmask and write the results as IEEE754 double array to the output.
+    ///
+    /// `bitmask` is optional. If it is None, all values are written.
+    ///
+    /// `bitmask`'s index must be global to the whole chunks.
+    pub fn scan(
+        &mut self,
+        output: &mut impl Write,
+        bitmask: Option<&RoaringBitmap>,
+    ) -> io::Result<()> {
+        let logical_offset = self.handle.chunk_footer().logical_offset() as usize;
+        self.reader.scan(output, bitmask, logical_offset)
+    }
+
+    /// Filter the values by the predicate and return the result as a bitmask.
+    /// The result bitmask is global to the whole chunks.
+    /// But the result bitmask is guaranteed to only contain the record offsets in the current chunk.
+    ///
+    /// `bitmask` is optional. If it is None, all values are evaluated by `predicate`.
+    ///
+    /// `bitmask`'s index must be global to the whole chunks.
+    pub fn filter(
+        &mut self,
+        predicate: Predicate,
+        bitmask: Option<&RoaringBitmap>,
+    ) -> RoaringBitmap {
+        let logical_offset = self.handle.chunk_footer().logical_offset() as usize;
+        self.reader.filter(predicate, bitmask, logical_offset)
+    }
+
+    /// Filter the values by the predicate and write the results as IEEE754 double array to the output.
+    ///
+    /// `bitmask` is optional. If it is None, all values are filtered and then scaned.
+    ///
+    /// `bitmask`'s index must be global to the whole chunks.
+    pub fn filter_scan(
+        &mut self,
+        output: &mut impl Write,
+        predicate: Predicate,
+        bitmask: Option<&RoaringBitmap>,
+    ) -> io::Result<()> {
+        let logical_offset = self.handle.chunk_footer().logical_offset() as usize;
+        self.reader
+            .filter_scan(output, predicate, bitmask, logical_offset)
     }
 }
 
@@ -137,6 +187,60 @@ macro_rules! impl_generic_reader {
             pub fn header_size(&self) -> usize {
                 match self {
                     $( $enum_name::$variant(c) => c.header_size(), )*
+                }
+            }
+
+            /// Scan the values filtered by the bitmask and write the results as IEEE754 double array to the output.
+            ///
+            /// `bitmask` is optional. If it is None, all values are written.
+            ///
+            /// `bitmask`'s index is global to the whole chunks.
+            /// That is why `logical_offset` is necessary to access bitmask.
+            pub fn scan(
+                &mut self,
+                output: &mut impl Write,
+                bitmask: Option<&RoaringBitmap>,
+                logical_offset: usize,
+            ) -> io::Result<()> {
+                match self {
+                    $( $enum_name::$variant(c) => c.scan(output, bitmask, logical_offset), )*
+                }
+            }
+
+            /// Filter the values by the predicate and return the result as a bitmask.
+            /// The result bitmask is global to the whole chunks.
+            /// But the result bitmask is guaranteed to only contain the record offsets in the current chunk.
+            ///
+            /// `bitmask` is optional. If it is None, all values are evaluated by `predicate`.
+            ///
+            /// `bitmask`'s index is global to the whole chunks.
+            /// That is why `logical_offset` is necessary to access bitmask.
+            pub fn filter(
+                &mut self,
+                predicate: Predicate,
+                bitmask: Option<&RoaringBitmap>,
+                logical_offset: usize,
+            ) -> RoaringBitmap {
+                match self {
+                    $( $enum_name::$variant(c) => c.filter(predicate, bitmask, logical_offset), )*
+                }
+            }
+
+            /// Filter the values by the predicate and write the results as IEEE754 double array to the output.
+            ///
+            /// `bitmask` is optional. If it is None, all values are filtered and then scaned.
+            ///
+            /// `bitmask`'s index is global to the whole chunks.
+            /// That is why `logical_offset` is necessary to access bitmask.
+            pub fn filter_scan(
+                &mut self,
+                output: &mut impl Write,
+                predicate: Predicate,
+                bitmask: Option<&RoaringBitmap>,
+                logical_offset: usize,
+            ) -> io::Result<()> {
+                match self {
+                    $( $enum_name::$variant(c) => c.filter_scan(output, predicate, bitmask, logical_offset), )*
                 }
             }
         }

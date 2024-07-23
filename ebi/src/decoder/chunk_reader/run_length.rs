@@ -3,7 +3,7 @@ use std::{mem::size_of, slice};
 use cfg_if::cfg_if;
 
 use crate::{
-    decoder::{FileMetadataLike, GeneralChunkHandle},
+    decoder::{query::QueryExecutor, FileMetadataLike, GeneralChunkHandle},
     format::{deserialize::FromLeBytes, run_length::RunLengthHeader},
 };
 
@@ -115,3 +115,6 @@ impl<'chunk> Reader for RunLengthReader<'chunk> {
         &self.header
     }
 }
+
+// TODO: Implement specialized scan
+impl QueryExecutor for RunLengthReader<'_> {}
