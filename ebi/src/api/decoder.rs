@@ -56,6 +56,10 @@ impl<W: Write> DecoderOutput<W> {
     pub fn writer_mut(&mut self) -> &mut W {
         &mut self.inner
     }
+
+    pub fn into_writer(self) -> W {
+        self.inner
+    }
 }
 
 impl DecoderOutput<File> {
@@ -66,9 +70,9 @@ impl DecoderOutput<File> {
 }
 
 impl DecoderOutput<Cursor<Vec<u8>>> {
-    pub fn from_vec() -> Self {
+    pub fn from_vec(vec: Vec<u8>) -> Self {
         Self {
-            inner: Cursor::new(Vec::new()),
+            inner: Cursor::new(vec),
         }
     }
 }
@@ -164,7 +168,7 @@ impl<R: Read + Seek> Decoder<R> {
         {
             let mut chunk_range_bitmap = RoaringBitmap::new();
             chunk_range_bitmap.insert_range(chunk_handle.logical_record_range_u32());
-            if !bitmask.is_some_and(|bm| (bm & chunk_range_bitmap).is_empty()) {
+            if bitmask.is_some_and(|bm| (bm & chunk_range_bitmap).is_empty()) {
                 continue;
             }
 
@@ -202,7 +206,7 @@ impl<R: Read + Seek> Decoder<R> {
         {
             let mut chunk_range_bitmap = RoaringBitmap::new();
             chunk_range_bitmap.insert_range(chunk_handle.logical_record_range_u32());
-            if !bitmask.is_some_and(|bm| (bm & chunk_range_bitmap).is_empty()) {
+            if bitmask.is_some_and(|bm| (bm & chunk_range_bitmap).is_empty()) {
                 continue;
             }
 
@@ -260,13 +264,5 @@ impl<R: Read + Seek> Decoder<R> {
         let chunk_reader = chunk_handle.make_chunk_reader(buffer)?;
 
         Ok(chunk_reader)
-    }
-
-    fn chunk_reader(
-        &mut self,
-        chunk_id: ChunkId,
-    ) -> decoder::Result<GeneralChunkReader<'_, '_, &'static Metadata>> {
-        let chunk_handle = &mut self.chunk_handles[chunk_id.index()];
-        Self::chunk_reader_from_handle(&mut self.input, chunk_handle, &mut self.buffer)
     }
 }

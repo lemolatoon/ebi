@@ -22,9 +22,10 @@ pub trait QueryExecutor: Reader {
     ) -> io::Result<()> {
         for (i, v) in self.decompress().iter().enumerate() {
             let record_offset = logical_offset + i;
-            if bitmask.is_some_and(|bm| bm.contains(record_offset as u32)) {
-                output.write_all(&v.to_ne_bytes())?;
+            if bitmask.is_some_and(|bm| !bm.contains(record_offset as u32)) {
+                continue;
             }
+            output.write_all(&v.to_ne_bytes())?;
         }
 
         Ok(())
@@ -47,7 +48,12 @@ pub trait QueryExecutor: Reader {
         let mut result = RoaringBitmap::new();
         for (i, v) in self.decompress().iter().enumerate() {
             let record_offset = logical_offset + i;
-            if bitmask.is_some_and(|bm| bm.contains(record_offset as u32)) && predicate.eval(*v) {
+
+            if bitmask.is_some_and(|bm| !bm.contains(record_offset as u32)) {
+                continue;
+            }
+
+            if predicate.eval(*v) {
                 result.insert(record_offset as u32);
             }
         }
