@@ -6,7 +6,7 @@ use ebi::{
         encoder::{Encoder, EncoderInput, EncoderOutput},
     },
     compressor::CompressorConfig,
-    decoder::query::Predicate,
+    decoder::query::{Predicate, Range, RangeValue},
     encoder::ChunkOption,
 };
 use rand::{random, Rng};
@@ -87,14 +87,21 @@ fn test_round_trip(compressor_config: CompressorConfig) {
 
             if random::<bool>() {
                 decoder
-                    .filter_scan(&mut decoder_output, Predicate::Le(f64::MAX), None, None)
+                    .filter_scan(
+                        &mut decoder_output,
+                        Predicate::Range(Range::new(
+                            RangeValue::Inclusive(f64::MIN),
+                            RangeValue::Inclusive(f64::MAX),
+                        )),
+                        None,
+                        None,
+                    )
                     .unwrap();
             } else {
-                let bm0 = decoder.filter(Predicate::Gt(0.5), None, None).unwrap();
-                let bm2 = decoder.filter(Predicate::Eq(0.5), None, None).unwrap();
-                let bm1 = decoder.filter(Predicate::Le(0.5), None, None).unwrap();
+                let bm0 = decoder.filter(Predicate::Ne(0.5), None, None).unwrap();
+                let bm1 = decoder.filter(Predicate::Eq(0.5), None, None).unwrap();
                 decoder
-                    .scan(&mut decoder_output, Some(&(bm0 | bm1 | bm2)), None)
+                    .scan(&mut decoder_output, Some(&(bm0 | bm1)), None)
                     .unwrap();
             }
 

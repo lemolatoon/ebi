@@ -81,13 +81,52 @@ pub trait QueryExecutor: Reader {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, PartialOrd)]
+pub enum RangeValue {
+    Inclusive(f64),
+    Exclusive(f64),
+    None,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, PartialOrd)]
+pub struct Range {
+    start: RangeValue,
+    end: RangeValue,
+}
+
+impl Range {
+    pub fn new(start: RangeValue, end: RangeValue) -> Self {
+        Self { start, end }
+    }
+
+    pub fn start(&self) -> RangeValue {
+        self.start
+    }
+
+    pub fn end(&self) -> RangeValue {
+        self.end
+    }
+
+    pub fn eval(&self, value: f64) -> bool {
+        let start_eval = match self.start {
+            RangeValue::Inclusive(v) => value >= v,
+            RangeValue::Exclusive(v) => value > v,
+            RangeValue::None => true,
+        };
+        let end_eval = match self.end {
+            RangeValue::Inclusive(v) => value <= v,
+            RangeValue::Exclusive(v) => value < v,
+            RangeValue::None => true,
+        };
+
+        start_eval && end_eval
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, PartialOrd)]
 pub enum Predicate {
     Eq(f64),
     Ne(f64),
-    Gt(f64),
-    Ge(f64),
-    Lt(f64),
-    Le(f64),
+    Range(Range),
 }
 
 impl Predicate {
@@ -95,10 +134,7 @@ impl Predicate {
         match self {
             Predicate::Eq(v) => value == *v,
             Predicate::Ne(v) => value != *v,
-            Predicate::Gt(v) => value > *v,
-            Predicate::Ge(v) => value >= *v,
-            Predicate::Lt(v) => value < *v,
-            Predicate::Le(v) => value <= *v,
+            Predicate::Range(r) => r.eval(value),
         }
     }
 }
