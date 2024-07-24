@@ -3,6 +3,7 @@ use std::{
     io::{self, Cursor, Read, Seek, Write},
     mem::align_of,
     path::Path,
+    sync::Arc,
 };
 
 use roaring::RoaringBitmap;
@@ -92,33 +93,24 @@ impl ChunkId {
 
 pub struct Decoder<R: Read + Seek> {
     input: DecoderInput<R>,
-    file_metadata_ref: &'static Metadata,
-    chunk_handles: Box<[GeneralChunkHandle<&'static Metadata>]>,
+    file_metadata_ref: Arc<Metadata>,
+    chunk_handles: Box<[GeneralChunkHandle<Arc<Metadata>>]>,
     buffer: Box<[u64]>,
-}
-
-impl<R: Read + Seek> Drop for Decoder<R> {
-    fn drop(&mut self) {
-        // Safety:
-        // file_metadata_ref is created from Box::leak.
-        // file_metadata_ref will never used right after this point because it will be dropped.
-        drop(unsafe { Box::from_raw(self.file_metadata_ref as *const Metadata as *mut Metadata) });
-    }
 }
 
 impl<R: Read + Seek> Decoder<R> {
     pub fn new(mut input: DecoderInput<R>) -> decoder::Result<Self> {
         let mut file_reader = FileReader::new();
-        file_reader.fetch_header(&mut input.reader_mut())?;
+        file_reader.fetch_header(input.reader_mut())?;
         file_reader.seek_to_footer(input.reader_mut())?;
-        file_reader.fetch_footer(&mut input.reader_mut())?;
+        file_reader.fetch_footer(input.reader_mut())?;
 
         let file_metadata = file_reader.into_metadata().unwrap();
-        let file_metadata = Box::new(file_metadata);
-        let file_metadata_ref: &'static Metadata = Box::leak(file_metadata);
+        let file_metadata_ref = Arc::new(file_metadata);
 
-        let chunk_handles: Box<[GeneralChunkHandle<&'static Metadata>]> =
-            file_metadata_ref.chunks_iter().collect();
+        let chunk_handles: Box<[GeneralChunkHandle<Arc<Metadata>>]> = file_metadata_ref
+            .chunks_iter_with_mapping_metadata(|| Arc::clone(&file_metadata_ref))
+            .collect();
 
         let max_chunk_size = chunk_handles.iter().map(|x| x.chunk_size()).max().unwrap() as usize;
         let buf_size = (max_chunk_size.next_multiple_of(align_of::<u64>()) + 1).next_power_of_two();
@@ -256,9 +248,9 @@ impl<R: Read + Seek> Decoder<R> {
 
     fn chunk_reader_from_handle<'a>(
         input: &'a mut DecoderInput<R>,
-        chunk_handle: &'a mut GeneralChunkHandle<&'static Metadata>,
+        chunk_handle: &'a mut GeneralChunkHandle<Arc<Metadata>>,
         buffer: &'a mut [u64],
-    ) -> decoder::Result<GeneralChunkReader<'a, 'a, &'static Metadata>> {
+    ) -> decoder::Result<GeneralChunkReader<'a, 'a, Arc<Metadata>>> {
         chunk_handle.seek_to_chunk(input.reader_mut())?;
         chunk_handle.fetch(input.reader_mut(), buffer)?;
         let chunk_reader = chunk_handle.make_chunk_reader(buffer)?;

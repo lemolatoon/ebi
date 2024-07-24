@@ -8,6 +8,7 @@ pub use error::Result;
 use std::{
     io::{self, Read, Seek},
     mem::{self, align_of, size_of, size_of_val},
+    ops::Deref,
     slice,
 };
 
@@ -24,13 +25,16 @@ pub trait FileMetadataLike {
     fn footer(&self) -> &NativeFileFooter;
 }
 
-impl<T: FileMetadataLike> FileMetadataLike for &T {
+impl<T> FileMetadataLike for T
+where
+    T: Deref<Target = Metadata>,
+{
     fn header(&self) -> &NativeFileHeader {
-        (*self).header()
+        self.deref().header()
     }
 
     fn footer(&self) -> &NativeFileFooter {
-        (*self).footer()
+        self.deref().footer()
     }
 }
 
@@ -58,9 +62,18 @@ impl Metadata {
 
         (0..n_chunks).map(move |i| GeneralChunkHandle::new(self, i))
     }
+
+    pub fn chunks_iter_with_mapping_metadata<T: FileMetadataLike>(
+        &self,
+        f: impl Fn() -> T,
+    ) -> impl Iterator<Item = GeneralChunkHandle<T>> {
+        let n_chunks = self.footer().number_of_chunks() as usize;
+
+        (0..n_chunks).map(move |i| GeneralChunkHandle::new(f(), i))
+    }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct MetadataRef<'a, 'b> {
     header: &'a NativeFileHeader,
     footer: &'b NativeFileFooter,
@@ -69,10 +82,11 @@ pub struct MetadataRef<'a, 'b> {
 impl<'a, 'b> MetadataRef<'a, 'b> {
     /// Returns an iterator over the chunks in the file.
     /// If the header or the footer is not read yet, returns `None`.
-    pub fn chunks_iter(&self) -> impl Iterator<Item = GeneralChunkHandle<&Self>> {
+    pub fn chunks_iter(&self) -> impl Iterator<Item = GeneralChunkHandle<Self>> {
         let n_chunks = self.footer().number_of_chunks() as usize;
 
-        (0..n_chunks).map(move |i| GeneralChunkHandle::new(self, i))
+        let metadata_ref = *self;
+        (0..n_chunks).map(move |i| GeneralChunkHandle::new(metadata_ref, i))
     }
 }
 
@@ -194,6 +208,13 @@ impl FileReader {
         self.footer.as_ref()
     }
 
+    pub fn metadata(&self) -> Option<MetadataRef<'_, '_>> {
+        Some(MetadataRef {
+            header: self.header.as_ref()?,
+            footer: self.footer.as_ref()?,
+        })
+    }
+
     /// Converts the `FileReader` into `Metadata`.
     /// If the header or the footer is not read yet, returns `None`.
     pub fn into_metadata(self) -> Option<Metadata> {
@@ -312,8 +333,8 @@ impl<T: FileMetadataLike> GeneralChunkHandle<T> {
     ///
     /// # Errors
     /// - Returns an error if the buffer is too small.
-    /// Especially, even if buffer size(bytes) are the same as chunk size, it can return an error if the buffer size is not a multiple of 8.
-    /// You can resize the buffer like this:
+    ///   Especially, even if buffer size(bytes) are the same as chunk size, it can return an error if the buffer size is not a multiple of 8.
+    ///   You can resize the buffer like this:
     /// ```no_run
     /// use std::mem::{align_of, size_of};
     /// let mut buf = Vec::new();
