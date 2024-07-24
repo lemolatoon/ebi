@@ -9,7 +9,7 @@ use ebi::{
     decoder::query::Predicate,
     encoder::ChunkOption,
 };
-use rand::Rng;
+use rand::{random, Rng};
 
 fn generate_and_write_random_f64(n: usize) -> Vec<f64> {
     let mut rng = rand::thread_rng();
@@ -85,12 +85,18 @@ fn test_round_trip(compressor_config: CompressorConfig) {
 
             let mut decoder = Decoder::new(decoder_input).unwrap();
 
-            let bm0 = decoder.filter(Predicate::Gt(0.5), None, None).unwrap();
-            let bm1 = decoder.filter(Predicate::Le(0.5), None, None).unwrap();
-            let bm2 = decoder.filter(Predicate::Eq(0.5), None, None).unwrap();
-            decoder
-                .scan(&mut decoder_output, Some(&(bm0 | bm1 | bm2)), None)
-                .unwrap();
+            if random::<bool>() {
+                decoder
+                    .filter_scan(&mut decoder_output, Predicate::Le(f64::MAX), None, None)
+                    .unwrap();
+            } else {
+                let bm0 = decoder.filter(Predicate::Gt(0.5), None, None).unwrap();
+                let bm2 = decoder.filter(Predicate::Eq(0.5), None, None).unwrap();
+                let bm1 = decoder.filter(Predicate::Le(0.5), None, None).unwrap();
+                decoder
+                    .scan(&mut decoder_output, Some(&(bm0 | bm1 | bm2)), None)
+                    .unwrap();
+            }
 
             decoder_output.into_writer().into_inner()
         };
@@ -100,10 +106,10 @@ fn test_round_trip(compressor_config: CompressorConfig) {
             .flat_map(|x| x.to_ne_bytes())
             .collect::<Vec<u8>>();
         assert_eq!(
-            random_values_bytes.len(),
-            decoded.len(),
-            "The length of the decoded values is not equal to the length of the original values. {} != {}", random_values_bytes.len(), decoded.len()
-        );
+    random_values_bytes.len(),
+    decoded.len(),
+    "The length of the decoded values is not equal to the length of the original values. {} != {}", random_values_bytes.len(), decoded.len()
+);
 
         assert_eq!(
             random_values_bytes, decoded,

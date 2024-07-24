@@ -220,9 +220,9 @@ impl<R: Read + Seek> Decoder<R> {
         Ok(result)
     }
 
-    pub fn filter_scan(
+    pub fn filter_scan<W: Write>(
         &mut self,
-        output: &mut DecoderOutput<File>,
+        output: &mut DecoderOutput<W>,
         predicate: Predicate,
         bitmask: Option<&RoaringBitmap>,
         chunk_id: Option<ChunkId>,
@@ -242,7 +242,7 @@ impl<R: Read + Seek> Decoder<R> {
         {
             let mut chunk_range_bitmap = RoaringBitmap::new();
             chunk_range_bitmap.insert_range(chunk_handle.logical_record_range_u32());
-            if !bitmask.is_some_and(|bm| (bm & chunk_range_bitmap).is_empty()) {
+            if bitmask.is_some_and(|bm| (bm & chunk_range_bitmap).is_empty()) {
                 continue;
             }
 
