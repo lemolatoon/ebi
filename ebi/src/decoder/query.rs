@@ -8,13 +8,13 @@ use super::chunk_reader::Reader;
 /// This trait provides default implementations based of [`Reader`] trait.
 /// The each implementation of this trait can be specialized for each compression scheme.
 pub trait QueryExecutor: Reader {
-    /// Scan the values filtered by the bitmask and write the results as IEEE754 double array to the output.
+    /// Materialize the values filtered by the bitmask and write the results as IEEE754 double array to the output.
     ///
     /// `bitmask` is optional. If it is None, all values are written.
     ///
     /// `bitmask`'s index is global to the whole chunks.
     /// That is why `logical_offset` is necessary to access bitmask.
-    fn scan<W: Write>(
+    fn materialize<W: Write>(
         &mut self,
         output: &mut W,
         bitmask: Option<&RoaringBitmap>,
@@ -67,7 +67,7 @@ pub trait QueryExecutor: Reader {
     ///
     /// `bitmask`'s index is global to the whole chunks.
     /// That is why `logical_offset` is necessary to access bitmask.
-    fn filter_scan<W: Write>(
+    fn filter_materialize<W: Write>(
         &mut self,
         output: &mut W,
         predicate: Predicate,
@@ -76,7 +76,7 @@ pub trait QueryExecutor: Reader {
     ) -> io::Result<()> {
         let filter_result = self.filter(predicate, bitmask, logical_offset);
 
-        self.scan(output, Some(&filter_result), logical_offset)
+        self.materialize(output, Some(&filter_result), logical_offset)
     }
 }
 

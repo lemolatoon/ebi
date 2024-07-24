@@ -76,18 +76,18 @@ impl<'handle, 'chunk, T: FileMetadataLike> GeneralChunkReader<'handle, 'chunk, T
         &mut self.reader
     }
 
-    /// Scan the values filtered by the bitmask and write the results as IEEE754 double array to the output.
+    /// Materialize the values filtered by the bitmask and write the results as IEEE754 double array to the output.
     ///
     /// `bitmask` is optional. If it is None, all values are written.
     ///
     /// `bitmask`'s index must be global to the whole chunks.
-    pub fn scan(
+    pub fn materialize(
         &mut self,
         output: &mut impl Write,
         bitmask: Option<&RoaringBitmap>,
     ) -> io::Result<()> {
         let logical_offset = self.handle.chunk_footer().logical_offset() as usize;
-        self.reader.scan(output, bitmask, logical_offset)
+        self.reader.materialize(output, bitmask, logical_offset)
     }
 
     /// Filter the values by the predicate and return the result as a bitmask.
@@ -111,7 +111,7 @@ impl<'handle, 'chunk, T: FileMetadataLike> GeneralChunkReader<'handle, 'chunk, T
     /// `bitmask` is optional. If it is None, all values are filtered and then scaned.
     ///
     /// `bitmask`'s index must be global to the whole chunks.
-    pub fn filter_scan(
+    pub fn filter_materialize(
         &mut self,
         output: &mut impl Write,
         predicate: Predicate,
@@ -119,7 +119,7 @@ impl<'handle, 'chunk, T: FileMetadataLike> GeneralChunkReader<'handle, 'chunk, T
     ) -> io::Result<()> {
         let logical_offset = self.handle.chunk_footer().logical_offset() as usize;
         self.reader
-            .filter_scan(output, predicate, bitmask, logical_offset)
+            .filter_materialize(output, predicate, bitmask, logical_offset)
     }
 }
 
@@ -190,20 +190,20 @@ macro_rules! impl_generic_reader {
                 }
             }
 
-            /// Scan the values filtered by the bitmask and write the results as IEEE754 double array to the output.
+            /// Materialize the values filtered by the bitmask and write the results as IEEE754 double array to the output.
             ///
             /// `bitmask` is optional. If it is None, all values are written.
             ///
             /// `bitmask`'s index is global to the whole chunks.
             /// That is why `logical_offset` is necessary to access bitmask.
-            pub fn scan(
+            pub fn materialize(
                 &mut self,
                 output: &mut impl Write,
                 bitmask: Option<&RoaringBitmap>,
                 logical_offset: usize,
             ) -> io::Result<()> {
                 match self {
-                    $( $enum_name::$variant(c) => c.scan(output, bitmask, logical_offset), )*
+                    $( $enum_name::$variant(c) => c.materialize(output, bitmask, logical_offset), )*
                 }
             }
 
@@ -232,7 +232,7 @@ macro_rules! impl_generic_reader {
             ///
             /// `bitmask`'s index is global to the whole chunks.
             /// That is why `logical_offset` is necessary to access bitmask.
-            pub fn filter_scan(
+            pub fn filter_materialize(
                 &mut self,
                 output: &mut impl Write,
                 predicate: Predicate,
@@ -240,7 +240,7 @@ macro_rules! impl_generic_reader {
                 logical_offset: usize,
             ) -> io::Result<()> {
                 match self {
-                    $( $enum_name::$variant(c) => c.filter_scan(output, predicate, bitmask, logical_offset), )*
+                    $( $enum_name::$variant(c) => c.filter_materialize(output, predicate, bitmask, logical_offset), )*
                 }
             }
         }

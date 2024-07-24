@@ -87,7 +87,7 @@ fn test_round_trip(compressor_config: CompressorConfig) {
 
             if random::<bool>() {
                 decoder
-                    .filter_scan(
+                    .filter_materialize(
                         &mut decoder_output,
                         Predicate::Range(Range::new(
                             RangeValue::Inclusive(f64::MIN),
@@ -101,7 +101,7 @@ fn test_round_trip(compressor_config: CompressorConfig) {
                 let bm0 = decoder.filter(Predicate::Ne(0.5), None, None).unwrap();
                 let bm1 = decoder.filter(Predicate::Eq(0.5), None, None).unwrap();
                 decoder
-                    .scan(&mut decoder_output, Some(&(bm0 | bm1)), None)
+                    .materialize(&mut decoder_output, Some(&(bm0 | bm1)), None)
                     .unwrap();
             }
 

@@ -139,7 +139,7 @@ impl<R: Read + Seek> Decoder<R> {
     /// Scan the values filtered by the bitmask and write the results as IEEE754 double array to the output.
     ///
     /// `bitmask` is optional. If it is None, all values are written.
-    pub fn scan<W: Write>(
+    pub fn materialize<W: Write>(
         &mut self,
         output: &mut DecoderOutput<W>,
         bitmask: Option<&RoaringBitmap>,
@@ -166,7 +166,7 @@ impl<R: Read + Seek> Decoder<R> {
 
             let mut chunk_reader = Self::chunk_reader_from_handle(input, chunk_handle, buffer)?;
 
-            chunk_reader.scan(output.writer_mut(), bitmask)?;
+            chunk_reader.materialize(output.writer_mut(), bitmask)?;
         }
 
         Ok(())
@@ -212,7 +212,7 @@ impl<R: Read + Seek> Decoder<R> {
         Ok(result)
     }
 
-    pub fn filter_scan<W: Write>(
+    pub fn filter_materialize<W: Write>(
         &mut self,
         output: &mut DecoderOutput<W>,
         predicate: Predicate,
@@ -240,7 +240,7 @@ impl<R: Read + Seek> Decoder<R> {
 
             let mut chunk_reader = Self::chunk_reader_from_handle(input, chunk_handle, buffer)?;
 
-            chunk_reader.filter_scan(output.writer_mut(), predicate, bitmask)?;
+            chunk_reader.filter_materialize(output.writer_mut(), predicate, bitmask)?;
         }
 
         Ok(())
