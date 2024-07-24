@@ -3,7 +3,7 @@ use std::{mem::size_of, slice};
 use cfg_if::cfg_if;
 
 use crate::{
-    decoder::GeneralChunkHandle,
+    decoder::{query::QueryExecutor, FileMetadataLike, GeneralChunkHandle},
     format::{deserialize::FromLeBytes, run_length::RunLengthHeader},
 };
 
@@ -25,7 +25,7 @@ impl<'chunk> RunLengthReader<'chunk> {
     /// Create a new RunLengthReader.
     /// Caller must guarantee that the input chunk is valid for Run Length Encoding Chunk.
     /// The input chunk must begin with `RunLengthHeader`, followed by f64 values and u32 run counts.
-    pub fn new(handle: &GeneralChunkHandle, chunk: &'chunk [u8]) -> Self {
+    pub fn new<T: FileMetadataLike>(handle: &GeneralChunkHandle<T>, chunk: &'chunk [u8]) -> Self {
         let number_of_records = handle.number_of_records() as usize;
 
         let header = RunLengthHeader::from_le_bytes(chunk);
@@ -115,3 +115,6 @@ impl<'chunk> Reader for RunLengthReader<'chunk> {
         &self.header
     }
 }
+
+// TODO: Implement specialized scan
+impl QueryExecutor for RunLengthReader<'_> {}

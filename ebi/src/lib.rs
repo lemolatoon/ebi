@@ -1,3 +1,4 @@
+pub mod api;
 pub mod compressor;
 pub mod core;
 pub mod decoder;
@@ -16,10 +17,7 @@ mod tests {
     use rand::Rng;
 
     use crate::{
-        compressor::{
-            gorilla::GorillaCompressor, run_length::RunLengthCompressor,
-            uncompressed::UncompressedCompressor, GenericCompressor,
-        },
+        compressor::CompressorConfig,
         decoder::FileReader,
         encoder::{ChunkOption, FileWriter},
         io::aligned_buf_reader::{AlignedBufRead, AlignedBufReader},
@@ -75,9 +73,10 @@ mod tests {
     #[test]
     fn test_round_trip_uncompressed() {
         let header = b"my_header".to_vec().into_boxed_slice();
-        let compressor = GenericCompressor::Uncompressed(
-            UncompressedCompressor::new(8000).header(header.clone()),
-        );
+        let compressor_config = CompressorConfig::uncompressed()
+            .capacity(8000)
+            .header(header)
+            .build();
         for n in [1003, 10003, 100004, 100005] {
             #[cfg(miri)] // miri is too slow
             if n > 1003 {
@@ -85,13 +84,13 @@ mod tests {
             }
 
             let random_values = generate_and_write_random_f64(n);
-            test_round_trip_for_compressor(&random_values, compressor.clone());
+            test_round_trip_for_compressor(&random_values, compressor_config.clone());
         }
     }
 
     #[test]
     fn test_round_trip_rle() {
-        let compressor = GenericCompressor::RLE(RunLengthCompressor::new());
+        let compressor_config = CompressorConfig::rle().build();
 
         for n in [1003, 10003, 100004, 100005] {
             #[cfg(miri)] // miri is too slow
@@ -99,16 +98,16 @@ mod tests {
                 continue;
             }
             let random_values = generate_and_write_random_f64(n);
-            test_round_trip_for_compressor(&random_values, compressor.clone());
+            test_round_trip_for_compressor(&random_values, compressor_config);
 
             let one_value = vec![1.0; n];
-            test_round_trip_for_compressor(&one_value, compressor.clone());
+            test_round_trip_for_compressor(&one_value, compressor_config);
         }
     }
 
     #[test]
     fn test_round_trip_gorilla() {
-        let compressor = GenericCompressor::Gorilla(GorillaCompressor::new());
+        let compressor_config = CompressorConfig::gorilla().build();
 
         for n in [1003, 10003, 100004, 100005] {
             #[cfg(miri)] // miri is too slow
@@ -117,12 +116,12 @@ mod tests {
             }
             {
                 let random_values = generate_and_write_random_f64(n);
-                test_round_trip_for_compressor(&random_values, compressor.clone());
+                test_round_trip_for_compressor(&random_values, compressor_config);
             }
 
             {
                 let one_value = vec![1.0; n];
-                test_round_trip_for_compressor(&one_value, compressor.clone());
+                test_round_trip_for_compressor(&one_value, compressor_config);
             }
 
             {
@@ -134,12 +133,12 @@ mod tests {
                     }
                     doubleing_values.push(doubleing_values[i - 1] * 2.0);
                 }
-                test_round_trip_for_compressor(&doubleing_values, compressor.clone());
+                test_round_trip_for_compressor(&doubleing_values, compressor_config);
             }
         }
     }
 
-    fn test_round_trip_for_compressor(values: &[f64], compressor: GenericCompressor) {
+    fn test_round_trip_for_compressor(values: &[f64], compressor: impl Into<CompressorConfig>) {
         let record_count = values.len();
         const RECORD_COUNT_PER_CHUNK: usize = 1024;
 
@@ -155,7 +154,7 @@ mod tests {
         let mut out_f = io::Cursor::new(Vec::<u8>::new());
 
         let chunk_option = ChunkOption::RecordCount(RECORD_COUNT_PER_CHUNK);
-        let file_writer = FileWriter::new(&mut in_f, compressor, chunk_option);
+        let file_writer = FileWriter::new(&mut in_f, compressor.into(), chunk_option);
 
         write_file(file_writer, &mut out_f).unwrap();
 
@@ -208,8 +207,10 @@ mod tests {
             )
         }
 
+        let metadata = file_reader.into_metadata().unwrap();
+
         // reading chunk in given buffer
-        let chunk_handles = file_reader.chunks_iter().unwrap();
+        let chunk_handles = metadata.chunks_iter();
         let mut buf = Vec::new();
         for (i, mut chunk_handle) in chunk_handles.enumerate() {
             let chunk_size = chunk_handle.chunk_size() as usize;

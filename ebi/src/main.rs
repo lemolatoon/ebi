@@ -12,7 +12,7 @@ use ebi::compressor::{
 };
 
 use ebi::{
-    compressor::GenericCompressor,
+    compressor::CompressorConfig,
     decoder::{
         chunk_reader::{GeneralChunkReaderInner, Reader},
         FileReader,
@@ -49,12 +49,12 @@ fn main() {
     generate_and_write_random_f64("uncompressed.bin", RECORD_COUNT * 300 + 3).unwrap();
     // let compressor = GenericCompressor::Uncompressed(UncompressedCompressor::new(100));
     // let compressor = GenericCompressor::RLE(RunLengthCompressor::new());
-    let compressor = GenericCompressor::Gorilla(GorillaCompressor::new());
+    let compressor_config = CompressorConfig::gorilla().build();
     let in_f = File::open("uncompressed.bin").unwrap();
     let mut in_f = AlignedBufReader::new(in_f);
     let mut out_f = File::create("compressed.bin").unwrap();
     let chunk_option = ChunkOption::RecordCount(RECORD_COUNT);
-    let mut file_context = FileWriter::new(&mut in_f, compressor, chunk_option);
+    let mut file_context = FileWriter::new(&mut in_f, compressor_config.into(), chunk_option);
 
     // write header leaving footer offset blank
     file_context.write_header(&mut out_f).unwrap();
@@ -118,8 +118,10 @@ fn main() {
         file_footer.compression_elapsed_time_nano_secs() as f64 / 1_000_000.0
     );
 
+    let file_metadata = file_reader.into_metadata().unwrap();
+
     // reading chunk in given buffer
-    let mut chunk_handles = file_reader.chunks_iter().unwrap().peekable();
+    let mut chunk_handles = file_metadata.chunks_iter().peekable();
     chunk_handles
         .peek()
         .unwrap()
