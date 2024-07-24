@@ -1,7 +1,6 @@
 use std::{
     fs::File,
     io::{self, Cursor, Read, Seek, Write},
-    mem::align_of,
     path::Path,
     sync::Arc,
 };
@@ -95,7 +94,6 @@ pub struct Decoder<R: Read + Seek> {
     input: DecoderInput<R>,
     file_metadata_ref: Arc<Metadata>,
     chunk_handles: Box<[GeneralChunkHandle<Arc<Metadata>>]>,
-    buffer: Box<[u64]>,
 }
 
 impl<R: Read + Seek> Decoder<R> {
@@ -112,15 +110,10 @@ impl<R: Read + Seek> Decoder<R> {
             .chunks_iter_with_mapping_metadata(|| Arc::clone(&file_metadata_ref))
             .collect();
 
-        let max_chunk_size = chunk_handles.iter().map(|x| x.chunk_size()).max().unwrap() as usize;
-        let buf_size = (max_chunk_size.next_multiple_of(align_of::<u64>()) + 1).next_power_of_two();
-        let buffer: Box<[u64]> = vec![0; buf_size].into_boxed_slice();
-
         Ok(Self {
             input,
             file_metadata_ref,
             chunk_handles,
-            buffer,
         })
     }
 
@@ -148,7 +141,6 @@ impl<R: Read + Seek> Decoder<R> {
         let Self {
             input,
             chunk_handles,
-            buffer,
             ..
         } = self;
 
@@ -164,7 +156,7 @@ impl<R: Read + Seek> Decoder<R> {
                 continue;
             }
 
-            let mut chunk_reader = Self::chunk_reader_from_handle(input, chunk_handle, buffer)?;
+            let mut chunk_reader = Self::chunk_reader_from_handle(input, chunk_handle)?;
 
             chunk_reader.materialize(output.writer_mut(), bitmask)?;
         }
@@ -184,7 +176,6 @@ impl<R: Read + Seek> Decoder<R> {
         let Self {
             input,
             chunk_handles,
-            buffer,
             ..
         } = self;
 
@@ -202,9 +193,9 @@ impl<R: Read + Seek> Decoder<R> {
                 continue;
             }
 
-            let mut chunk_reader = Self::chunk_reader_from_handle(input, chunk_handle, buffer)?;
+            let mut chunk_reader = Self::chunk_reader_from_handle(input, chunk_handle)?;
 
-            let filtered = chunk_reader.filter(predicate, bitmask);
+            let filtered = chunk_reader.filter(predicate, bitmask)?;
 
             result |= filtered;
         }
@@ -222,7 +213,6 @@ impl<R: Read + Seek> Decoder<R> {
         let Self {
             input,
             chunk_handles,
-            buffer,
             ..
         } = self;
 
@@ -238,7 +228,7 @@ impl<R: Read + Seek> Decoder<R> {
                 continue;
             }
 
-            let mut chunk_reader = Self::chunk_reader_from_handle(input, chunk_handle, buffer)?;
+            let mut chunk_reader = Self::chunk_reader_from_handle(input, chunk_handle)?;
 
             chunk_reader.filter_materialize(output.writer_mut(), predicate, bitmask)?;
         }
@@ -249,11 +239,9 @@ impl<R: Read + Seek> Decoder<R> {
     fn chunk_reader_from_handle<'a>(
         input: &'a mut DecoderInput<R>,
         chunk_handle: &'a mut GeneralChunkHandle<Arc<Metadata>>,
-        buffer: &'a mut [u64],
-    ) -> decoder::Result<GeneralChunkReader<'a, 'a, Arc<Metadata>>> {
+    ) -> decoder::Result<GeneralChunkReader<'a, &'a mut R, Arc<Metadata>>> {
         chunk_handle.seek_to_chunk(input.reader_mut())?;
-        chunk_handle.fetch(input.reader_mut(), buffer)?;
-        let chunk_reader = chunk_handle.make_chunk_reader(buffer)?;
+        let chunk_reader = chunk_handle.make_chunk_reader(input.reader_mut())?;
 
         Ok(chunk_reader)
     }

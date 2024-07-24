@@ -2,26 +2,24 @@ pub mod gorilla;
 pub mod run_length;
 pub mod uncompressed;
 
-use std::io::{self, Write};
-use std::mem::{align_of, size_of};
+use std::io::{self, Read, Write};
 
 use roaring::RoaringBitmap;
 
 use crate::format::native::{NativeFileFooter, NativeFileHeader};
-use crate::format::{CompressionScheme, GeneralChunkHeader};
+use crate::format::CompressionScheme;
 
 use super::query::{Predicate, QueryExecutor};
-use super::{error::DecoderError, GeneralChunkHandle};
+use super::GeneralChunkHandle;
 use super::{FileMetadataLike, Result};
 
 #[derive(Debug, Clone, PartialEq, PartialOrd)]
-pub struct GeneralChunkReader<'handle, 'chunk, T: FileMetadataLike> {
+pub struct GeneralChunkReader<'handle, R: Read, T: FileMetadataLike> {
     handle: &'handle GeneralChunkHandle<T>,
-    chunk: &'chunk [u8],
-    reader: GeneralChunkReaderInner<'chunk>,
+    reader: GeneralChunkReaderInner<R>,
 }
 
-impl<'handle, 'chunk, T: FileMetadataLike> GeneralChunkReader<'handle, 'chunk, T> {
+impl<'handle, R: Read, T: FileMetadataLike> GeneralChunkReader<'handle, R, T> {
     /// Create a new GeneralChunkReader.
     /// Caller must guarantee that the input chunk is valid.
     /// # chunk format
@@ -31,33 +29,15 @@ impl<'handle, 'chunk, T: FileMetadataLike> GeneralChunkReader<'handle, 'chunk, T
     /// The chunk begins with the header including the method specific header.
     /// The header is followed by the data.
     /// The data is 64bit aligned, so there may be padding between the header and the data.
-    pub fn new(handle: &'handle GeneralChunkHandle<T>, chunk: &'chunk [u8]) -> Result<Self> {
-        let chunk_size = handle.chunk_size() as usize;
-        if chunk.len() < chunk_size.next_multiple_of(align_of::<u64>()) / size_of::<u64>() + 1 {
-            return Err(DecoderError::BufferTooSmall);
-        }
-
+    pub fn new(handle: &'handle GeneralChunkHandle<T>, reader: R) -> Result<Self> {
         let compression_scheme = handle.header().config().compression_scheme();
 
-        let reader_inner = GeneralChunkReaderInner::new(handle, chunk, *compression_scheme);
+        let reader_inner = GeneralChunkReaderInner::new(handle, reader, *compression_scheme)?;
 
         Ok(Self {
             handle,
-            chunk,
             reader: reader_inner,
         })
-    }
-
-    /// Returns the raw chunk data including the chunk header.
-    pub fn chunk(&self) -> &[u8] {
-        self.chunk
-    }
-
-    /// Returns the raw data of the chunk, which does not contain the chunk header.
-    pub fn data(&self) -> &[u8] {
-        let header_size = self.reader.header_size();
-
-        &self.chunk[size_of::<GeneralChunkHeader>() + header_size..]
     }
 
     pub fn header(&self) -> &NativeFileHeader {
@@ -68,11 +48,11 @@ impl<'handle, 'chunk, T: FileMetadataLike> GeneralChunkReader<'handle, 'chunk, T
         self.handle.footer()
     }
 
-    pub fn inner(&self) -> &GeneralChunkReaderInner<'chunk> {
+    pub fn inner(&self) -> &GeneralChunkReaderInner<R> {
         &self.reader
     }
 
-    pub fn inner_mut(&mut self) -> &mut GeneralChunkReaderInner<'chunk> {
+    pub fn inner_mut(&mut self) -> &mut GeneralChunkReaderInner<R> {
         &mut self.reader
     }
 
@@ -85,7 +65,7 @@ impl<'handle, 'chunk, T: FileMetadataLike> GeneralChunkReader<'handle, 'chunk, T
         &mut self,
         output: &mut impl Write,
         bitmask: Option<&RoaringBitmap>,
-    ) -> io::Result<()> {
+    ) -> Result<()> {
         let logical_offset = self.handle.chunk_footer().logical_offset() as usize;
         self.reader.materialize(output, bitmask, logical_offset)
     }
@@ -101,7 +81,7 @@ impl<'handle, 'chunk, T: FileMetadataLike> GeneralChunkReader<'handle, 'chunk, T
         &mut self,
         predicate: Predicate,
         bitmask: Option<&RoaringBitmap>,
-    ) -> RoaringBitmap {
+    ) -> Result<RoaringBitmap> {
         let logical_offset = self.handle.chunk_footer().logical_offset() as usize;
         self.reader.filter(predicate, bitmask, logical_offset)
     }
@@ -116,7 +96,7 @@ impl<'handle, 'chunk, T: FileMetadataLike> GeneralChunkReader<'handle, 'chunk, T
         output: &mut impl Write,
         predicate: Predicate,
         bitmask: Option<&RoaringBitmap>,
-    ) -> io::Result<()> {
+    ) -> Result<()> {
         let logical_offset = self.handle.chunk_footer().logical_offset() as usize;
         self.reader
             .filter_materialize(output, predicate, bitmask, logical_offset)
@@ -124,35 +104,35 @@ impl<'handle, 'chunk, T: FileMetadataLike> GeneralChunkReader<'handle, 'chunk, T
 }
 
 #[derive(Debug, Clone, PartialEq, PartialOrd)]
-pub enum GeneralChunkReaderInner<'chunk> {
-    Uncompressed(uncompressed::UncompressedReader<'chunk>),
-    RLE(run_length::RunLengthReader<'chunk>),
-    Gorilla(gorilla::GorillaReader<'chunk>),
+pub enum GeneralChunkReaderInner<R: Read> {
+    Uncompressed(uncompressed::UncompressedReader<R>),
+    RLE(run_length::RunLengthReader<R>),
+    Gorilla(gorilla::GorillaReader<R>),
 }
 
-impl<'chunk> GeneralChunkReaderInner<'chunk> {
+impl<R: Read> GeneralChunkReaderInner<R> {
     pub fn new<T: FileMetadataLike>(
         handle: &GeneralChunkHandle<T>,
-        chunk: &'chunk [u8],
+        reader: R,
         compression_scheme: CompressionScheme,
-    ) -> Self {
-        match compression_scheme {
+    ) -> io::Result<Self> {
+        Ok(match compression_scheme {
             CompressionScheme::Uncompressed => GeneralChunkReaderInner::Uncompressed(
-                uncompressed::UncompressedReader::new(handle, chunk),
+                uncompressed::UncompressedReader::new(handle, reader)?,
             ),
             CompressionScheme::RLE => {
-                GeneralChunkReaderInner::RLE(run_length::RunLengthReader::new(handle, chunk))
+                GeneralChunkReaderInner::RLE(run_length::RunLengthReader::new(handle, reader)?)
             }
             CompressionScheme::Gorilla => {
-                GeneralChunkReaderInner::Gorilla(gorilla::GorillaReader::new(handle, chunk))
+                GeneralChunkReaderInner::Gorilla(gorilla::GorillaReader::new(handle, reader))
             }
             c => unimplemented!("Unimplemented compression scheme: {:?}", c),
-        }
+        })
     }
 }
 
-impl From<&GeneralChunkReaderInner<'_>> for CompressionScheme {
-    fn from(value: &GeneralChunkReaderInner<'_>) -> Self {
+impl<R: Read> From<&GeneralChunkReaderInner<R>> for CompressionScheme {
+    fn from(value: &GeneralChunkReaderInner<R>) -> Self {
         match value {
             GeneralChunkReaderInner::Uncompressed(_) => CompressionScheme::Uncompressed,
             GeneralChunkReaderInner::RLE(_) => CompressionScheme::RLE,
@@ -165,7 +145,7 @@ pub trait Reader {
     type NativeHeader;
 
     /// Decompress the whole chunk and return the slice of the decompressed values.
-    fn decompress(&mut self) -> &[f64];
+    fn decompress(&mut self) -> io::Result<&[f64]>;
 
     /// Returns the number of bytes of the method specific header.
     fn header_size(&self) -> usize;
@@ -177,8 +157,8 @@ pub trait Reader {
 
 macro_rules! impl_generic_reader {
     ($enum_name:ident, $($variant:ident),*) => {
-        impl<'a> $enum_name<'a> {
-            pub fn decompress(&mut self) -> &[f64] {
+        impl<R: Read> $enum_name<R> {
+            pub fn decompress(&mut self) -> io::Result<&[f64]> {
                 match self {
                     $( $enum_name::$variant(c) => c.decompress(), )*
                 }
@@ -201,7 +181,7 @@ macro_rules! impl_generic_reader {
                 output: &mut impl Write,
                 bitmask: Option<&RoaringBitmap>,
                 logical_offset: usize,
-            ) -> io::Result<()> {
+            ) -> Result<()> {
                 match self {
                     $( $enum_name::$variant(c) => c.materialize(output, bitmask, logical_offset), )*
                 }
@@ -220,7 +200,7 @@ macro_rules! impl_generic_reader {
                 predicate: Predicate,
                 bitmask: Option<&RoaringBitmap>,
                 logical_offset: usize,
-            ) -> RoaringBitmap {
+            ) -> Result<RoaringBitmap> {
                 match self {
                     $( $enum_name::$variant(c) => c.filter(predicate, bitmask, logical_offset), )*
                 }
@@ -238,7 +218,7 @@ macro_rules! impl_generic_reader {
                 predicate: Predicate,
                 bitmask: Option<&RoaringBitmap>,
                 logical_offset: usize,
-            ) -> io::Result<()> {
+            ) -> Result<()> {
                 match self {
                     $( $enum_name::$variant(c) => c.filter_materialize(output, predicate, bitmask, logical_offset), )*
                 }

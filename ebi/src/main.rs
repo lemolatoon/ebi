@@ -128,7 +128,7 @@ fn main() {
         .seek_to_chunk(&mut in_f)
         .unwrap();
     let mut buf = Vec::new();
-    for (i, mut chunk_handle) in chunk_handles.enumerate() {
+    for (i, chunk_handle) in chunk_handles.enumerate() {
         // you can skip this chunk if you like
         if i == 1 {
             chunk_handle.seek_to_chunk_end(&mut in_f).unwrap();
@@ -139,8 +139,7 @@ fn main() {
             buf.resize(chunk_size.next_multiple_of(align_of::<u64>()) + 1, 0);
         }
 
-        chunk_handle.fetch(&mut in_f, &mut buf[..]).unwrap();
-        let mut chunk_reader = chunk_handle.make_chunk_reader(&buf[..]).unwrap();
+        let mut chunk_reader = chunk_handle.make_chunk_reader(&mut in_f).unwrap();
         #[allow(irrefutable_let_patterns)]
         if let GeneralChunkReaderInner::Uncompressed(ref mut chunk_reader) =
             chunk_reader.inner_mut()
@@ -153,7 +152,10 @@ fn main() {
             .unwrap();
             let mut buf: [u8; std::mem::size_of::<f64>()] = [0; std::mem::size_of::<f64>()];
             in_f.read_exact(&mut buf).unwrap();
-            assert_eq!(chunk_reader.decompress()[2], f64::from_ne_bytes(buf));
+            assert_eq!(
+                chunk_reader.decompress().unwrap()[2],
+                f64::from_ne_bytes(buf)
+            );
         };
         // Compression Method Specific Operations
     }

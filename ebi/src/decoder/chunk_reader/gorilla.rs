@@ -1,46 +1,51 @@
+use std::io::{self, Read};
+
 use crate::decoder::{query::QueryExecutor, FileMetadataLike, GeneralChunkHandle};
 
 use super::Reader;
 
 #[derive(Debug, Clone, PartialEq, PartialOrd)]
-pub struct GorillaReader<'chunk> {
-    decoder: modified_tsz::GorillaDecoder<modified_tsz::BufferRefReader<'chunk>>,
+pub struct GorillaReader<R: Read> {
+    reader: R,
+    // decoder: modified_tsz::GorillaDecoder<modified_tsz::BufferRefReader<'chunk>>,
     number_of_records: usize,
     decompressed: Option<Vec<f64>>,
 }
 
-impl<'chunk> GorillaReader<'chunk> {
-    pub fn new<T: FileMetadataLike>(handle: &GeneralChunkHandle<T>, chunk: &'chunk [u8]) -> Self {
+impl<R: Read> GorillaReader<R> {
+    pub fn new<T: FileMetadataLike>(handle: &GeneralChunkHandle<T>, reader: R) -> Self {
         let number_of_records = handle.number_of_records() as usize;
-        let decoder = modified_tsz::GorillaDecoder::new(
-            modified_tsz::BufferRefReader::new(chunk),
-            Some(number_of_records),
-        );
+        // let decoder = modified_tsz::GorillaDecoder::new(
+        //     modified_tsz::BufferRefReader::new(chunk),
+        //     Some(number_of_records),
+        // );
 
         Self {
-            decoder,
+            // decoder,
+            reader,
             number_of_records,
             decompressed: None,
         }
     }
 }
 
-impl<'chunk> Reader for GorillaReader<'chunk> {
+impl<R: Read> Reader for GorillaReader<R> {
     type NativeHeader = ();
 
-    fn decompress(&mut self) -> &[f64] {
-        if self.decompressed.is_some() {
-            return self.decompressed.as_ref().unwrap();
-        }
+    fn decompress(&mut self) -> io::Result<&[f64]> {
+        unimplemented!();
+        // if self.decompressed.is_some() {
+        //     return Ok(self.decompressed.as_ref().unwrap());
+        // }
 
-        let mut buf = Vec::with_capacity(self.number_of_records);
-        while let Ok(value) = self.decoder.next() {
-            buf.push(value);
-        }
+        // let mut buf = Vec::with_capacity(self.number_of_records);
+        // while let Ok(value) = self.decoder.next() {
+        //     buf.push(value);
+        // }
 
-        self.decompressed = Some(buf);
+        // self.decompressed = Some(buf);
 
-        self.decompressed.as_ref().unwrap()
+        // Ok(self.decompressed.as_ref().unwrap())
     }
 
     fn header_size(&self) -> usize {
@@ -52,7 +57,7 @@ impl<'chunk> Reader for GorillaReader<'chunk> {
     }
 }
 
-impl QueryExecutor for GorillaReader<'_> {}
+impl<R: Read> QueryExecutor for GorillaReader<R> {}
 
 mod modified_tsz {
     //! This original implementation is from tsz crate. It is modified to just use the floating point values compression.

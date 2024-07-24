@@ -1,6 +1,8 @@
-use std::io::{self, Write};
+use std::io::Write;
 
 use roaring::RoaringBitmap;
+
+use crate::decoder;
 
 use super::chunk_reader::Reader;
 
@@ -19,8 +21,8 @@ pub trait QueryExecutor: Reader {
         output: &mut W,
         bitmask: Option<&RoaringBitmap>,
         logical_offset: usize,
-    ) -> io::Result<()> {
-        for (i, v) in self.decompress().iter().enumerate() {
+    ) -> decoder::Result<()> {
+        for (i, v) in self.decompress()?.iter().enumerate() {
             let record_offset = logical_offset + i;
             if bitmask.is_some_and(|bm| !bm.contains(record_offset as u32)) {
                 continue;
@@ -44,9 +46,9 @@ pub trait QueryExecutor: Reader {
         predicate: Predicate,
         bitmask: Option<&RoaringBitmap>,
         logical_offset: usize,
-    ) -> RoaringBitmap {
+    ) -> decoder::Result<RoaringBitmap> {
         let mut result = RoaringBitmap::new();
-        for (i, v) in self.decompress().iter().enumerate() {
+        for (i, v) in self.decompress()?.iter().enumerate() {
             let record_offset = logical_offset + i;
 
             if bitmask.is_some_and(|bm| !bm.contains(record_offset as u32)) {
@@ -58,7 +60,7 @@ pub trait QueryExecutor: Reader {
             }
         }
 
-        result
+        Ok(result)
     }
 
     /// Filter the values by the predicate and write the results as IEEE754 double array to the output.
@@ -73,8 +75,8 @@ pub trait QueryExecutor: Reader {
         predicate: Predicate,
         bitmask: Option<&RoaringBitmap>,
         logical_offset: usize,
-    ) -> io::Result<()> {
-        let filter_result = self.filter(predicate, bitmask, logical_offset);
+    ) -> decoder::Result<()> {
+        let filter_result = self.filter(predicate, bitmask, logical_offset)?;
 
         self.materialize(output, Some(&filter_result), logical_offset)
     }

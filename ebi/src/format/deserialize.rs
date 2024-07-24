@@ -1,6 +1,11 @@
-use std::mem::size_of;
+use std::{
+    io::{self, Read},
+    mem::size_of,
+};
 
 use thiserror::Error;
+
+use crate::decoder;
 
 use super::{
     ChunkFooter, ChunkOption, ChunkOptionKind, CompressionScheme, FieldType, FileConfig,
@@ -10,6 +15,7 @@ use super::{
 /// A trait for converting a byte slice into a struct instance, assuming little-endian byte order.
 /// This trait should be implemented for structs that need to be constructed from byte slices.
 pub trait FromLeBytes: Sized {
+    const SIZE: usize = size_of::<Self>();
     /// Constructs a struct instance from a byte slice in little-endian byte order.
     ///
     /// # Panics
@@ -17,6 +23,31 @@ pub trait FromLeBytes: Sized {
     /// Panics if the byte slice is smaller than the size of the struct.
     fn from_le_bytes(bytes: &[u8]) -> Self;
 }
+
+pub trait FromLeBytesExt: FromLeBytes {
+    /// Constructs a struct instance from the [`Read`] trait object in little-endian byte order.
+    /// This function reads the byte slice from the reader and constructs a struct instance.
+    /// The byte slice is read from the reader and passed to the `from_le_bytes` function.
+    fn from_le_bytes_by_reader<R: std::io::Read>(reader: &mut R) -> io::Result<Self>;
+}
+
+macro_rules! impl_from_le_bytes_ext {
+    ($($t:ty),*) => {
+        $(
+            impl crate::format::deserialize::FromLeBytesExt for $t {
+                fn from_le_bytes_by_reader<R: std::io::Read>(reader: &mut R) -> std::io::Result<Self> {
+                    let mut buf = [0u8; std::mem::size_of::<$t>()];
+                    reader.read_exact(&mut buf)?;
+                    Ok(<$t>::from_le_bytes(&buf))
+                }
+            }
+        )*
+    };
+}
+
+pub(crate) use impl_from_le_bytes_ext;
+
+impl_from_le_bytes_ext!(ChunkFooter, FileFooter0, FileFooter2);
 
 /// A trait for attempting to convert a byte slice into a struct instance, assuming little-endian byte order.
 /// This trait should be implemented for structs that can potentially be constructed from byte slices.
@@ -32,6 +63,39 @@ pub trait TryFromLeBytes {
     where
         Self: Sized;
 }
+
+/// An extension trait for `TryFromLeBytes` that provides a method to read from a reader and attempt to construct an instance.
+pub trait TryFromLeBytesExt {
+    fn try_from_le_bytes_by_reader<R: Read>(reader: &mut R) -> decoder::Result<Self>
+    where
+        Self: Sized + TryFromLeBytes;
+}
+
+macro_rules! impl_try_from_le_bytes_ext {
+    ($($t:ty),*) => {
+        $(
+            impl TryFromLeBytesExt for $t {
+                fn try_from_le_bytes_by_reader<R: Read>(reader: &mut R) -> crate::decoder::Result<Self> {
+                    let mut buf = vec![0u8; size_of::<$t>()];
+                    reader.read_exact(&mut buf)?;
+                    let constructed = <$t>::try_from_le_bytes(&buf)?;
+
+                    Ok(constructed)
+                }
+            }
+        )*
+    };
+}
+pub(crate) use impl_try_from_le_bytes_ext;
+
+impl_try_from_le_bytes_ext!(
+    FileHeader,
+    FileConfig,
+    FieldType,
+    CompressionScheme,
+    ChunkOption,
+    ChunkOptionKind
+);
 
 #[derive(Error, Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub enum ConversionError {
