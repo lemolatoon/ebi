@@ -137,7 +137,6 @@ mod modified_tsz {
         }
 
         fn read_next_value(&mut self) -> io::Result<u64> {
-            println!("read bit0");
             let contol_bit = self.r.read_bit()?;
 
             if !contol_bit
@@ -146,22 +145,17 @@ mod modified_tsz {
                 return Ok(self.value_bits);
             }
 
-            println!("read bit1");
             let zeroes_bit = self.r.read_bit()?;
 
             if zeroes_bit
             /* 1 */
             {
-                println!("read bits5");
                 self.leading_zeroes = self.r.read_bits(5).map(|n| n as u8)?;
-                println!("read bits6");
                 let significant_digits = self.r.read_bits(6).map(|n| (n + 1) as u8)?;
-                dbg!(self.leading_zeroes, significant_digits);
                 self.trailing_zeroes = 64 - self.leading_zeroes - significant_digits;
             }
 
             let size = 64 - self.leading_zeroes - self.trailing_zeroes;
-            println!("read bits{}", size);
             self.r.read_bits(size).map(|bits| {
                 self.value_bits ^= bits << self.trailing_zeroes;
                 self.value_bits
@@ -194,10 +188,8 @@ mod modified_tsz {
 
             let value_bits = if self.first {
                 self.first = false;
-                println!("read first value");
                 self.read_first_value()?
             } else {
-                println!("read next value");
                 self.read_next_value()?
             };
 

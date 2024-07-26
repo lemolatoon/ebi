@@ -60,11 +60,6 @@ impl<R: Read> Reader for UncompressedReader<R> {
         let mut buf: Vec<f64> = vec![0.0; self.number_of_records];
         let buf_ref = buf.as_mut_slice();
         let bytes = buf_ref.as_bytes_mut();
-        println!(
-            "# of records: {}, # of bytes: {}",
-            self.number_of_records,
-            bytes.len()
-        );
         self.reader.read_exact(bytes)?;
 
         self.values = Some(buf);

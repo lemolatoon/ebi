@@ -212,7 +212,6 @@ mod tests {
         let chunk_handles = metadata.chunks_iter();
         for (i, chunk_handle) in chunk_handles.enumerate() {
             chunk_handle.seek_to_chunk(&mut in_f).unwrap();
-            println!("pos: {}", in_f.position());
             let mut chunk_reader = chunk_handle.make_chunk_reader(&mut in_f).unwrap();
 
             let written_data = if values.len() < (i + 1) * RECORD_COUNT_PER_CHUNK {
