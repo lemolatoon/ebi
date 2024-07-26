@@ -89,7 +89,6 @@ mod tests {
 
     #[test]
     fn test_round_trip_rle() {
-        panic!("unimplemented");
         let compressor_config = CompressorConfig::rle().build();
 
         for n in [1003, 10003, 100004, 100005] {
@@ -223,6 +222,12 @@ mod tests {
             };
 
             let decompressed_data = chunk_reader.inner_mut().decompress().unwrap();
+
+            assert_eq!(
+                written_data.len(),
+                decompressed_data.len(),
+                "written data and decompressed data must have the same length"
+            );
 
             assert_eq!(
                 written_data, decompressed_data,

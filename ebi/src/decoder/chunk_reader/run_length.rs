@@ -55,7 +55,7 @@ impl<R: Read> Reader for RunLengthReader<R> {
 
         let mut decompressed = Vec::with_capacity(self.number_of_records());
 
-        for _ in 0..self.number_of_fields() {
+        for _ in 0..dbg!(self.number_of_fields()) {
             let mut buf = [0u8; size_of::<u8>() + size_of::<f64>()];
             self.reader.read_exact(&mut buf)?;
             let run_count = buf[0];
