@@ -11,7 +11,6 @@ mod tests {
     use std::{
         env,
         io::{self, Seek, SeekFrom, Write},
-        mem::{align_of, size_of},
     };
 
     use rand::Rng;
@@ -211,17 +210,9 @@ mod tests {
 
         // reading chunk in given buffer
         let chunk_handles = metadata.chunks_iter();
-        let mut buf = Vec::new();
-        for (i, mut chunk_handle) in chunk_handles.enumerate() {
-            let chunk_size = chunk_handle.chunk_size() as usize;
-            let expected_chunk_size = chunk_size.next_multiple_of(align_of::<u64>()) + 1;
-            if buf.len() * size_of::<u64>() < expected_chunk_size {
-                buf.resize(expected_chunk_size.next_power_of_two(), 0);
-            }
-
+        for (i, chunk_handle) in chunk_handles.enumerate() {
             chunk_handle.seek_to_chunk(&mut in_f).unwrap();
-            chunk_handle.fetch(&mut in_f, &mut buf[..]).unwrap();
-            let mut chunk_reader = chunk_handle.make_chunk_reader(&buf[..]).unwrap();
+            let mut chunk_reader = chunk_handle.make_chunk_reader(&mut in_f).unwrap();
 
             let written_data = if values.len() < (i + 1) * RECORD_COUNT_PER_CHUNK {
                 &values[i * RECORD_COUNT_PER_CHUNK..]
@@ -229,7 +220,13 @@ mod tests {
                 &values[i * RECORD_COUNT_PER_CHUNK..(i + 1) * RECORD_COUNT_PER_CHUNK]
             };
 
-            let decompressed_data = chunk_reader.inner_mut().decompress();
+            let decompressed_data = chunk_reader.inner_mut().decompress().unwrap();
+
+            assert_eq!(
+                written_data.len(),
+                decompressed_data.len(),
+                "written data and decompressed data must have the same length"
+            );
 
             assert_eq!(
                 written_data, decompressed_data,

@@ -61,7 +61,7 @@ impl Compressor for GorillaCompressor {
     }
 }
 
-mod modified_tsz {
+pub(crate) mod modified_tsz {
     //! This original implementation is from tsz crate. It is modified to just use the floating point values compression.
     //! Original tsz crate is licensed under MIT.
     //! Original LICENSE is below:

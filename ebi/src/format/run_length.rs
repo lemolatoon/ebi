@@ -7,7 +7,10 @@
 //! }
 //! ```
 
-use super::{deserialize::FromLeBytes, serialize::ToLe};
+use super::{
+    deserialize::{self, FromLeBytes},
+    serialize::ToLe,
+};
 
 #[derive(Default, Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 #[repr(C, packed(1))]
@@ -32,6 +35,8 @@ impl FromLeBytes for RunLengthHeader {
         Self { number_of_fields }
     }
 }
+
+deserialize::impl_from_le_bytes_ext!(RunLengthHeader);
 
 impl RunLengthHeader {
     pub fn number_of_fields(&self) -> u64 {

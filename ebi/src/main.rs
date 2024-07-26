@@ -1,7 +1,6 @@
 use std::{
     fs::File,
-    io::{self, Read, Seek, SeekFrom, Write},
-    mem::align_of,
+    io::{self, Write},
     path::Path,
 };
 
@@ -12,16 +11,16 @@ use ebi::compressor::{
 };
 
 use ebi::{
-    compressor::CompressorConfig,
-    decoder::{
-        chunk_reader::{GeneralChunkReaderInner, Reader},
-        FileReader,
+    api::{
+        decoder::{Decoder, DecoderInput, DecoderOutput},
+        encoder::{Encoder, EncoderInput, EncoderOutput},
     },
-    encoder::{ChunkOption, FileWriter},
-    io::aligned_buf_reader::AlignedBufReader,
+    compressor::CompressorConfig,
+    encoder::ChunkOption,
 };
 use rand::Rng;
 
+#[allow(dead_code)]
 fn generate_and_write_random_f64(path: impl AsRef<Path>, n: usize) -> io::Result<()> {
     let mut rng = rand::thread_rng();
     let mut random_values: Vec<f64> = Vec::with_capacity(n);
@@ -46,115 +45,30 @@ fn generate_and_write_random_f64(path: impl AsRef<Path>, n: usize) -> io::Result
 
 fn main() {
     const RECORD_COUNT: usize = 100;
-    generate_and_write_random_f64("uncompressed.bin", RECORD_COUNT * 300 + 3).unwrap();
+    // generate_and_write_random_f64("uncompressed.bin", RECORD_COUNT * 3000 + 3).unwrap();
     // let compressor = GenericCompressor::Uncompressed(UncompressedCompressor::new(100));
-    // let compressor = GenericCompressor::RLE(RunLengthCompressor::new());
+    // let compressor_config = CompressorConfig::rle().build();
     let compressor_config = CompressorConfig::gorilla().build();
-    let in_f = File::open("uncompressed.bin").unwrap();
-    let mut in_f = AlignedBufReader::new(in_f);
-    let mut out_f = File::create("compressed.bin").unwrap();
     let chunk_option = ChunkOption::RecordCount(RECORD_COUNT);
-    let mut file_context = FileWriter::new(&mut in_f, compressor_config.into(), chunk_option);
 
-    // write header leaving footer offset blank
-    file_context.write_header(&mut out_f).unwrap();
-
-    // loop until there are no data left
-    let mut compressor = None;
-    while let Some(mut chunk_writer) = file_context.chunk_writer_with_compressor(compressor.take())
-    {
-        chunk_writer.write(&mut out_f).unwrap();
-        // you can flush if you want
-        out_f.flush().unwrap();
-
-        compressor = Some(chunk_writer.into_compressor());
-    }
-
-    file_context.write_footer(&mut out_f).unwrap();
-    let footer_offset_slot_offset = file_context.footer_offset_slot_offset();
-    out_f
-        .seek(SeekFrom::Start(footer_offset_slot_offset as u64))
-        .unwrap();
-    file_context.write_footer_offset(&mut out_f).unwrap();
-    let elapsed_time_slot_offset = file_context.elapsed_time_slot_offset();
-    out_f
-        .seek(SeekFrom::Start(elapsed_time_slot_offset as u64))
-        .unwrap();
-    file_context.write_elapsed_time(&mut out_f).unwrap();
-    // you can flush if you want
-    out_f.flush().unwrap();
-
-    drop(in_f);
-    drop(out_f);
-    // ================== DECODING ==================
-    let mut in_f = File::open("compressed.bin").unwrap(); // in_f: Read
-    println!(
-        "compressed.bin: {} Bytes, {} KiB, {} MiB",
-        in_f.metadata().unwrap().len(),
-        in_f.metadata().unwrap().len() as f64 / 1024.0,
-        in_f.metadata().unwrap().len() as f64 / 1024.0 / 1024.0
+    let mut encoder = Encoder::new(
+        EncoderInput::from_file("uncompressed.bin").unwrap(),
+        EncoderOutput::from_file("compressed.bin").unwrap(),
+        chunk_option,
+        compressor_config,
     );
-    let mut file_reader = FileReader::new();
-    let file_header = *file_reader.fetch_header(&mut in_f).unwrap();
-    // All fields can be gotten by getter
-    println!(
-        "magic_number: {:?}",
-        file_header.magic_number().map(|x| x as char)
-    );
+    encoder.encode().unwrap();
 
-    file_reader.seek_to_footer(&mut in_f).unwrap();
-
-    let file_footer = file_reader.fetch_footer(&mut in_f).unwrap();
-
-    // Also they are getters for footer.
-    println!("number_of_records: {}", file_footer.number_of_records());
-    println!(
-        "compression scheme: {:?}",
-        file_header.config().compression_scheme()
-    );
-    println!(
-        "compressed in {} ns, {} ms",
-        file_footer.compression_elapsed_time_nano_secs(),
-        file_footer.compression_elapsed_time_nano_secs() as f64 / 1_000_000.0
-    );
-
-    let file_metadata = file_reader.into_metadata().unwrap();
-
-    // reading chunk in given buffer
-    let mut chunk_handles = file_metadata.chunks_iter().peekable();
-    chunk_handles
-        .peek()
+    let input = DecoderInput::from_file("compressed.bin")
         .unwrap()
-        .seek_to_chunk(&mut in_f)
-        .unwrap();
-    let mut buf = Vec::new();
-    for (i, mut chunk_handle) in chunk_handles.enumerate() {
-        // you can skip this chunk if you like
-        if i == 1 {
-            chunk_handle.seek_to_chunk_end(&mut in_f).unwrap();
-            continue;
-        }
-        let chunk_size = chunk_handle.chunk_size() as usize;
-        if buf.len() < chunk_size.next_multiple_of(align_of::<u64>()) + 1 {
-            buf.resize(chunk_size.next_multiple_of(align_of::<u64>()) + 1, 0);
-        }
+        .into_buffered();
+    let mut decoder = Decoder::new(input).unwrap();
 
-        chunk_handle.fetch(&mut in_f, &mut buf[..]).unwrap();
-        let mut chunk_reader = chunk_handle.make_chunk_reader(&buf[..]).unwrap();
-        #[allow(irrefutable_let_patterns)]
-        if let GeneralChunkReaderInner::Uncompressed(ref mut chunk_reader) =
-            chunk_reader.inner_mut()
-        {
-            let mut in_f = File::open("uncompressed.bin").unwrap();
-            in_f.seek(SeekFrom::Start(
-                (chunk_handle.chunk_footer().logical_offset() + 2)
-                    * std::mem::size_of::<f64>() as u64,
-            ))
-            .unwrap();
-            let mut buf: [u8; std::mem::size_of::<f64>()] = [0; std::mem::size_of::<f64>()];
-            in_f.read_exact(&mut buf).unwrap();
-            assert_eq!(chunk_reader.decompress()[2], f64::from_ne_bytes(buf));
-        };
-        // Compression Method Specific Operations
-    }
+    let mut output = DecoderOutput::from_vec(Vec::with_capacity(RECORD_COUNT * 3000 + 3));
+
+    decoder.materialize(&mut output, None, None).unwrap();
+
+    let output = output.into_writer().into_inner();
+
+    println!("{:?}", output.len());
 }

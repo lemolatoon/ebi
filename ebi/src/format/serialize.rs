@@ -83,13 +83,6 @@ mod private {
     impl Sealed for super::FileFooter0 {}
     impl Sealed for super::FileFooter2 {}
     impl Sealed for super::ChunkFooter {}
-
-    impl Sealed for f32 {}
-    impl Sealed for f64 {}
-    impl Sealed for u8 {}
-    impl Sealed for u16 {}
-    impl Sealed for u32 {}
-    impl Sealed for u64 {}
 }
 
 impl<T: private::Sealed> AsBytes for T {

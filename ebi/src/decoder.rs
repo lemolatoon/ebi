@@ -7,17 +7,14 @@ use error::DecoderError;
 pub use error::Result;
 use std::{
     io::{self, Read, Seek},
-    mem::{self, align_of, size_of, size_of_val},
+    mem::size_of,
     ops::Deref,
-    slice,
 };
 
 use crate::format::{
     deserialize::{FromLeBytes, TryFromLeBytes},
     native::{NativeChunkFooter, NativeFileFooter, NativeFileHeader},
-    run_length::RunLengthHeader,
-    uncompressed::UncompressedHeader0,
-    ChunkFooter, CompressionScheme, FileFooter0, FileFooter2, FileHeader, GeneralChunkHeader,
+    ChunkFooter, FileFooter0, FileFooter2, FileHeader,
 };
 
 pub trait FileMetadataLike {
@@ -271,6 +268,30 @@ impl<T: FileMetadataLike> GeneralChunkHandle<T> {
         next_physical_offset - physical_offset
     }
 
+    pub fn physical_offset(&self) -> u64 {
+        self.chunk_footer().physical_offset()
+    }
+
+    pub fn logical_offset(&self) -> u64 {
+        self.chunk_footer().logical_offset()
+    }
+
+    pub fn next_physical_offset(&self) -> u64 {
+        self.footer()
+            .chunk_footers()
+            .get(self.chunk_index + 1)
+            .map(|footer| footer.physical_offset())
+            .unwrap_or_else(|| self.header().footer_offset())
+    }
+
+    pub fn next_logical_offset(&self) -> u64 {
+        self.footer()
+            .chunk_footers()
+            .get(self.chunk_index + 1)
+            .map(|footer| footer.logical_offset())
+            .unwrap_or_else(|| self.footer().number_of_records())
+    }
+
     pub fn number_of_records(&self) -> u64 {
         let logical_offset = self.chunk_footer().logical_offset();
         let next_physical_offset = self
@@ -326,88 +347,7 @@ impl<T: FileMetadataLike> GeneralChunkHandle<T> {
         Ok(())
     }
 
-    /// Fetches the chunk from the input stream.
-    /// Caller must guarantee that the input stream is at the beginning of the chunk.
-    ///
-    /// The reason why this method requires buffer as `&mut [u64]` is that the buffer must be aligned to 8 bytes.
-    ///
-    /// # Errors
-    /// - Returns an error if the buffer is too small.
-    ///   Especially, even if buffer size(bytes) are the same as chunk size, it can return an error if the buffer size is not a multiple of 8.
-    ///   You can resize the buffer like this:
-    /// ```no_run
-    /// use std::mem::{align_of, size_of};
-    /// let mut buf = Vec::new();
-    /// let chunk_size: usize = 1017/* = chunk_handle.chunk_size() as usize */;
-    /// let expected_chunk_size = chunk_size.next_multiple_of(align_of::<u64>()) + 1;
-    /// if buf.len() * size_of::<u64>() < expected_chunk_size {
-    ///     buf.resize(expected_chunk_size.next_power_of_two(), 0);
-    /// }
-    /// ```
-    /// This size of buffer is guaranteed to be enough for `fetch`.
-    /// - Returns an error if I/O error occurs.
-    pub fn fetch<'buf, R: Read>(&mut self, mut input: R, buf: &'buf mut [u64]) -> Result<()> {
-        let chunk_size = self.chunk_size() as usize;
-        // Safety:
-        // - we can transmute u64 slice as u8 slice safely.
-        let buf: &'buf mut [u8] = unsafe {
-            slice::from_raw_parts_mut(buf.as_mut_ptr().cast::<u8>(), mem::size_of_val(buf))
-        };
-
-        if buf.len() < chunk_size.next_multiple_of(align_of::<u64>()) + 1 {
-            return Err(DecoderError::BufferTooSmall);
-        }
-
-        let header_size = self.fetch_header(&mut input, buf)?;
-        let data_offset = header_size.next_multiple_of(align_of::<u64>());
-
-        input.read_exact(&mut buf[data_offset..data_offset + chunk_size - header_size])?;
-
-        Ok(())
-    }
-
-    /// Fetches the header of the chunk including the method specific header.
-    /// The header is stored in the buffer.
-    ///
-    /// Returns the header_size of the chunk including `GeneralChunkHeader`.
-    fn fetch_header<R: Read>(&self, mut input: R, buf: &mut [u8]) -> Result<usize> {
-        input.read_exact(&mut buf[..size_of::<GeneralChunkHeader>()])?;
-
-        let compression_scheme = self.header().config().compression_scheme();
-
-        let header_size = match *compression_scheme {
-            CompressionScheme::Uncompressed => {
-                input.read_exact(
-                    &mut buf[size_of::<GeneralChunkHeader>()..size_of::<UncompressedHeader0>()],
-                )?;
-                let header_head = UncompressedHeader0::from_le_bytes(
-                    &buf[size_of::<GeneralChunkHeader>()..size_of::<UncompressedHeader0>()],
-                );
-                let header_size = header_head.header_size as usize;
-                input.read_exact(&mut buf[size_of::<UncompressedHeader0>()..header_size])?;
-                header_size
-            }
-            CompressionScheme::RLE => {
-                let header_size = size_of::<RunLengthHeader>();
-                input.read_exact(&mut buf[size_of::<GeneralChunkHeader>()..header_size])?;
-
-                header_size
-            }
-            CompressionScheme::Gorilla => 0,
-            c => unimplemented!("Unimplemented compression scheme: {:?}", c),
-        };
-
-        Ok(size_of::<GeneralChunkHeader>() + header_size)
-    }
-
-    pub fn make_chunk_reader<'handle, 'chunk>(
-        &'handle self,
-        input: &'chunk [u64],
-    ) -> Result<GeneralChunkReader<'handle, 'chunk, T>> {
-        // Safety:
-        // - we can transmute u64 slice as u8 slice safely.
-        let input: &'chunk [u8] =
-            unsafe { slice::from_raw_parts(input.as_ptr().cast::<u8>(), size_of_val(input)) };
-        GeneralChunkReader::new(self, input)
+    pub fn make_chunk_reader<R: Read>(&self, reader: R) -> Result<GeneralChunkReader<'_, R, T>> {
+        GeneralChunkReader::new(self, reader)
     }
 }
