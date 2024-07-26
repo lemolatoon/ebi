@@ -28,8 +28,11 @@ impl<R: Read> GorillaReader<R> {
     }
 }
 
+pub type GorillaIterator<'a, R> = &'a mut modified_tsz::GorillaDecoder<BitReader<R>>;
+
 impl<R: Read> Reader for GorillaReader<R> {
     type NativeHeader = ();
+    type DecompressIterator<'a> = GorillaIterator<'a, R> where Self: 'a;
 
     fn decompress(&mut self) -> io::Result<&[f64]> {
         if self.decompressed.is_some() {
@@ -52,6 +55,20 @@ impl<R: Read> Reader for GorillaReader<R> {
 
     fn read_header(&mut self) -> &Self::NativeHeader {
         &()
+    }
+
+    fn decompress_iter(&mut self) -> Self::DecompressIterator<'_> {
+        &mut self.decoder
+    }
+
+    fn set_decompress_result(&mut self, data: Vec<f64>) -> &[f64] {
+        self.decompressed = Some(data);
+
+        self.decompressed.as_ref().unwrap()
+    }
+
+    fn decompress_result(&mut self) -> Option<&[f64]> {
+        self.decompressed.as_deref()
     }
 }
 
@@ -160,6 +177,14 @@ mod modified_tsz {
                 self.value_bits ^= bits << self.trailing_zeroes;
                 self.value_bits
             })
+        }
+    }
+
+    impl<'a, T: BitRead> Iterator for &'a mut GorillaDecoder<T> {
+        type Item = io::Result<f64>;
+
+        fn next(&mut self) -> Option<Self::Item> {
+            GorillaDecoder::next(self).transpose()
         }
     }
 

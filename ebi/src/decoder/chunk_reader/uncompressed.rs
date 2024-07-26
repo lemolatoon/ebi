@@ -51,6 +51,7 @@ impl<R: Read> UncompressedReader<R> {
 
 impl<R: Read> Reader for UncompressedReader<R> {
     type NativeHeader = NativeUncompressedHeader;
+    type DecompressIterator<'a> = UncompressedIterator<'a, R> where Self: 'a;
 
     fn decompress(&mut self) -> io::Result<&[f64]> {
         if self.values.is_some() {
@@ -73,6 +74,50 @@ impl<R: Read> Reader for UncompressedReader<R> {
 
     fn read_header(&mut self) -> &Self::NativeHeader {
         &self.header
+    }
+
+    fn decompress_iter(&mut self) -> Self::DecompressIterator<'_> {
+        UncompressedIterator::new(self)
+    }
+
+    fn set_decompress_result(&mut self, data: Vec<f64>) -> &[f64] {
+        self.values = Some(data);
+
+        self.values.as_deref().unwrap()
+    }
+
+    fn decompress_result(&mut self) -> Option<&[f64]> {
+        self.values.as_deref()
+    }
+}
+
+pub struct UncompressedIterator<'a, R: Read> {
+    reader: &'a mut UncompressedReader<R>,
+    count: usize,
+}
+
+impl<'a, R: Read> UncompressedIterator<'a, R> {
+    pub fn new(reader: &'a mut UncompressedReader<R>) -> Self {
+        UncompressedIterator { reader, count: 0 }
+    }
+}
+
+impl<'a, R: Read> Iterator for UncompressedIterator<'a, R> {
+    type Item = io::Result<f64>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.count >= self.reader.number_of_records {
+            return None;
+        }
+
+        let mut buf = [0u8; size_of::<f64>()];
+        match self.reader.reader.read_exact(&mut buf) {
+            Ok(_) => {
+                self.count += 1;
+                Some(Ok(f64::from_le_bytes(buf)))
+            }
+            Err(e) => Some(Err(e)),
+        }
     }
 }
 

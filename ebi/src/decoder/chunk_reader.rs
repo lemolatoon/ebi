@@ -4,6 +4,7 @@ pub mod uncompressed;
 
 use std::io::{self, Read, Write};
 
+use quick_impl::QuickImpl;
 use roaring::RoaringBitmap;
 
 use crate::format::native::{NativeFileFooter, NativeFileHeader};
@@ -143,9 +144,28 @@ impl<R: Read> From<&GeneralChunkReaderInner<R>> for CompressionScheme {
 
 pub trait Reader {
     type NativeHeader;
+    type DecompressIterator<'a>: Iterator<Item = io::Result<f64>>
+    where
+        Self: 'a;
+
+    /// Returns `impl Iterator<Item = io::Result<f64>>`, which decompresses the chunk iteratively.
+    fn decompress_iter(&mut self) -> Self::DecompressIterator<'_>;
 
     /// Decompress the whole chunk and return the slice of the decompressed values.
-    fn decompress(&mut self) -> io::Result<&[f64]>;
+    fn decompress(&mut self) -> io::Result<&[f64]> {
+        if self.decompress_result().is_some() {
+            return Ok(self.decompress_result().unwrap());
+        }
+
+        let data = self.decompress_iter().collect::<io::Result<Vec<f64>>>()?;
+        let result = self.set_decompress_result(data);
+
+        Ok(result)
+    }
+
+    fn set_decompress_result(&mut self, data: Vec<f64>) -> &[f64];
+
+    fn decompress_result(&mut self) -> Option<&[f64]>;
 
     /// Returns the number of bytes of the method specific header.
     fn header_size(&self) -> usize;
@@ -155,12 +175,54 @@ pub trait Reader {
     fn read_header(&mut self) -> &Self::NativeHeader;
 }
 
+#[derive(QuickImpl)]
+pub enum GeneralDecompressIterator<'a, R: Read> {
+    #[quick_impl(impl From)]
+    Uncompressed(uncompressed::UncompressedIterator<'a, R>),
+    #[quick_impl(impl From)]
+    RLE(run_length::RunLengthIterator<'a, R>),
+    #[quick_impl(impl From)]
+    Gorilla(gorilla::GorillaIterator<'a, R>),
+}
+
+impl<'a, R: Read> Iterator for GeneralDecompressIterator<'a, R> {
+    type Item = io::Result<f64>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        match self {
+            GeneralDecompressIterator::Uncompressed(c) => c.next(),
+            GeneralDecompressIterator::RLE(c) => c.next(),
+            GeneralDecompressIterator::Gorilla(c) => c.next(),
+        }
+    }
+}
+
 macro_rules! impl_generic_reader {
     ($enum_name:ident, $($variant:ident),*) => {
         impl<R: Read> $enum_name<R> {
+            /// Decompress the whole chunk and return the slice of the decompressed values.
             pub fn decompress(&mut self) -> io::Result<&[f64]> {
                 match self {
                     $( $enum_name::$variant(c) => c.decompress(), )*
+                }
+            }
+
+            /// Returns `impl Iterator<Item = io::Result<f64>>`, which decompresses the chunk iteratively.
+            pub fn decompress_iter(&mut self) -> GeneralDecompressIterator<'_, R> {
+                match self {
+                    $( $enum_name::$variant(c) => c.decompress_iter().into(), )*
+                }
+            }
+
+            pub fn set_decompress_result(&mut self, data: Vec<f64>) -> &[f64] {
+                match self {
+                    $( $enum_name::$variant(c) => c.set_decompress_result(data), )*
+                }
+            }
+
+            pub fn decompress_result(&mut self) -> Option<&[f64]> {
+                match self {
+                    $( $enum_name::$variant(c) => c.decompress_result(), )*
                 }
             }
 
@@ -228,3 +290,129 @@ macro_rules! impl_generic_reader {
 }
 
 impl_generic_reader!(GeneralChunkReaderInner, Uncompressed, RLE, Gorilla);
+
+#[cfg(test)]
+mod tests {
+    use io::Seek;
+    use rand::Rng;
+
+    use crate::{
+        api::{
+            decoder::{ChunkId, Decoder, DecoderInput},
+            encoder::{Encoder, EncoderInput, EncoderOutput},
+        },
+        compressor::CompressorConfig,
+        encoder::ChunkOption,
+    };
+
+    use super::*;
+
+    fn generate_and_write_random_f64(n: usize) -> Vec<f64> {
+        let mut rng = rand::thread_rng();
+        let mut random_values: Vec<f64> = Vec::with_capacity(n);
+
+        for i in 0..n {
+            if rng.gen_bool(0.5) && random_values.last().is_some() {
+                random_values.push(random_values[i - 1]);
+            } else {
+                random_values.push(rng.gen());
+            }
+        }
+
+        random_values
+    }
+
+    fn decoder(
+        values: &[f64],
+        compressor_config: impl Into<CompressorConfig>,
+    ) -> Decoder<io::Cursor<Vec<u8>>> {
+        let encoded = {
+            let encoder_input = EncoderInput::from_f64_slice(values);
+
+            let encoder_output = EncoderOutput::from_vec(Vec::new());
+
+            let chunk_option = ChunkOption::RecordCount(512);
+
+            let mut encoder = Encoder::new(
+                encoder_input,
+                encoder_output,
+                chunk_option,
+                compressor_config.into(),
+            );
+
+            encoder.encode().unwrap();
+
+            encoder.into_output().into_vec()
+        };
+
+        let decoder_input = DecoderInput::from_reader(io::Cursor::new(encoded));
+
+        Decoder::new(decoder_input).unwrap()
+    }
+
+    fn test_all(compresor_config: impl Into<CompressorConfig>) {
+        let values = generate_and_write_random_f64(1003);
+        let mut decoder = decoder(values.as_slice(), compresor_config.into());
+
+        let mut reader = decoder.chunk_reader(ChunkId::new(0)).unwrap();
+
+        test_compressed_result(reader.inner_mut());
+
+        test_decompress_iter(&mut decoder);
+    }
+
+    fn test_compressed_result<R: Read>(reader: &mut GeneralChunkReaderInner<R>) {
+        let result = vec![1.0, 2.0, 3.0, 4.0, 5.0];
+        let data = reader.set_decompress_result(result);
+
+        assert_eq!(
+            data,
+            &[1.0, 2.0, 3.0, 4.0, 5.0],
+            "set_decompress_result should return the data set by set_decompress_result"
+        );
+
+        assert_eq!(
+            reader.decompress_result().unwrap(),
+            &[1.0, 2.0, 3.0, 4.0, 5.0],
+            "decompress_result should return the data set by set_decompress_result"
+        );
+    }
+
+    fn test_decompress_iter<R: Read + Seek>(decoder: &mut Decoder<R>) {
+        let mut reader = decoder.chunk_reader(ChunkId::new(0)).unwrap();
+        let iter_result = reader
+            .inner_mut()
+            .decompress_iter()
+            .collect::<io::Result<Vec<f64>>>()
+            .unwrap();
+
+        let mut reader = decoder.chunk_reader(ChunkId::new(0)).unwrap();
+        let decompress_result = reader.inner_mut().decompress().unwrap();
+
+        assert_eq!(
+            iter_result.len(),
+            decompress_result.len(),
+            "decompress_iter should return the same length of result as decompress"
+        );
+
+        assert_eq!(
+            iter_result, decompress_result,
+            "decompress_iter should return the same result as decompress"
+        );
+    }
+
+    #[test]
+    fn test_gorilla() {
+        test_all(CompressorConfig::gorilla().build());
+    }
+
+    #[test]
+    fn test_rle() {
+        test_all(CompressorConfig::rle().build());
+    }
+
+    #[test]
+    fn test_uncompressed() {
+        test_all(CompressorConfig::uncompressed().build());
+    }
+}

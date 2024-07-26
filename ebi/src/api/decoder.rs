@@ -246,6 +246,19 @@ impl<R: Read + Seek> Decoder<R> {
         Ok(())
     }
 
+    pub fn chunk_reader(
+        &mut self,
+        chunk_id: ChunkId,
+    ) -> decoder::Result<GeneralChunkReader<'_, &mut R, Arc<Metadata>>> {
+        let Self {
+            input,
+            chunk_handles,
+            ..
+        } = self;
+
+        Self::chunk_reader_from_handle(input, &mut chunk_handles[chunk_id.index()])
+    }
+
     fn chunk_reader_from_handle<'a>(
         input: &'a mut DecoderInput<R>,
         chunk_handle: &'a mut GeneralChunkHandle<Arc<Metadata>>,
