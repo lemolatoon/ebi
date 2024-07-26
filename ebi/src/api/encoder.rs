@@ -1,6 +1,6 @@
 use std::{
     fs::File,
-    io::{Cursor, Read, Seek, SeekFrom, Write},
+    io::{BufWriter, Cursor, Read, Seek, SeekFrom, Write},
     mem::size_of_val,
     path::Path,
 };
@@ -84,6 +84,11 @@ impl<W: Write + Seek> EncoderOutput<W> {
 
     pub fn into_inner(self) -> W {
         self.inner
+    }
+
+    pub fn into_buffered(self) -> EncoderOutput<BufWriter<W>> {
+        let buf_writer = BufWriter::new(self.inner);
+        EncoderOutput { inner: buf_writer }
     }
 }
 

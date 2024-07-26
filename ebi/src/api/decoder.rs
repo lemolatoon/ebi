@@ -1,6 +1,6 @@
 use std::{
     fs::File,
-    io::{self, Cursor, Read, Seek, Write},
+    io::{self, BufReader, BufWriter, Cursor, Read, Seek, Write},
     path::Path,
     sync::Arc,
 };
@@ -31,6 +31,11 @@ impl<R: Read + Seek> DecoderInput<R> {
     pub fn reader_mut(&mut self) -> &mut R {
         &mut self.inner
     }
+
+    pub fn into_buffered(self) -> DecoderInput<BufReader<R>> {
+        let buf_reader = BufReader::new(self.inner);
+        DecoderInput { inner: buf_reader }
+    }
 }
 
 impl DecoderInput<File> {
@@ -59,6 +64,11 @@ impl<W: Write> DecoderOutput<W> {
 
     pub fn into_writer(self) -> W {
         self.inner
+    }
+
+    pub fn into_buffered(self) -> DecoderOutput<BufWriter<W>> {
+        let buf_writer = BufWriter::new(self.inner);
+        DecoderOutput { inner: buf_writer }
     }
 }
 
