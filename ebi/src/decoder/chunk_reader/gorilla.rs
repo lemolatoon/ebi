@@ -201,114 +201,112 @@ mod modified_tsz {
         }
     }
 
-    #[derive(Debug, Clone, PartialEq, PartialOrd)]
-    pub struct BufferRefReader<'a> {
-        bytes: &'a [u8], // internal buffer of bytes
-        index: usize,    // index into bytes
-        pos: u32,        // position in the byte we are currenlty reading
-    }
-
-    impl<'a> BufferRefReader<'a> {
-        /// new creates a new `BufferedReader` from `bytes`
-        pub fn new(bytes: &'a [u8]) -> Self {
-            Self {
-                bytes,
-                index: 0,
-                pos: 0,
-            }
-        }
-
-        fn get_byte(&mut self) -> io::Result<u8> {
-            self.bytes
-                .get(self.index)
-                .cloned()
-                .ok_or(io::Error::new(io::ErrorKind::UnexpectedEof, "EOF"))
-        }
-    }
-
-    impl<'a> BitRead for BufferRefReader<'a> {
-        fn read_bit(&mut self) -> io::Result<bool> {
-            if self.pos == 8 {
-                self.index += 1;
-                self.pos = 0;
-            }
-
-            let byte = self.get_byte()?;
-
-            let bit = byte & 1u8.wrapping_shl(7 - self.pos) != 0;
-
-            self.pos += 1;
-
-            Ok(bit)
-        }
-
-        fn read_byte(&mut self) -> io::Result<u8> {
-            if self.pos == 0 {
-                self.pos += 8;
-                return self.get_byte();
-            }
-
-            if self.pos == 8 {
-                self.index += 1;
-                return self.get_byte();
-            }
-
-            let mut byte = 0;
-            let mut b = self.get_byte()?;
-
-            byte |= b.wrapping_shl(self.pos);
-
-            self.index += 1;
-            b = self.get_byte()?;
-
-            byte |= b.wrapping_shr(8 - self.pos);
-
-            Ok(byte)
-        }
-
-        fn read_bits(&mut self, mut num: u8) -> io::Result<u64> {
-            if num > 64 {
-                num = 64;
-            }
-
-            let mut bits: u64 = 0;
-            while num >= 8 {
-                let byte = self.read_byte().map(u64::from)?;
-                bits = bits.wrapping_shl(8) | byte;
-                num -= 8;
-            }
-
-            while num > 0 {
-                self.read_bit()
-                    .map(|bit| bits = bits.wrapping_shl(1) | bit as u64)?;
-
-                num -= 1;
-            }
-
-            Ok(bits)
-        }
-
-        fn peak_bits(&mut self, num: u8) -> io::Result<u64> {
-            // save the current index and pos so we can reset them after calling `read_bits`
-            let index = self.index;
-            let pos = self.pos;
-
-            let bits = self.read_bits(num)?;
-
-            self.index = index;
-            self.pos = pos;
-
-            Ok(bits)
-        }
-    }
-
     #[cfg(test)]
     mod tests {
         use std::io;
 
         use crate::io::bit_read::{BitRead, BitReader};
 
-        use super::BufferRefReader;
+        #[derive(Debug, Clone, PartialEq, PartialOrd)]
+        pub struct BufferRefReader<'a> {
+            bytes: &'a [u8], // internal buffer of bytes
+            index: usize,    // index into bytes
+            pos: u32,        // position in the byte we are currenlty reading
+        }
+
+        impl<'a> BufferRefReader<'a> {
+            /// new creates a new `BufferedReader` from `bytes`
+            pub fn new(bytes: &'a [u8]) -> Self {
+                Self {
+                    bytes,
+                    index: 0,
+                    pos: 0,
+                }
+            }
+
+            fn get_byte(&mut self) -> io::Result<u8> {
+                self.bytes
+                    .get(self.index)
+                    .cloned()
+                    .ok_or(io::Error::new(io::ErrorKind::UnexpectedEof, "EOF"))
+            }
+        }
+
+        impl<'a> BitRead for BufferRefReader<'a> {
+            fn read_bit(&mut self) -> io::Result<bool> {
+                if self.pos == 8 {
+                    self.index += 1;
+                    self.pos = 0;
+                }
+
+                let byte = self.get_byte()?;
+
+                let bit = byte & 1u8.wrapping_shl(7 - self.pos) != 0;
+
+                self.pos += 1;
+
+                Ok(bit)
+            }
+
+            fn read_byte(&mut self) -> io::Result<u8> {
+                if self.pos == 0 {
+                    self.pos += 8;
+                    return self.get_byte();
+                }
+
+                if self.pos == 8 {
+                    self.index += 1;
+                    return self.get_byte();
+                }
+
+                let mut byte = 0;
+                let mut b = self.get_byte()?;
+
+                byte |= b.wrapping_shl(self.pos);
+
+                self.index += 1;
+                b = self.get_byte()?;
+
+                byte |= b.wrapping_shr(8 - self.pos);
+
+                Ok(byte)
+            }
+
+            fn read_bits(&mut self, mut num: u8) -> io::Result<u64> {
+                if num > 64 {
+                    num = 64;
+                }
+
+                let mut bits: u64 = 0;
+                while num >= 8 {
+                    let byte = self.read_byte().map(u64::from)?;
+                    bits = bits.wrapping_shl(8) | byte;
+                    num -= 8;
+                }
+
+                while num > 0 {
+                    self.read_bit()
+                        .map(|bit| bits = bits.wrapping_shl(1) | bit as u64)?;
+
+                    num -= 1;
+                }
+
+                Ok(bits)
+            }
+
+            fn peak_bits(&mut self, num: u8) -> io::Result<u64> {
+                // save the current index and pos so we can reset them after calling `read_bits`
+                let index = self.index;
+                let pos = self.pos;
+
+                let bits = self.read_bits(num)?;
+
+                self.index = index;
+                self.pos = pos;
+
+                Ok(bits)
+            }
+        }
 
         #[test]
         fn gorilla() {
