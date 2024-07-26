@@ -31,8 +31,6 @@ pub struct BitReader<R: Read> {
     buffer: u64,
     /// The number of bits in the buffer. 0 indicates that the buffer is empty.
     buffer_len: u8,
-    /// The position of the first bit in the buffer.
-    buffer_pos: u8,
 }
 
 impl<R: Read> std::fmt::Debug for BitReader<R> {
@@ -40,7 +38,6 @@ impl<R: Read> std::fmt::Debug for BitReader<R> {
         f.debug_struct("BitReader")
             .field("buffer", &format!("{:064b}", self.buffer))
             .field("buffer_len", &self.buffer_len)
-            .field("buffer_pos", &self.buffer_pos)
             .finish()
     }
 }
@@ -51,7 +48,6 @@ impl<R: Read> BitReader<R> {
             reader,
             buffer: 0,
             buffer_len: 0,
-            buffer_pos: 0,
         }
     }
 
@@ -123,6 +119,13 @@ impl<R: Read> BitRead for BitReader<R> {
     /// ```
     #[inline]
     fn read_bit(&mut self) -> io::Result<bool> {
+        if self.buffer_len >= 1 {
+            let bit = (self.buffer >> 63) & 1;
+            self.buffer <<= 1;
+            self.buffer_len -= 1;
+
+            return Ok(bit == 1);
+        }
         self.fill_buffer()?;
         if self.buffer_len == 0 {
             return Err(io::Error::new(
@@ -153,6 +156,13 @@ impl<R: Read> BitRead for BitReader<R> {
     /// ```
     #[inline]
     fn read_byte(&mut self) -> io::Result<u8> {
+        if self.buffer_len >= 8 {
+            let byte = (self.buffer >> 56) as u8;
+            self.buffer <<= 8;
+            self.buffer_len -= 8;
+
+            return Ok(byte);
+        }
         self.fill_buffer()?;
 
         if self.buffer_len < 8 {
@@ -195,6 +205,14 @@ impl<R: Read> BitRead for BitReader<R> {
             n = 64;
         }
 
+        if self.buffer_len > n {
+            let bits = self.buffer >> (64 - n);
+            self.buffer <<= n;
+            self.buffer_len -= n;
+
+            return Ok(bits);
+        }
+
         let mut bits: u64 = 0;
         while n >= 8 {
             let byte = self.read_byte().map(u64::from)?;
@@ -230,7 +248,14 @@ impl<R: Read> BitRead for BitReader<R> {
     /// assert_eq!(bit_reader.peak_bits(4).unwrap(), 0b0100);
     /// ```
     #[inline]
-    fn peak_bits(&mut self, n: u8) -> io::Result<u64> {
+    fn peak_bits(&mut self, mut n: u8) -> io::Result<u64> {
+        if n > 56 {
+            n = 56;
+        }
+        if self.buffer_len >= n {
+            let bits = self.buffer >> (64 - n);
+            return Ok(bits);
+        }
         self.fill_buffer()?;
 
         if self.buffer_len < n {
