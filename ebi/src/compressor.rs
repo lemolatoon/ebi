@@ -7,6 +7,7 @@ use uncompressed::UncompressedCompressor;
 
 use crate::format::{self, CompressionScheme};
 
+pub mod buff;
 pub mod gorilla;
 pub mod run_length;
 pub mod uncompressed;
