@@ -20,6 +20,7 @@ use ebi::{
 };
 use rand::Rng;
 
+#[allow(dead_code)]
 fn generate_and_write_random_f64(path: impl AsRef<Path>, n: usize) -> io::Result<()> {
     let mut rng = rand::thread_rng();
     let mut random_values: Vec<f64> = Vec::with_capacity(n);
