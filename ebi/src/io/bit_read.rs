@@ -21,6 +21,7 @@ pub trait BitRead {
     fn peak_bits(&mut self, n: u8) -> io::Result<u64>;
 }
 
+#[derive(Clone, PartialEq, PartialOrd)]
 pub struct BitReader<R: Read> {
     /// The underlying reader.
     reader: R,
@@ -34,6 +35,16 @@ pub struct BitReader<R: Read> {
     buffer_pos: u8,
 }
 
+impl<R: Read> std::fmt::Debug for BitReader<R> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("BitReader")
+            .field("buffer", &format!("{:064b}", self.buffer))
+            .field("buffer_len", &self.buffer_len)
+            .field("buffer_pos", &self.buffer_pos)
+            .finish()
+    }
+}
+
 impl<R: Read> BitReader<R> {
     pub fn new(reader: R) -> Self {
         Self {
@@ -44,52 +55,48 @@ impl<R: Read> BitReader<R> {
         }
     }
 
-    /// Fill the buffer with 8 bits from the reader.
-    /// Return the number of bytes read.
-    ///
-    /// The bits left in the buffer will be discarded.
-    #[inline]
-    fn fill_buffer_full(&mut self) -> io::Result<u8> {
-        debug_assert!(self.buffer_len == 0);
-
-        let mut byte = [0u8; 8];
-        let n = self.reader.read(&mut byte)? as u8;
-
-        self.buffer = u64::from_be_bytes(byte);
-
-        self.buffer_len = n * 8;
-        self.buffer_pos = 0;
-        Ok(n)
-    }
-
-    /// Fill the buffer with 8 bits from the reader.
+    /// Fill the buffer with 64 bits from the reader.
     /// Return the number of bytes read.
     ///
     /// The bits left in the buffer will be preserved.
     #[inline]
     fn fill_buffer(&mut self) -> io::Result<u8> {
-        // reset buffer_pos
-        self.buffer <<= self.buffer_pos;
-        self.buffer_pos = 0;
+        if self.buffer_len == 64 {
+            return Ok(0);
+        }
 
-        // The number of bytes to read.
-        let mut n = (64 - self.buffer_len) / 8;
-        debug_assert!(n * 8 + self.buffer_len <= 64);
-        let mut byte = [0u8; 8];
-        n = self.reader.read(&mut byte[0..(n as usize)])? as u8;
-        let byte = u64::from_be_bytes(byte);
-        println!("byte: \t\t\t\t\t{:064b}", byte);
-        self.buffer = byte | (self.buffer >> (n * 8));
-        self.buffer_len += 8 * n;
-        Ok(n)
-    }
+        let rest_len = 64 - self.buffer_len;
 
-    #[inline]
-    fn read_bit_filled(&mut self) -> bool {
-        let bit = (self.buffer >> (63 - self.buffer_pos)) & 1;
-        self.buffer_pos += 1;
-        self.buffer_len -= 1;
-        bit == 1
+        let n_bytes_fetchable = rest_len / 8;
+
+        let mut bytes = [0u8; 8];
+
+        let n_bytes_read = self.reader.read(&mut bytes[..n_bytes_fetchable as usize])? as u8;
+        let n_bits_read = n_bytes_read * 8;
+
+        let bytes = u64::from_be_bytes(bytes);
+
+        // Create a mask to clear the buffer from `from` to `end`.
+        // Offset is from the most significant bit.
+        let create_mask = |from: u8, end: u8| {
+            if end - from == 64 {
+                return u64::MAX;
+            }
+            // let mask = (1 << (end - from)) - 1;
+            // let mask = mask << (64 - end);
+            1u64.wrapping_shl((end - from) as u32)
+                .wrapping_sub(1)
+                .wrapping_shl((64 - end) as u32)
+        };
+        let buffer_mask = create_mask(0, self.buffer_len);
+        let bytes_read_mask = create_mask(self.buffer_len, self.buffer_len + n_bits_read);
+
+        self.buffer =
+            (self.buffer & buffer_mask) | ((bytes >> (self.buffer_len)) & bytes_read_mask);
+
+        self.buffer_len += n_bits_read;
+
+        Ok(n_bytes_read)
     }
 }
 
@@ -116,19 +123,18 @@ impl<R: Read> BitRead for BitReader<R> {
     /// ```
     #[inline]
     fn read_bit(&mut self) -> io::Result<bool> {
+        self.fill_buffer()?;
         if self.buffer_len == 0 {
-            let n_bits_read = self.fill_buffer_full()?;
-
-            if n_bits_read == 0 {
-                return Err(io::Error::new(
-                    io::ErrorKind::UnexpectedEof,
-                    "EOF while reading a bit",
-                ));
-            }
+            return Err(io::Error::new(
+                io::ErrorKind::UnexpectedEof,
+                "EOF while reading a bit",
+            ));
         }
-        let bit = (self.buffer >> (63 - self.buffer_pos)) & 1;
-        self.buffer_pos += 1;
+
+        let bit = (self.buffer >> 63) & 1;
+        self.buffer <<= 1;
         self.buffer_len -= 1;
+
         Ok(bit == 1)
     }
 
@@ -147,25 +153,19 @@ impl<R: Read> BitRead for BitReader<R> {
     /// ```
     #[inline]
     fn read_byte(&mut self) -> io::Result<u8> {
-        let mut byte = 0u8;
-        if self.buffer_len == 0 {
-            self.fill_buffer_full()?;
-        }
+        self.fill_buffer()?;
+
         if self.buffer_len < 8 {
             return Err(io::Error::new(
                 io::ErrorKind::UnexpectedEof,
                 "EOF while reading a byte",
             ));
         }
-        if self.buffer_pos % 8 != 0 {
-            for _ in 0..8 {
-                byte = (byte << 1) | (self.read_bit_filled() as u8);
-            }
-        } else {
-            byte = (self.buffer >> (64 - 8 - self.buffer_pos)) as u8;
-            self.buffer <<= 8;
-            self.buffer_len -= 8;
-        }
+
+        let byte = (self.buffer >> 56) as u8;
+        self.buffer <<= 8;
+        self.buffer_len -= 8;
+
         Ok(byte)
     }
 
@@ -190,19 +190,25 @@ impl<R: Read> BitRead for BitReader<R> {
     /// assert_eq!(bit_reader.read_bits(4).unwrap_err().kind(), std::io::ErrorKind::UnexpectedEof);
     #[inline]
     fn read_bits(&mut self, mut n: u8) -> io::Result<u64> {
+        // can't read more than 64 bits into a u64
         if n > 64 {
             n = 64;
         }
-        let mut bits = 0u64;
 
-        while n > 8 {
-            bits = (bits << 8) | self.read_byte()? as u64;
+        let mut bits: u64 = 0;
+        while n >= 8 {
+            let byte = self.read_byte().map(u64::from)?;
+            bits = bits.wrapping_shl(8) | byte;
             n -= 8;
         }
 
-        for _ in 0..n {
-            bits = (bits << 1) | (self.read_bit()? as u64);
+        while n > 0 {
+            let bit = self.read_bit()?;
+            bits = bits.wrapping_shl(1) | (bit as u64);
+
+            n -= 1;
         }
+
         Ok(bits)
     }
 
@@ -224,21 +230,17 @@ impl<R: Read> BitRead for BitReader<R> {
     /// assert_eq!(bit_reader.peak_bits(4).unwrap(), 0b0100);
     /// ```
     #[inline]
-    fn peak_bits(&mut self, mut n: u8) -> io::Result<u64> {
-        if n > 56 {
-            n = 56;
-        }
-        if self.buffer_len < n {
-            self.fill_buffer()?;
-        }
+    fn peak_bits(&mut self, n: u8) -> io::Result<u64> {
+        self.fill_buffer()?;
+
         if self.buffer_len < n {
             return Err(io::Error::new(
                 io::ErrorKind::UnexpectedEof,
-                "EOF while reading bits",
+                "EOF while peaking bits",
             ));
         }
 
-        let bits = (self.buffer << self.buffer_pos) >> (64 - n);
+        let bits = self.buffer >> (64 - n);
 
         Ok(bits)
     }
@@ -246,6 +248,10 @@ impl<R: Read> BitRead for BitReader<R> {
 
 #[cfg(test)]
 mod tests {
+    use tsz::stream::Write as _;
+
+    use crate::compressor::gorilla::modified_tsz::BufferedWriterExt;
+
     use super::*;
 
     #[test]
@@ -272,5 +278,162 @@ mod tests {
             bit_reader.read_bit().unwrap_err().kind(),
             std::io::ErrorKind::UnexpectedEof
         );
+    }
+
+    #[test]
+    #[allow(clippy::bool_assert_comparison)]
+    fn read_bit() {
+        let bytes = [0b01101100, 0b11101001];
+        let mut b = BitReader::new(&bytes[..]);
+
+        assert_eq!(b.read_bit().unwrap(), false);
+        assert_eq!(b.read_bit().unwrap(), true);
+        assert_eq!(b.read_bit().unwrap(), true);
+        assert_eq!(b.read_bit().unwrap(), false);
+        assert_eq!(b.read_bit().unwrap(), true);
+        assert_eq!(b.read_bit().unwrap(), true);
+        assert_eq!(b.read_bit().unwrap(), false);
+        assert_eq!(b.read_bit().unwrap(), false);
+
+        assert_eq!(b.read_bit().unwrap(), true);
+        assert_eq!(b.read_bit().unwrap(), true);
+        assert_eq!(b.read_bit().unwrap(), true);
+        assert_eq!(b.read_bit().unwrap(), false);
+        assert_eq!(b.read_bit().unwrap(), true);
+        assert_eq!(b.read_bit().unwrap(), false);
+        assert_eq!(b.read_bit().unwrap(), false);
+        assert_eq!(b.read_bit().unwrap(), true);
+
+        assert_eq!(
+            b.read_bit().unwrap_err().kind(),
+            io::ErrorKind::UnexpectedEof
+        );
+    }
+
+    #[test]
+    #[allow(clippy::bool_assert_comparison)]
+    fn read_byte() {
+        let bytes = [100, 25, 0, 240, 240];
+        let mut b = BitReader::new(&bytes[..]);
+
+        assert_eq!(b.read_byte().unwrap(), 100);
+        assert_eq!(b.read_byte().unwrap(), 25);
+        assert_eq!(b.read_byte().unwrap(), 0);
+
+        // read some individual bits we can test `read_byte` when the position in the
+        // byte we are currently reading is non-zero
+        assert_eq!(b.read_bit().unwrap(), true);
+        assert_eq!(b.read_bit().unwrap(), true);
+        assert_eq!(b.read_bit().unwrap(), true);
+        assert_eq!(b.read_bit().unwrap(), true);
+
+        assert_eq!(b.read_byte().unwrap(), 15);
+
+        assert_eq!(
+            b.read_byte().unwrap_err().kind(),
+            io::ErrorKind::UnexpectedEof
+        );
+    }
+
+    #[test]
+    fn read_bits() {
+        let bytes = [0b01010111, 0b00011101, 0b11110101, 0b00010100];
+        let mut b = BitReader::new(&bytes[..]);
+
+        assert_eq!(b.read_bits(3).unwrap(), 0b010);
+        assert_eq!(b.read_bits(1).unwrap(), 0b1);
+        assert_eq!(b.read_bits(20).unwrap(), 0b01110001110111110101);
+        assert_eq!(b.read_bits(8).unwrap(), 0b00010100);
+        assert_eq!(
+            b.read_bits(4).unwrap_err().kind(),
+            io::ErrorKind::UnexpectedEof
+        );
+    }
+
+    #[test]
+    #[allow(clippy::bool_assert_comparison)]
+    fn read_mixed() {
+        let bytes = [0b01101101, 0b01101101];
+        let mut b = BitReader::new(&bytes[..]);
+
+        assert_eq!(b.read_bit().unwrap(), false);
+        assert_eq!(b.read_bits(3).unwrap(), 0b110);
+        assert_eq!(b.read_byte().unwrap(), 0b11010110);
+        assert_eq!(b.read_bits(2).unwrap(), 0b11);
+        assert_eq!(b.read_bit().unwrap(), false);
+        assert_eq!(b.read_bits(1).unwrap(), 0b1);
+        assert_eq!(
+            b.read_bit().unwrap_err().kind(),
+            io::ErrorKind::UnexpectedEof
+        );
+    }
+
+    #[test]
+    fn peak_bits() {
+        let bytes = [0b01010111, 0b00011101, 0b11110101, 0b00010100];
+        let mut b = BitReader::new(&bytes[..]);
+
+        assert_eq!(b.peak_bits(1).unwrap(), 0b0);
+        assert_eq!(b.peak_bits(4).unwrap(), 0b0101);
+        assert_eq!(b.peak_bits(8).unwrap(), 0b01010111);
+        assert_eq!(b.peak_bits(20).unwrap(), 0b01010111000111011111);
+
+        // read some individual bits we can test `peak_bits` when the position in the
+        // byte we are currently reading is non-zero
+        assert_eq!(b.read_bits(12).unwrap(), 0b010101110001);
+
+        assert_eq!(b.peak_bits(1).unwrap(), 0b1);
+        assert_eq!(b.peak_bits(4).unwrap(), 0b1101);
+        assert_eq!(b.peak_bits(8).unwrap(), 0b11011111);
+        assert_eq!(b.peak_bits(20).unwrap(), 0b11011111010100010100);
+
+        assert_eq!(
+            b.peak_bits(22).unwrap_err().kind(),
+            io::ErrorKind::UnexpectedEof
+        );
+    }
+
+    #[test]
+    #[allow(clippy::bool_assert_comparison)]
+    #[allow(clippy::unusual_byte_groupings)]
+    fn read_many_bits() {
+        let bytes = [
+            0b0100_1001,
+            0b1101_1011,
+            0b1111_0101,
+            0b0001_0100,
+            0b1001_0110,
+            0b1001_0101,
+            0b1011_1101,
+            0b1001_1011,
+        ];
+        let mut b = BitReader::new(&bytes[..]);
+
+        assert_eq!(b.read_bit().unwrap(), false);
+        assert_eq!(b.read_bit().unwrap(), true);
+        // 6 + 8 * 5 + 6 = 52
+        assert_eq!(
+            b.read_bits(52).unwrap(),
+            0b00_1001__1101_1011__1111_0101__0001_0100__1001_0110__1001_0101__1011_11
+        );
+    }
+
+    #[test]
+    #[allow(clippy::bool_assert_comparison)]
+    #[allow(clippy::unusual_byte_groupings)]
+    fn read_many_bits2() {
+        let mut writer = BufferedWriterExt::new();
+        writer.write_bits(0b0101_010, 63);
+        writer.write_bits(0b1_0111, 5);
+        writer.write_bits(0b111_1010, 7);
+
+        let bytes = writer.as_slice();
+
+        let mut reader = BitReader::new(bytes);
+
+        assert_eq!(reader.read_bits(63 - 7).unwrap(), 0);
+        assert_eq!(reader.read_bits(7).unwrap(), 0b0101_010);
+        assert_eq!(reader.read_bits(5).unwrap(), 0b1_0111);
+        assert_eq!(reader.read_bits(7).unwrap(), 0b111_1010);
     }
 }

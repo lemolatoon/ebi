@@ -89,6 +89,7 @@ mod tests {
 
     #[test]
     fn test_round_trip_rle() {
+        panic!("unimplemented");
         let compressor_config = CompressorConfig::rle().build();
 
         for n in [1003, 10003, 100004, 100005] {
