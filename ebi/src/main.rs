@@ -29,7 +29,9 @@ fn generate_and_write_random_f64(path: impl AsRef<Path>, n: usize) -> io::Result
         if rng.gen_bool(0.5) && random_values.last().is_some() {
             random_values.push(random_values[i - 1]);
         } else {
-            random_values.push(rng.gen());
+            let mut fp: f64 = rng.gen();
+            fp = (fp * 10.0).floor() / 10.0;
+            random_values.push(fp);
         }
     }
 
@@ -45,10 +47,11 @@ fn generate_and_write_random_f64(path: impl AsRef<Path>, n: usize) -> io::Result
 
 fn main() {
     const RECORD_COUNT: usize = 100;
-    // generate_and_write_random_f64("uncompressed.bin", RECORD_COUNT * 3000 + 3).unwrap();
+    generate_and_write_random_f64("uncompressed.bin", RECORD_COUNT * 3000 + 3).unwrap();
     // let compressor = GenericCompressor::Uncompressed(UncompressedCompressor::new(100));
     // let compressor_config = CompressorConfig::rle().build();
-    let compressor_config = CompressorConfig::gorilla().build();
+    // let compressor_config = CompressorConfig::gorilla().build();
+    let compressor_config = CompressorConfig::buff().build();
     let chunk_option = ChunkOption::RecordCount(RECORD_COUNT);
 
     let mut encoder = Encoder::new(

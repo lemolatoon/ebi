@@ -272,6 +272,7 @@ dependencies = [
  "criterion",
  "derive-getters",
  "derive_builder",
+ "either",
  "quick-impl",
  "rand",
  "rand_chacha",

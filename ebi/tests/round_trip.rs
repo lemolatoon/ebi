@@ -48,6 +48,12 @@ fn test_api_round_trip_rle() {
     test_round_trip(compressor_config.into());
 }
 
+#[test]
+fn test_api_round_trip_buff() {
+    let compressor_config = CompressorConfig::buff().build();
+    test_round_trip(compressor_config.into());
+}
+
 fn test_round_trip(compressor_config: CompressorConfig) {
     for n in [1003, 10003, 100004, 100005] {
         #[cfg(miri)] // miri is too slow

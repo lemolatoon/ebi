@@ -1,3 +1,4 @@
+use buff::BUFFCompressor;
 use derive_builder::Builder;
 use gorilla::GorillaCompressor;
 use quick_impl::QuickImpl;
@@ -42,6 +43,7 @@ pub enum GenericCompressor {
     Uncompressed(UncompressedCompressor),
     RLE(RunLengthCompressor),
     Gorilla(GorillaCompressor),
+    BUFF(BUFFCompressor),
 }
 
 macro_rules! impl_generic_compressor {
@@ -92,11 +94,12 @@ impl GenericCompressor {
             GenericCompressor::Uncompressed(_) => format::CompressionScheme::Uncompressed,
             GenericCompressor::RLE(_) => format::CompressionScheme::RLE,
             GenericCompressor::Gorilla(_) => format::CompressionScheme::Gorilla,
+            GenericCompressor::BUFF(_) => format::CompressionScheme::BUFF,
         }
     }
 }
 
-impl_generic_compressor!(GenericCompressor, Uncompressed, RLE, Gorilla);
+impl_generic_compressor!(GenericCompressor, Uncompressed, RLE, Gorilla, BUFF);
 
 #[derive(QuickImpl, Debug, Clone)]
 pub enum CompressorConfig {
@@ -106,6 +109,8 @@ pub enum CompressorConfig {
     RLE(RunLengthCompressorConfig),
     #[quick_impl(impl From)]
     Gorilla(GorillaCompressorConfig),
+    #[quick_impl(impl From)]
+    BUFF(BUFFCompressorConfig),
 }
 
 impl CompressorConfig {
@@ -124,6 +129,7 @@ impl CompressorConfig {
             CompressorConfig::Gorilla(c) => {
                 GenericCompressor::Gorilla(GorillaCompressor::with_capacity(c.capacity.0))
             }
+            CompressorConfig::BUFF(c) => GenericCompressor::BUFF(BUFFCompressor::new(c.scale)),
         }
     }
 
@@ -138,6 +144,7 @@ impl From<&CompressorConfig> for CompressionScheme {
             CompressorConfig::Uncompressed(_) => Self::Uncompressed,
             CompressorConfig::RLE(_) => Self::RLE,
             CompressorConfig::Gorilla(_) => Self::Gorilla,
+            CompressorConfig::BUFF(_) => Self::BUFF,
         }
     }
 }
@@ -153,6 +160,10 @@ impl CompressorConfig {
 
     pub fn gorilla() -> GorillaCompressorConfigBuilder {
         GorillaCompressorConfigBuilder::default()
+    }
+
+    pub fn buff() -> BUFFCompressorConfigBuilder {
+        BUFFCompressorConfigBuilder::default()
     }
 }
 
@@ -222,11 +233,27 @@ impl GorillaCompressorConfigBuilder {
     }
 }
 
+#[derive(Builder, Debug, Clone, Copy)]
+#[builder(pattern = "owned", build_fn(skip))]
+pub struct BUFFCompressorConfig {
+    scale: usize,
+}
+
+impl BUFFCompressorConfigBuilder {
+    pub fn build(self) -> BUFFCompressorConfig {
+        BUFFCompressorConfig {
+            scale: self.scale.unwrap_or(1),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::mem::size_of_val;
 
-    use super::{gorilla::GorillaCompressor, GenericCompressor};
+    use super::{
+        buff::BUFFCompressor, gorilla::GorillaCompressor, CompressorConfig, GenericCompressor,
+    };
 
     fn test_total_bytes_in(compressor: &mut GenericCompressor) {
         let mut floats: Vec<f64> = (0..10).map(|x| (x / 2) as f64).collect();
@@ -329,6 +356,20 @@ mod tests {
     #[test]
     fn test_gorilla() {
         let mut compressor = GenericCompressor::Gorilla(GorillaCompressor::new());
+
+        test_total_bytes_in(&mut compressor);
+        test_total_bytes_buffered(&mut compressor);
+
+        test_reset(&mut compressor);
+
+        test_total_bytes_in(&mut compressor);
+        test_total_bytes_buffered(&mut compressor);
+    }
+
+    #[test]
+    fn test_buff() {
+        let config: CompressorConfig = CompressorConfig::buff().build().into();
+        let mut compressor = config.build();
 
         test_total_bytes_in(&mut compressor);
         test_total_bytes_buffered(&mut compressor);

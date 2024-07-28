@@ -486,7 +486,7 @@ mod tests {
                 env!("CARGO_PKG_VERSION_MINOR"),
                 env!("CARGO_PKG_VERSION_PATCH")
             ]
-            .map(|v| v.parse().unwrap())
+            .map(|v| v.parse::<u16>().unwrap())
         );
         assert_eq!(file_header.config.field_type, FieldType::F64);
         assert_eq!(

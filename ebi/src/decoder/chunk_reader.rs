@@ -1,3 +1,4 @@
+pub mod buff;
 pub mod gorilla;
 pub mod run_length;
 pub mod uncompressed;
@@ -109,6 +110,7 @@ pub enum GeneralChunkReaderInner<R: Read> {
     Uncompressed(uncompressed::UncompressedReader<R>),
     RLE(run_length::RunLengthReader<R>),
     Gorilla(gorilla::GorillaReader<R>),
+    BUFF(buff::BUFFReader<R>),
 }
 
 impl<R: Read> GeneralChunkReaderInner<R> {
@@ -138,6 +140,7 @@ impl<R: Read> From<&GeneralChunkReaderInner<R>> for CompressionScheme {
             GeneralChunkReaderInner::Uncompressed(_) => CompressionScheme::Uncompressed,
             GeneralChunkReaderInner::RLE(_) => CompressionScheme::RLE,
             GeneralChunkReaderInner::Gorilla(_) => CompressionScheme::Gorilla,
+            GeneralChunkReaderInner::BUFF(_) => CompressionScheme::BUFF,
         }
     }
 }
@@ -183,6 +186,8 @@ pub enum GeneralDecompressIterator<'a, R: Read> {
     RLE(run_length::RunLengthIterator<'a, R>),
     #[quick_impl(impl From)]
     Gorilla(gorilla::GorillaIterator<'a, R>),
+    #[quick_impl(impl From)]
+    BUFF(buff::BUFFIterator<'a>),
 }
 
 impl<'a, R: Read> Iterator for GeneralDecompressIterator<'a, R> {
@@ -193,6 +198,7 @@ impl<'a, R: Read> Iterator for GeneralDecompressIterator<'a, R> {
             GeneralDecompressIterator::Uncompressed(c) => c.next(),
             GeneralDecompressIterator::RLE(c) => c.next(),
             GeneralDecompressIterator::Gorilla(c) => c.next(),
+            GeneralDecompressIterator::BUFF(c) => c.next(),
         }
     }
 }
@@ -289,7 +295,7 @@ macro_rules! impl_generic_reader {
     };
 }
 
-impl_generic_reader!(GeneralChunkReaderInner, Uncompressed, RLE, Gorilla);
+impl_generic_reader!(GeneralChunkReaderInner, Uncompressed, RLE, Gorilla, BUFF);
 
 #[cfg(test)]
 mod tests {
@@ -414,5 +420,10 @@ mod tests {
     #[test]
     fn test_uncompressed() {
         test_all(CompressorConfig::uncompressed().build());
+    }
+
+    #[test]
+    fn test_buff() {
+        test_all(CompressorConfig::buff().build());
     }
 }

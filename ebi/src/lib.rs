@@ -1,4 +1,5 @@
 pub mod api;
+pub mod compression_common;
 pub mod compressor;
 pub mod core;
 pub mod decoder;
