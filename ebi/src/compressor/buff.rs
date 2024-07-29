@@ -91,7 +91,9 @@ mod internal {
 
             let mut bound = PrecisionBound::new(prec_delta);
             // let start1 = Instant::now();
+            dbg!(prec);
             let dec_len = *PRECISION_MAP.get(prec as usize).unwrap();
+            dbg!(dec_len);
             bound.set_length(0, dec_len);
             let mut min = i64::max_value();
             let mut max = i64::min_value();
@@ -100,11 +102,15 @@ mod internal {
                 let fixed = bound.fetch_fixed_aligned(*bd);
                 if fixed < min {
                     min = fixed;
-                } else if fixed > max {
+                    dbg!((min, *bd));
+                }
+                if fixed > max {
                     max = fixed;
+                    dbg!((max, *bd));
                 }
                 fixed_vec.push(fixed);
             }
+            dbg!(min, max);
             let delta = max - min;
             let base_fixed = min;
             println!("base integer: {}, max:{}", base_fixed, max);
@@ -112,13 +118,19 @@ mod internal {
             let base_fixed64: i64 = base_fixed;
             let mut single_val = false;
             let mut cal_int_length = 0.0;
-            if delta == 0 {
-                single_val = true;
-            } else {
-                cal_int_length = (delta as f64).log2().ceil();
-            }
+            // if delta == 0 {
+            //     single_val = true;
+            // } else {
+            //     cal_int_length = (delta as f64).log2().ceil();
+            // }
+            cal_int_length = (max as f64).log2().ceil();
 
             let fixed_len = cal_int_length as usize;
+            dbg!(min, max, cal_int_length, dec_len);
+            println!("min:\t\t {:064b}", min);
+            println!("min(delta):\t {:064b}", min - base_fixed64);
+            println!("max:\t\t {:064b}", max);
+            println!("max(delta):\t {:064b}", max - base_fixed64);
             bound.set_length((cal_int_length as u64 - dec_len), dec_len);
             let ilen = fixed_len - dec_len as usize;
             let dlen = dec_len as usize;

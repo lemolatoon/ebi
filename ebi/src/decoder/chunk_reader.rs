@@ -129,6 +129,9 @@ impl<R: Read> GeneralChunkReaderInner<R> {
             CompressionScheme::Gorilla => {
                 GeneralChunkReaderInner::Gorilla(gorilla::GorillaReader::new(handle, reader))
             }
+            CompressionScheme::BUFF => {
+                GeneralChunkReaderInner::BUFF(buff::BUFFReader::new(handle, reader))
+            }
             c => unimplemented!("Unimplemented compression scheme: {:?}", c),
         })
     }
@@ -321,7 +324,27 @@ mod tests {
             if rng.gen_bool(0.5) && random_values.last().is_some() {
                 random_values.push(random_values[i - 1]);
             } else {
-                random_values.push(rng.gen());
+                random_values.push(rng.gen_range(0.0..10000.0));
+            }
+        }
+
+        random_values
+    }
+
+    fn generate_and_write_random_f64_with_precision(n: usize, scale: usize) -> Vec<f64> {
+        let mut rng = rand::thread_rng();
+        let mut random_values: Vec<f64> = Vec::with_capacity(n);
+
+        fn round_by_scale(value: f64, scale: usize) -> f64 {
+            let scale = scale as f64;
+            (value * scale).round() / scale
+        }
+
+        for i in 0..n {
+            if rng.gen_bool(0.5) && random_values.last().is_some() {
+                random_values.push(random_values[i - 1]);
+            } else {
+                random_values.push(round_by_scale(rng.gen_range(0.0..10000.0), scale));
             }
         }
 
@@ -359,6 +382,17 @@ mod tests {
     fn test_all(compresor_config: impl Into<CompressorConfig>) {
         let values = generate_and_write_random_f64(1003);
         let mut decoder = decoder(values.as_slice(), compresor_config.into());
+
+        let mut reader = decoder.chunk_reader(ChunkId::new(0)).unwrap();
+
+        test_compressed_result(reader.inner_mut());
+
+        test_decompress_iter(&mut decoder);
+    }
+
+    fn test_all_with_precision(compresor_config: CompressorConfig, scale: usize) {
+        let values = generate_and_write_random_f64_with_precision(1003, scale);
+        let mut decoder = decoder(values.as_slice(), compresor_config.clone());
 
         let mut reader = decoder.chunk_reader(ChunkId::new(0)).unwrap();
 
@@ -424,6 +458,7 @@ mod tests {
 
     #[test]
     fn test_buff() {
-        test_all(CompressorConfig::buff().build());
+        let scale = 100;
+        test_all_with_precision(CompressorConfig::buff().scale(scale).build().into(), scale);
     }
 }

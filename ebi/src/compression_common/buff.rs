@@ -207,8 +207,8 @@ pub mod precision_bound {
             if exp < self.precision_exp {
                 fixed = 0u64;
             } else {
-                fixed =
-                    ((bdu << (11)) | FIRST_ONE) >> (63 - exp - self.decimal_length as i32) as u64;
+                fixed = ((bdu << (11)) | FIRST_ONE)
+                    >> (63 - (exp) - (self.decimal_length) as i32) as u64;
                 if sign != 0 {
                     fixed = !(fixed - 1);
                 }

@@ -18,7 +18,7 @@ pub struct BUFFReader<R: Read> {
 }
 
 impl<R: Read> BUFFReader<R> {
-    pub fn new<T: FileMetadataLike>(handle: GeneralChunkHandle<T>, reader: R) -> Self {
+    pub fn new<T: FileMetadataLike>(handle: &GeneralChunkHandle<T>, reader: R) -> Self {
         let chunk_size = handle.chunk_size();
         Self {
             reader,
@@ -39,11 +39,15 @@ impl<R: Read> Reader for BUFFReader<R> {
         Self: 'a;
 
     fn decompress(&mut self) -> io::Result<&[f64]> {
+        if self.decompressed.is_some() {
+            return Ok(self.decompressed.as_ref().unwrap());
+        }
+
         let mut buf = vec![0; self.chunk_size as usize];
         self.reader.read_exact(&mut buf)?;
 
         // TODO: use the scale from the header
-        let result = internal::buff_simd256_decode(1, buf);
+        let result = internal::buff_simd256_decode(100, buf);
 
         self.decompressed = Some(result);
 
