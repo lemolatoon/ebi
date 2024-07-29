@@ -104,10 +104,13 @@ mod internal {
         println!("base integer: {}", base_int);
         let len = bitpack.read(32).unwrap();
         println!("total vector size:{}", len);
-        let ilen = bitpack.read(32).unwrap();
-        println!("bit packing length:{}", ilen);
+        let fixed_representation_bits_length = bitpack.read(32).unwrap();
+        println!(
+            "fixed_representation_bits_length:{}",
+            fixed_representation_bits_length
+        );
         let dlen = bitpack.read(32).unwrap();
-        bound.set_length(ilen as u64, dlen as u64);
+        bound.set_length(fixed_representation_bits_length as u64, dlen as u64);
         // check integer part and update bitmap;
 
         let mut expected_datapoints: Vec<f64> = Vec::new();
@@ -116,7 +119,7 @@ mod internal {
         let mut dec_scl: f64 = 2.0f64.powi(dlen as i32);
         println!("Scale for decimal:{}", dec_scl);
 
-        let mut remain = dlen + ilen;
+        let mut remain = fixed_representation_bits_length;
         let mut bytec = 0;
         let mut chunk;
         let mut f_cur = 0f64;

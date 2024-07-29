@@ -125,31 +125,31 @@ mod internal {
             // }
             cal_int_length = (max as f64).log2().ceil();
 
-            let fixed_len = cal_int_length as usize;
+            let fixed_representation_bits_length =
+                std::cmp::max((delta as f64).log2().ceil() as u32, 1);
             dbg!(min, max, cal_int_length, dec_len);
             println!("min:\t\t {:064b}", min);
             println!("min(delta):\t {:064b}", min - base_fixed64);
             println!("max:\t\t {:064b}", max);
             println!("max(delta):\t {:064b}", max - base_fixed64);
             bound.set_length((cal_int_length as u64 - dec_len), dec_len);
-            let ilen = fixed_len - dec_len as usize;
             let dlen = dec_len as usize;
-            println!("int_len:{},dec_len:{}", ilen as u64, dec_len);
             let mut bitpack_vec = BitPack::<Vec<u8>>::with_capacity(8);
             bitpack_vec.write(ubase_fixed as u32, 32);
             bitpack_vec.write((ubase_fixed >> 32) as u32, 32);
             bitpack_vec.write(t, 32);
-            bitpack_vec.write(ilen as u32, 32);
+            bitpack_vec.write(fixed_representation_bits_length, 32);
             bitpack_vec.write(dlen as u32, 32);
 
             // let duration1 = start1.elapsed();
             // println!("Time elapsed in dividing double function() is: {:?}", duration1);
 
             // let start1 = Instant::now();
-            let mut remain = fixed_len;
+            let mut remain = fixed_representation_bits_length as usize;
             let mut bytec = 0;
 
             if remain < 8 {
+                dbg!(remain);
                 for i in fixed_vec {
                     bitpack_vec
                         .write_bits((i - base_fixed64) as u32, remain)
