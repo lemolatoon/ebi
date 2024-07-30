@@ -5,6 +5,11 @@ mod helper {
     use ebi::api::decoder::ChunkId;
     use ebi::compressor::CompressorConfig;
     use ebi::decoder::query::{Range, RangeValue};
+    use rand::prelude::Distribution;
+    use rand::rngs::StdRng;
+    use rand::seq::SliceRandom as _;
+    use rand::{Rng, SeedableRng};
+    use std::cmp::min;
     use std::io::Cursor;
 
     use ebi::{
@@ -44,6 +49,48 @@ mod helper {
         };
 
         assert_eq!(bitmap, expected, "[{test_name}]: Filter result mismatch");
+    }
+
+    fn test_query_filter_inner_with_expected_calculation(
+        config: CompressorConfig,
+        values: Vec<f64>,
+        chunk_option: ChunkOption,
+        predicate: Predicate,
+        bitmask: Option<&RoaringBitmap>,
+        chunk_id: Option<ChunkId>,
+        test_name: String,
+    ) {
+        let encoded = {
+            let uncompressed_config = CompressorConfig::uncompressed().build();
+            let encoder_input = EncoderInput::from_f64_slice(&values);
+            let encoder_output = EncoderOutput::from_vec(Vec::new());
+            let mut encoder = Encoder::new(
+                encoder_input,
+                encoder_output,
+                chunk_option,
+                uncompressed_config,
+            );
+            encoder.encode().unwrap();
+            encoder.into_output().into_vec()
+        };
+
+        let expected = {
+            let input_cursor = Cursor::new(&encoded[..]);
+            let decoder_input = DecoderInput::from_reader(input_cursor);
+            let mut decoder = Decoder::new(decoder_input).unwrap();
+            decoder.filter(predicate, bitmask, chunk_id).unwrap()
+        };
+
+        test_query_filter_inner(
+            config,
+            values,
+            chunk_option,
+            predicate,
+            bitmask,
+            chunk_id,
+            expected,
+            test_name,
+        );
     }
 
     /// Test filter_materialize
@@ -111,6 +158,51 @@ mod helper {
         assert_eq!(
             materialized, expected,
             "[{test_name}]: Filter materialize result mismatch"
+        );
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn test_query_filter_materialize_inner_with_expected_calculation(
+        config: CompressorConfig,
+        values: Vec<f64>,
+        chunk_option: ChunkOption,
+        predicate: Predicate,
+        bitmask: Option<&RoaringBitmap>,
+        chunk_id: Option<ChunkId>,
+        test_name: String,
+        round_scale: Option<usize>,
+    ) {
+        let encoded = {
+            let uncompressed_config = CompressorConfig::uncompressed().build();
+            let encoder_input = EncoderInput::from_f64_slice(&values);
+            let encoder_output = EncoderOutput::from_vec(Vec::new());
+            let mut encoder = Encoder::new(
+                encoder_input,
+                encoder_output,
+                chunk_option,
+                uncompressed_config,
+            );
+            encoder.encode().unwrap();
+            encoder.into_output().into_vec()
+        };
+
+        let expected = {
+            let input_cursor = Cursor::new(&encoded[..]);
+            let decoder_input = DecoderInput::from_reader(input_cursor);
+            let mut decoder = Decoder::new(decoder_input).unwrap();
+            decoder.filter(predicate, bitmask, chunk_id).unwrap()
+        };
+
+        test_query_filter_materialize_inner(
+            config,
+            values,
+            chunk_option,
+            predicate,
+            bitmask,
+            chunk_id,
+            expected,
+            test_name,
+            round_scale,
         );
     }
 
@@ -363,19 +455,229 @@ mod helper {
         }
     }
 
-    pub(crate) fn test_query_filter(
+    fn test_query_filter_optionally_materialize_random(
         config: impl Into<CompressorConfig>,
         test_name: impl std::fmt::Display,
+        is_filter_materialize: bool,
+        round_scale: Option<usize>,
+        mean: Option<f64>,
+        std_dev: Option<f64>,
     ) {
-        test_query_filter_optionally_materialize(config, test_name, false, None);
+        let config = config.into();
+        let t_name = |n: String| format!("{test_name}: {n}");
+
+        let query_name = if is_filter_materialize {
+            "Filter Materialize"
+        } else {
+            "Filter"
+        };
+
+        type TestFnRandom = Box<
+            dyn Fn(
+                CompressorConfig,
+                Vec<f64>,
+                ChunkOption,
+                Predicate,
+                Option<&RoaringBitmap>,
+                Option<ChunkId>,
+                String,
+            ),
+        >;
+        let test_fn_random: TestFnRandom = if is_filter_materialize {
+            Box::new(move |config, values, option, pred, bm, id, name| {
+                test_query_filter_materialize_inner_with_expected_calculation(
+                    config,
+                    values,
+                    option,
+                    pred,
+                    bm,
+                    id,
+                    name,
+                    round_scale,
+                )
+            })
+        } else {
+            Box::new(test_query_filter_inner_with_expected_calculation)
+        };
+        let mut rng = StdRng::from_entropy();
+        let gen_random_float = || {
+            let mut rng = StdRng::from_entropy();
+            match rng.gen_range(0..=3) {
+                0 => rng.gen_range(f64::MIN / 2.0..=0.0),
+                1 => rng.gen_range(0.0..=f64::MAX / 2.0),
+                2 => rng.gen_range(-10000.0..=10000.0),
+                3 => rng.gen_range(0.0..=100.0),
+                _ => unreachable!(),
+            }
+        };
+        let mean = mean.unwrap_or_else(gen_random_float);
+        let std_dev = std_dev.unwrap_or_else(|| rng.gen_range(0.001..=1000.0));
+        println!("mean: {}, std_dev: {}", mean, std_dev);
+        let distribution = rand_distr::Normal::new(mean, std_dev).unwrap();
+        let mut n_records = *[10, 100, 1000, 10000, 100000, 1000000]
+            .as_slice()
+            .choose(&mut rng)
+            .unwrap();
+        n_records += rng.gen_range(0..n_records - 1);
+        let chunk_option = if rng.gen_bool(0.5) {
+            let mut rng = StdRng::from_entropy();
+            let n_chunks_max = n_records / min(rng.gen_range(1..=10000), n_records);
+            let n_chunks = rng.gen_range(1..=n_chunks_max);
+            ChunkOption::RecordCount(n_records / n_chunks)
+        } else {
+            let byte_size = rng.gen_range(100..=1024 * 10);
+            ChunkOption::ByteSize(byte_size)
+        };
+        println!("n_records: {}, chunk_option: {:?}", n_records, chunk_option);
+        let gen_values = || {
+            let mut rng = StdRng::from_entropy();
+            let mut values = Vec::with_capacity(n_records);
+            for _ in 0..n_records {
+                let fp = distribution.sample(&mut rng);
+                if let Some(scale) = round_scale {
+                    values.push((fp * scale as f64).round() / scale as f64);
+                } else {
+                    values.push(fp);
+                }
+            }
+            values
+        };
+
+        let gen_chunk_id = || {
+            let mut rng = StdRng::from_entropy();
+            if let ChunkOption::RecordCount(record_counts) = chunk_option {
+                if rng.gen_bool(0.5) {
+                    Some(ChunkId::new(rng.gen_range(0..=(n_records / record_counts))))
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+        };
+
+        let gen_bitmask = || {
+            let mut rng = StdRng::from_entropy();
+            if rng.gen_bool(0.5) {
+                let mut bitmask = RoaringBitmap::new();
+                let p = rng.gen_range(0.0..=1.0);
+                for i in 0..n_records {
+                    if rng.gen_bool(p) {
+                        bitmask.insert(i as u32);
+                    }
+                }
+                Some(bitmask)
+            } else {
+                None
+            }
+        };
+
+        // Range
+        {
+            let mut gen_range_value = || match rng.gen_range(0..=3) {
+                0 => RangeValue::None,
+                1 => RangeValue::Inclusive(distribution.sample(&mut rng)),
+                2 => RangeValue::Exclusive(distribution.sample(&mut rng)),
+                3 => RangeValue::Inclusive(distribution.sample(&mut rng)),
+                _ => unreachable!(),
+            };
+            let predicate = Predicate::Range(Range::new(gen_range_value(), gen_range_value()));
+            let values = gen_values();
+            let bitmask = gen_bitmask();
+            let chunk_id = gen_chunk_id();
+
+            test_fn_random(
+                config.clone(),
+                values.clone(),
+                chunk_option,
+                predicate,
+                bitmask.as_ref(),
+                chunk_id,
+                t_name(format!(
+                    "Range({:?}), {:?}, bitmask?: {} {query_name}",
+                    predicate,
+                    chunk_id,
+                    bitmask.is_some()
+                )),
+            );
+        }
+
+        // Eq
+        {
+            let predicate = Predicate::Eq(distribution.sample(&mut rng));
+            let values = gen_values();
+            let bitmask = gen_bitmask();
+            let chunk_id = gen_chunk_id();
+
+            test_fn_random(
+                config.clone(),
+                values.clone(),
+                chunk_option,
+                predicate,
+                bitmask.as_ref(),
+                chunk_id,
+                t_name(format!(
+                    "Eq({:?}), {:?}, bitmask?: {} {query_name}",
+                    predicate,
+                    chunk_id,
+                    bitmask.is_some()
+                )),
+            );
+        }
+
+        // Ne
+        {
+            let predicate = Predicate::Ne(distribution.sample(&mut rng));
+            let values = gen_values();
+            let bitmask = gen_bitmask();
+            let chunk_id = gen_chunk_id();
+
+            test_fn_random(
+                config,
+                values,
+                chunk_option,
+                predicate,
+                bitmask.as_ref(),
+                chunk_id,
+                t_name(format!(
+                    "Ne({:?}), {:?}, bitmask?: {} {query_name}",
+                    predicate,
+                    chunk_id,
+                    bitmask.is_some()
+                )),
+            );
+        }
+    }
+
+    pub(crate) fn test_query_filter(
+        config: impl Into<CompressorConfig>,
+        test_name: impl std::fmt::Display + Clone,
+    ) {
+        let config = config.into();
+        test_query_filter_optionally_materialize(config.clone(), test_name.clone(), false, None);
+        test_query_filter_optionally_materialize_random(config, test_name, false, None, None, None);
     }
 
     pub(crate) fn test_query_filter_materialize(
         config: impl Into<CompressorConfig>,
         round_scale: Option<usize>,
-        test_name: impl std::fmt::Display,
+        test_name: impl std::fmt::Display + Clone,
     ) {
-        test_query_filter_optionally_materialize(config, test_name, true, round_scale);
+        let config = config.into();
+        test_query_filter_optionally_materialize(
+            config.clone(),
+            test_name.clone(),
+            true,
+            round_scale,
+        );
+        test_query_filter_optionally_materialize_random(
+            config,
+            test_name,
+            true,
+            round_scale,
+            None,
+            None,
+        );
     }
 
     #[allow(clippy::too_many_arguments)]

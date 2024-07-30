@@ -33,10 +33,6 @@ impl<R: Read> UncompressedReader<R> {
         let header1_size = header_head.header_size as usize - size_of::<UncompressedHeader0>();
         let mut header = vec![0u8; header1_size].into_boxed_slice();
         reader.read_exact(&mut header)?;
-        println!(
-            "header: {:?}",
-            header.iter().map(|c| *c as char).collect::<String>()
-        );
         let header = NativeUncompressedHeader::new(header_head, header);
         let number_of_records = handle.number_of_records() as usize;
 

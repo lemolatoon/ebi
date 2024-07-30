@@ -9,7 +9,7 @@ use ebi::{
     decoder::query::{Predicate, Range, RangeValue},
     encoder::ChunkOption,
 };
-use rand::{random, Rng};
+use rand::Rng;
 
 #[cfg(test)]
 pub(crate) fn generate_and_write_random_f64(n: usize) -> Vec<f64> {
