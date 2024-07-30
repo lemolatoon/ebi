@@ -164,16 +164,16 @@ mod helper {
         // Range filter
         {
             // Test 1: Range filter (Inclusive, Inclusive)
-            let values = vec![3.3, 5.6, 3.8, 6.7, 2.1, 9.9, 10.1];
+            let values = vec![-300.3, -5.6, -3.8, -699.7, 2.1, 9.9, 100.1];
             let predicate = Predicate::Range(Range::new(
-                RangeValue::Inclusive(3.8),
+                RangeValue::Inclusive(-3.8),
                 RangeValue::Inclusive(9.9),
             ));
-            let expected = RoaringBitmap::from_iter(vec![1, 2, 3, 5]);
+            let expected = RoaringBitmap::from_iter(vec![2, 4, 5]);
             test_fn(
                 config.clone(),
                 values,
-                ChunkOption::RecordCount(2),
+                ChunkOption::RecordCount(5),
                 predicate,
                 None,
                 None,
@@ -191,7 +191,7 @@ mod helper {
             test_fn(
                 config.clone(),
                 values,
-                ChunkOption::RecordCount(2),
+                ChunkOption::RecordCount(5),
                 predicate,
                 None,
                 None,
@@ -209,7 +209,7 @@ mod helper {
             test_fn(
                 config.clone(),
                 values,
-                ChunkOption::RecordCount(2),
+                ChunkOption::RecordCount(5),
                 predicate,
                 None,
                 None,
@@ -227,7 +227,7 @@ mod helper {
             test_fn(
                 config.clone(),
                 values,
-                ChunkOption::RecordCount(2),
+                ChunkOption::RecordCount(5),
                 predicate,
                 None,
                 None,
@@ -243,7 +243,7 @@ mod helper {
             test_fn(
                 config.clone(),
                 values,
-                ChunkOption::RecordCount(2),
+                ChunkOption::RecordCount(5),
                 predicate,
                 None,
                 None,
@@ -259,7 +259,7 @@ mod helper {
             test_fn(
                 config.clone(),
                 values,
-                ChunkOption::RecordCount(2),
+                ChunkOption::RecordCount(5),
                 predicate,
                 None,
                 None,
@@ -271,13 +271,13 @@ mod helper {
         // Other predicates filter
         {
             // Test 1: Eq filter
-            let values = vec![3.3, 5.6, 3.8, 6.7, 2.1, 9.9, 10.1, 3.8];
+            let values = vec![322.3, 5204029348.6, 3.8, -6.7, 2.1, 99.9, 1000220.1, 3.8];
             let predicate = Predicate::Eq(3.8);
             let expected = RoaringBitmap::from_iter(vec![2, 7]);
             test_fn(
                 config.clone(),
                 values,
-                ChunkOption::RecordCount(2),
+                ChunkOption::RecordCount(5),
                 predicate,
                 None,
                 None,
@@ -286,13 +286,13 @@ mod helper {
             );
 
             // Test 2: Ne filter
-            let values = vec![3.3, 5.6, 3.8, 6.7, 2.1, 9.9, 10.1, 3.8];
+            let values = vec![3.7, 522.6, 3.8, 6099.7, -22390.1, 908.9, -10.1, 3.8];
             let predicate = Predicate::Ne(3.8);
             let expected = RoaringBitmap::from_iter(vec![0, 1, 3, 4, 5, 6]);
             test_fn(
                 config.clone(),
                 values,
-                ChunkOption::RecordCount(2),
+                ChunkOption::RecordCount(5),
                 predicate,
                 None,
                 None,
@@ -312,7 +312,7 @@ mod helper {
             test_fn(
                 config.clone(),
                 values,
-                ChunkOption::RecordCount(2),
+                ChunkOption::RecordCount(5),
                 predicate,
                 Some(&bitmask),
                 None,
@@ -438,12 +438,12 @@ mod helper {
         let t_name = |n: &str| format!("{test_name}: {n}");
         // Test 1: Materialize without bitmask and chunk_id
         {
-            let values = vec![3.3, 5.6, 3.8, 6.7, 2.1, 9.9, 10.1];
+            let values = vec![33.3, 5.6, 3.8, 6.7, 2.1, 9.9, 10.1];
             let expected = values.clone();
             test_query_materialize_inner(
                 config.clone(),
                 values,
-                ChunkOption::RecordCount(2),
+                ChunkOption::RecordCount(5),
                 None,
                 None,
                 round_scale,
@@ -454,13 +454,13 @@ mod helper {
 
         // Test 2: Materialize with bitmask
         {
-            let values = vec![3.3, 5.6, 3.8, 6.7, 2.1, 9.9, 10.1];
+            let values = vec![33.3, 5.6, 3.8, 6.7, 2.1, 9.9, 10.1];
             let bitmask = RoaringBitmap::from_iter(vec![0, 2, 3, 5]);
-            let expected = vec![3.3, 3.8, 6.7, 9.9];
+            let expected = vec![33.3, 3.8, 6.7, 9.9];
             test_query_materialize_inner(
                 config.clone(),
                 values,
-                ChunkOption::RecordCount(2),
+                ChunkOption::RecordCount(5),
                 Some(&bitmask),
                 None,
                 round_scale,
@@ -471,10 +471,10 @@ mod helper {
 
         // Test 3: Materialize with chunk_id
         {
-            let values = vec![3.3, 5.6, 3.8, 6.7, 2.1, 9.9, 10.1, 20.3];
+            let values = vec![33.3, 5.6, 3.8, 6.7, 2.1, 9.9, 10.1, 200.3];
             let chunk_option = ChunkOption::RecordCount(3);
             let chunk_id = ChunkId::new(2);
-            let expected = vec![10.1, 20.3];
+            let expected = vec![10.1, 200.3];
             test_query_materialize_inner(
                 config.clone(),
                 values,
@@ -489,11 +489,11 @@ mod helper {
 
         // Test 4: Materialize with bitmask and chunk_id
         {
-            let values = vec![3.3, 5.6, 3.8, 6.7, 2.1, 9.9, 10.1];
+            let values = vec![33.3, 5.6, 3.8, 67.7, -2.1, 9999.9, 10.1];
             let chunk_option = ChunkOption::RecordCount(3);
             let chunk_id = ChunkId::new(1);
             let bitmask = RoaringBitmap::from_iter(vec![0, 2, 3, 5]);
-            let expected = vec![6.7, 9.9];
+            let expected = vec![67.7, 9999.9];
             test_query_materialize_inner(
                 config,
                 values,
