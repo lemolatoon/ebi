@@ -92,11 +92,9 @@ mod internal {
     };
 
     pub fn buff_simd256_decode(scale: usize, bytes: Vec<u8>) -> Vec<f64> {
-        let prec = (scale as f32).log10() as i32;
-        let prec_delta = get_precision_bound(prec);
+        let precision = (scale as f32).log10() as i32;
 
         let mut bitpack = BitPack::<&[u8]>::new(bytes.as_slice());
-        let mut bound = PrecisionBound::new(prec_delta);
         let lower = bitpack.read(32).unwrap();
         let higher = bitpack.read(32).unwrap();
         let ubase_int = (lower as u64) | ((higher as u64) << 32);
@@ -110,7 +108,6 @@ mod internal {
             fixed_representation_bits_length
         );
         let dlen = bitpack.read(32).unwrap();
-        bound.set_length(fixed_representation_bits_length as u64, dlen as u64);
         // check integer part and update bitmap;
 
         let mut expected_datapoints: Vec<f64> = Vec::new();

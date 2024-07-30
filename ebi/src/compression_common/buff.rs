@@ -13,14 +13,32 @@ pub fn flip(x: u8) -> u8 {
     let offset = 1u8 << 7;
     x ^ offset
 }
+
+const EXP_MASK: u64 = 0b0111111111110000000000000000000000000000000000000000000000000000;
+const FIRST_ONE: u64 = 0b1000000000000000000000000000000000000000000000000000000000000000;
+const NEG_ONE: u64 = 0b1111111111111111111111111111111111111111111111111111111111111111;
+
+#[inline]
+pub fn into_fixed_representation(value: f64, decimal_length: i32) -> i64 {
+    let v_bits = value.to_bits();
+    let exp = ((v_bits & EXP_MASK) >> 52) as i32 - 1023;
+    let sign = v_bits & FIRST_ONE;
+
+    let mut fixed = ((v_bits << (11)) | FIRST_ONE) >> (63 - (exp) - decimal_length) as u64;
+
+    if sign != 0 {
+        fixed = !(fixed - 1);
+    }
+
+    unsafe { std::mem::transmute::<u64, i64>(fixed) }
+}
+
 pub mod precision_bound {
     use std::mem;
 
     use crate::compression_common::buff::bit_packing::BitPack;
 
-    pub const EXP_MASK: u64 = 0b0111111111110000000000000000000000000000000000000000000000000000;
-    pub const FIRST_ONE: u64 = 0b1000000000000000000000000000000000000000000000000000000000000000;
-    pub const NEG_ONE: u64 = 0b1111111111111111111111111111111111111111111111111111111111111111;
+    use super::{into_fixed_representation, EXP_MASK, FIRST_ONE, NEG_ONE};
 
     pub const PRECISION_MAP: [u64; 16] =
         [0, 5, 8, 11, 15, 18, 21, 25, 28, 31, 35, 38, 50, 10, 10, 10];
@@ -34,18 +52,16 @@ pub mod precision_bound {
     }
 
     impl PrecisionBound {
-        pub fn new(precision: f64) -> Self {
-            let mut e = PrecisionBound {
+        pub fn new(precision_delta: f64) -> Self {
+            let precision_delta_bits = precision_delta.to_bits();
+            let precision_exp = ((precision_delta_bits & EXP_MASK) >> 52) as i32 - 1023;
+            PrecisionBound {
                 position: 0,
-                precision: precision,
-                precision_exp: 0,
+                precision: precision_delta,
+                precision_exp,
                 int_length: 0,
                 decimal_length: 0,
-            };
-            let xu: u64 = precision.to_bits();
-            let xu = unsafe { mem::transmute::<f64, u64>(precision) };
-            e.precision_exp = ((xu & EXP_MASK) >> 52) as i32 - 1023 as i32;
-            e
+            }
         }
 
         pub fn precision_bound(&mut self, orig: f64) -> f64 {
@@ -199,22 +215,14 @@ pub mod precision_bound {
 
         ///byte aligned version of spilt double
         #[inline]
-        pub fn fetch_fixed_aligned(&self, bd: f64) -> i64 {
-            let bdu = unsafe { mem::transmute::<f64, u64>(bd) };
-            let exp = ((bdu & EXP_MASK) >> 52) as i32 - 1023 as i32;
-            let sign = bdu & FIRST_ONE;
-            let mut fixed = 0u64;
+        pub fn into_fixed_representation(&self, v: f64) -> i64 {
+            let v_bits = v.to_bits();
+            let exp = ((v_bits & EXP_MASK) >> 52) as i32 - 1023i32;
             if exp < self.precision_exp {
-                fixed = 0u64;
+                0i64
             } else {
-                fixed = ((bdu << (11)) | FIRST_ONE)
-                    >> (63 - (exp) - (self.decimal_length) as i32) as u64;
-                if sign != 0 {
-                    fixed = !(fixed - 1);
-                }
+                into_fixed_representation(v, self.decimal_length as i32)
             }
-            let signed_int = unsafe { mem::transmute::<u64, i64>(fixed) };
-            signed_int
         }
 
         pub fn finer(&self, input: f64) -> Vec<u8> {
@@ -321,6 +329,10 @@ pub mod bit_packing {
     }
 
     impl<'a> BitPack<&'a mut [u8]> {
+        /// # Errors
+        /// If bits > MAX_BITS, return Err(bits)
+        ///
+        /// If the buffer is full, in other words, the buffer does not have enough space to write bits, return Err(bits)
         pub fn write(&mut self, mut value: u32, mut bits: usize) -> Result<(), usize> {
             if bits > MAX_BITS || self.buff.len() * BYTE_BITS < self.sum_bits() + bits {
                 return Err(bits);
@@ -538,6 +550,8 @@ pub mod bit_packing {
             Self::new(Vec::with_capacity(capacity))
         }
 
+        /// # Errors
+        /// If bits > MAX_BITS, return Err(bits)
         #[inline]
         pub fn write(&mut self, value: u32, bits: usize) -> Result<(), usize> {
             let len = self.buff.len();
@@ -594,18 +608,19 @@ pub mod bit_packing {
         }
 
         #[inline]
-        pub fn write_byte(&mut self, value: u8) -> Result<(), usize> {
+        pub fn write_byte(&mut self, value: u8) {
             self.buff.push(value);
-            Ok(())
         }
 
+        /// Update the state of the BitPack to reflect the cursor of the buffer
+        /// [`Self::write_byte`] method does not update the cursor of the buffer
+        /// This method should be called before [`Self::write_bits`] method to ensure the cursor is updated
         #[inline]
         pub fn finish_write_byte(&mut self) {
             let len = self.buff.len();
             self.buff.resize(len + 1, 0x0);
             self.bits = 0;
             self.cursor = len;
-            // println!("cursor now at {}" , self.cursor)
         }
 
         #[inline]
