@@ -91,8 +91,8 @@ pub enum RangeValue {
 
 #[derive(Debug, Clone, Copy, PartialEq, PartialOrd)]
 pub struct Range {
-    start: RangeValue,
-    end: RangeValue,
+    pub start: RangeValue,
+    pub end: RangeValue,
 }
 
 impl Range {

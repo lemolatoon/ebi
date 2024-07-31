@@ -206,6 +206,7 @@ impl<R: Read + Seek> Decoder<R> {
             let mut chunk_reader = Self::chunk_reader_from_handle(input, chunk_handle)?;
 
             let filtered = chunk_reader.filter(predicate, bitmask)?;
+            dbg!(&filtered);
 
             result |= filtered;
         }

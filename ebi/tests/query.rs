@@ -33,6 +33,7 @@ mod helper {
         expected: RoaringBitmap,
         test_name: String,
     ) {
+        println!("=========== {} ===========", test_name);
         let encoded = {
             let encoder_input = EncoderInput::from_f64_slice(&values);
             let encoder_output = EncoderOutput::from_vec(Vec::new());
@@ -252,6 +253,20 @@ mod helper {
         } else {
             Box::new(test_query_filter_inner)
         };
+        // Test 1: Eq filter
+        let values = vec![322.3, 5204029348.6, 3.8, -6.7, 2.1, 99.9, 1000220.1, 3.8];
+        let predicate = Predicate::Eq(3.8);
+        let expected = RoaringBitmap::from_iter(vec![2, 7]);
+        test_fn(
+            config.clone(),
+            values,
+            ChunkOption::RecordCount(5),
+            predicate,
+            None,
+            None,
+            expected,
+            t_name(format!("Eq {query_name}")),
+        );
 
         // Range filter
         {

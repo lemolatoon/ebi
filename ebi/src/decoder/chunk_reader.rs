@@ -8,7 +8,7 @@ use std::io::{self, Read, Write};
 use quick_impl::QuickImpl;
 use roaring::RoaringBitmap;
 
-use crate::format::native::{NativeFileFooter, NativeFileHeader};
+use crate::format::native::{NativeChunkFooter, NativeFileFooter, NativeFileHeader};
 use crate::format::CompressionScheme;
 
 use super::query::{Predicate, QueryExecutor};
@@ -48,6 +48,10 @@ impl<'handle, R: Read, T: FileMetadataLike> GeneralChunkReader<'handle, R, T> {
 
     pub fn footer(&self) -> &NativeFileFooter {
         self.handle.footer()
+    }
+
+    pub fn chunk_footer(&self) -> &NativeChunkFooter {
+        self.handle.chunk_footer()
     }
 
     pub fn inner(&self) -> &GeneralChunkReaderInner<R> {

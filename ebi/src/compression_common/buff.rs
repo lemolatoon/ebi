@@ -38,10 +38,18 @@ pub mod precision_bound {
 
     use crate::compression_common::buff::bit_packing::BitPack;
 
-    use super::{into_fixed_representation, EXP_MASK, FIRST_ONE, NEG_ONE};
+    use super::{get_precision_bound, into_fixed_representation, EXP_MASK, FIRST_ONE, NEG_ONE};
 
-    pub const PRECISION_MAP: [u64; 16] =
-        [0, 5, 8, 11, 15, 18, 21, 25, 28, 31, 35, 38, 50, 10, 10, 10];
+    pub const PRECISION_MAP: [u64; 13] = [0, 5, 8, 11, 15, 18, 21, 25, 28, 31, 35, 38, 50];
+    pub const INV_PRECISION_MAP: [Option<u64>; 51] = const {
+        let mut arr = [None; 51];
+        let mut i = 0;
+        while i < PRECISION_MAP.len() {
+            arr[PRECISION_MAP[i] as usize] = Some(i as u64);
+            i += 1;
+        }
+        arr
+    };
 
     pub struct PrecisionBound {
         position: u64,
@@ -222,6 +230,22 @@ pub mod precision_bound {
                 0i64
             } else {
                 into_fixed_representation(v, self.decimal_length as i32)
+            }
+        }
+
+        /// Use this function to convert a double to fixed representation with a given decimal length
+        /// This computation might be heavy, so if you convert a lot of double, you can use the `into_fixed_representation` function
+        #[inline]
+        pub fn into_fixed_representation_with_decimal_length(v: f64, decimal_length: i32) -> i64 {
+            let precision = INV_PRECISION_MAP[decimal_length as usize].unwrap();
+            let precision_bound = get_precision_bound(precision as i32);
+            let precision_exp = ((precision_bound.to_bits() & EXP_MASK) >> 52) as i32 - 1023;
+            let v_bits = v.to_bits();
+            let exp = ((v_bits & EXP_MASK) >> 52) as i32 - 1023i32;
+            if exp < precision_exp {
+                0i64
+            } else {
+                into_fixed_representation(v, decimal_length)
             }
         }
 
@@ -437,6 +461,17 @@ pub mod bit_packing {
             Ok(output)
         }
 
+        pub fn read_u32(&mut self) -> Result<u32, usize> {
+            if self.buff.len() * BYTE_BITS < self.sum_bits() + 32 {
+                return Err(32);
+            };
+
+            let u32_slice = &self.buff[self.cursor..self.cursor + 4];
+            self.cursor += 4;
+
+            Ok(u32::from_le_bytes(u32_slice.try_into().unwrap()))
+        }
+
         /***
         read bits less than BYTE_BITS
          */
@@ -452,6 +487,10 @@ pub mod bit_packing {
                 );
                 return Err(bits);
             };
+            println!(
+                "read bits: bits: from({}), len({}) {:08b}",
+                self.bits, bits, self.buff[self.cursor]
+            );
 
             let mut bits_left = 0;
             let mut output = 0;
@@ -492,17 +531,16 @@ pub mod bit_packing {
 
         #[inline]
         pub fn read_byte(&mut self) -> Result<u8, usize> {
+            let output = self.buff[self.cursor];
             self.cursor += 1;
-            let output = self.buff[self.cursor] as u8;
             Ok(output)
         }
 
         #[inline]
         pub fn read_n_byte(&mut self, n: usize) -> Result<&[u8], usize> {
-            self.cursor += 1;
             let end = self.cursor + n;
             let output = &self.buff[self.cursor..end];
-            self.cursor += n - 1;
+            self.cursor += n;
             Ok(output)
         }
 
@@ -516,12 +554,16 @@ pub mod bit_packing {
 
         #[inline]
         pub fn skip_n_byte(&mut self, mut n: usize) -> Result<(), usize> {
+            println!("skip_n_byte: n: {}", n);
             self.cursor += n;
             // println!("current cursor{}, current bits:{}",self.cursor,self.bits);
             Ok(())
         }
         #[inline]
-        pub fn skip(&mut self, mut bits: usize) -> Result<(), usize> {
+        pub fn skip(&mut self, bits: usize) -> Result<(), usize> {
+            if bits == 0 {
+                return Ok(());
+            }
             if self.buff.len() * BYTE_BITS < self.sum_bits() + bits {
                 return Err(bits);
             };
@@ -530,9 +572,13 @@ pub mod bit_packing {
             let bytes = bits / BYTE_BITS;
             let left = bits % BYTE_BITS;
 
+            println!("skip: bits: {bits}");
+            dbg!((self.cursor, self.bits));
+
             let cur_bits = (self.bits + left);
             self.cursor = self.cursor + bytes + cur_bits / BYTE_BITS;
             self.bits = cur_bits % BYTE_BITS;
+            dbg!((self.cursor, self.bits));
 
             // println!("current cursor{}, current bits:{}",self.cursor,self.bits);
             Ok(())

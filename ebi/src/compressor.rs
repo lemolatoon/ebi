@@ -251,9 +251,7 @@ impl BUFFCompressorConfigBuilder {
 mod tests {
     use std::mem::size_of_val;
 
-    use super::{
-        buff::BUFFCompressor, gorilla::GorillaCompressor, CompressorConfig, GenericCompressor,
-    };
+    use super::{gorilla::GorillaCompressor, CompressorConfig, GenericCompressor};
 
     fn test_total_bytes_in(compressor: &mut GenericCompressor) {
         let mut floats: Vec<f64> = (0..10).map(|x| (x / 2) as f64).collect();
