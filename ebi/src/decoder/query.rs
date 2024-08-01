@@ -22,11 +22,9 @@ pub trait QueryExecutor: Reader {
         bitmask: Option<&RoaringBitmap>,
         logical_offset: usize,
     ) -> decoder::Result<()> {
-        dbg!(bitmask);
         for (i, v) in self.decompress()?.iter().enumerate() {
             let record_offset = logical_offset + i;
             if bitmask.is_some_and(|bm| !bm.contains(record_offset as u32)) {
-                dbg!(record_offset);
                 continue;
             }
             output.write_all(&v.to_ne_bytes())?;
@@ -108,6 +106,10 @@ impl Range {
 
     pub fn end(&self) -> RangeValue {
         self.end
+    }
+
+    pub fn swap(&mut self) {
+        std::mem::swap(&mut self.start, &mut self.end);
     }
 
     pub fn eval(&self, value: f64) -> bool {

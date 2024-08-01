@@ -157,6 +157,12 @@ mod helper {
             .collect();
 
         assert_eq!(
+            materialized.len(),
+            expected.len(),
+            "[{test_name}]: Filter materialize result length mismatch"
+        );
+
+        assert_eq!(
             materialized, expected,
             "[{test_name}]: Filter materialize result mismatch"
         );
@@ -396,6 +402,54 @@ mod helper {
                     "Range {query_name} large range (Inclusive, Inclusive)"
                 )),
             );
+
+            // Test 9: Range filter simd (Inclusive, None)
+            #[rustfmt::skip]
+            let values = vec![/*  0 */1.0, 1.0, 1.0, 1.0, 1.0,
+                                        /*  5 */2.0, 2.0, 2.0, 2.0, 2.0,
+                                        /* 10 */2.0, 2.0, 2.0, 2.0, 2.0,
+                                        /* 15 */2.0, 2.0, 2.0, 2.0, 2.0,
+                                        /* 20 */10.5, 10.6, 10.7, 10.9, 10.9,
+                                        /* 25 */100.0, 100.0, 100.0, 100.0, 100.0,
+                                        /* 30 */10.0, 10.0, 10.0, 10.0, 10.0];
+            let predicate =
+                Predicate::Range(Range::new(RangeValue::Inclusive(10.7), RangeValue::None));
+            let expected = RoaringBitmap::from_iter(22..30);
+            let chunk_option = ChunkOption::RecordCount(35);
+            test_fn(
+                config.clone(),
+                values,
+                chunk_option,
+                predicate,
+                None,
+                None,
+                expected,
+                t_name(format!("Range {query_name} simd (Inclusive, None)")),
+            );
+
+            // Test 10: Range filter simd (None, Exclusive)
+            #[rustfmt::skip]
+            let values = vec![/*  0 */1.0, 1.0, 1.0, 1.0, 1.0,
+                                        /*  5 */2.0, 2.0, 2.0, 2.0, 2.0,
+                                        /* 10 */2.0, 2.0, 2.0, 2.0, 2.0,
+                                        /* 15 */2.0, 2.0, 2.0, 2.0, 2.0,
+                                        /* 20 */10.5, 10.6, 10.7, 10.9, 10.9,
+                                        /* 25 */100.0, 100.0, 100.0, 100.0, 100.0,
+                                        /* 30 */10.0, 10.0, 10.0, 10.0, 10.0];
+            let predicate =
+                Predicate::Range(Range::new(RangeValue::None, RangeValue::Exclusive(10.7)));
+            let expected = RoaringBitmap::from_iter((0..=21).chain(30..35));
+            let chunk_option = ChunkOption::RecordCount(35);
+            test_fn(
+                config.clone(),
+                values,
+                chunk_option,
+                predicate,
+                None,
+                None,
+                expected,
+                t_name(format!("Range {query_name} simd (None, Exclusive)")),
+            );
         }
 
         // Other predicates filter
@@ -557,35 +611,42 @@ mod helper {
             Box::new(test_query_filter_inner_with_expected_calculation)
         };
         let mut rng = StdRng::from_entropy();
+        let round = |x: f64| {
+            if let Some(scale) = round_scale {
+                (x * scale as f64).round() / scale as f64
+            } else {
+                x
+            }
+        };
         let clamp = |x: f64| {
             if let Some(lower_bound) = lower_bound {
                 if x < lower_bound {
-                    return lower_bound;
+                    return round(lower_bound);
                 }
             }
 
             if let Some(upper_bound) = upper_bound {
                 if x > upper_bound {
-                    return upper_bound;
+                    return round(upper_bound);
                 }
             }
 
-            x
+            round(x)
         };
         let gen_random_float = || {
             let mut rng = StdRng::from_entropy();
-            let fp = match rng.gen_range(0..=3) {
+            let fp = match rng.gen_range(0..=10) {
                 0 => rng.gen_range(f64::MIN / 2.0..=0.0),
-                1 => rng.gen_range(0.0..=f64::MAX / 2.0),
-                2 => rng.gen_range(-10000.0..=10000.0),
-                3 => rng.gen_range(0.0..=100.0),
+                1..3 => rng.gen_range(0.0..=f64::MAX / 2.0),
+                3..6 => rng.gen_range(-10000.0..=10000.0),
+                6..=10 => rng.gen_range(0.0..=100.0),
                 _ => unreachable!(),
             };
 
             clamp(fp)
         };
         let mean = mean.unwrap_or_else(gen_random_float);
-        let std_dev = std_dev.unwrap_or_else(|| rng.gen_range(0.001..=1000.0));
+        let std_dev = std_dev.unwrap_or_else(|| rng.gen_range(0.001..=10.0));
         println!("mean: {}, std_dev: {}", mean, std_dev);
         let distribution = rand_distr::Normal::new(mean, std_dev).unwrap();
         #[cfg(not(miri))]
@@ -658,8 +719,30 @@ mod helper {
                 3 => RangeValue::Inclusive(clamp(distribution.sample(&mut rng))),
                 _ => unreachable!(),
             };
-            let predicate = Predicate::Range(Range::new(gen_range_value(), gen_range_value()));
+            let range = {
+                let mut range = Range::new(gen_range_value(), gen_range_value());
+                if let (
+                    RangeValue::Inclusive(start) | RangeValue::Exclusive(start),
+                    RangeValue::Inclusive(end) | RangeValue::Exclusive(end),
+                ) = (range.start(), range.end())
+                {
+                    if start > end {
+                        range.swap();
+                        range
+                    } else {
+                        range
+                    }
+                } else {
+                    range
+                }
+            };
+            let predicate = Predicate::Range(range);
             let values = gen_values();
+            println!(
+                "values max: {}, min: {}",
+                values.iter().copied().reduce(f64::max).unwrap(),
+                values.iter().copied().reduce(f64::min).unwrap()
+            );
             let bitmask = gen_bitmask();
             let chunk_id = gen_chunk_id();
 
@@ -730,15 +813,21 @@ mod helper {
         config: impl Into<CompressorConfig>,
         lower_bound: Option<f64>,
         upper_bound: Option<f64>,
+        round_scale: Option<usize>,
         test_name: impl std::fmt::Display + Clone,
     ) {
         let config = config.into();
-        test_query_filter_optionally_materialize(config.clone(), test_name.clone(), false, None);
+        test_query_filter_optionally_materialize(
+            config.clone(),
+            test_name.clone(),
+            false,
+            round_scale,
+        );
         test_query_filter_optionally_materialize_random(
             config,
             test_name,
             false,
-            None,
+            round_scale,
             None,
             None,
             lower_bound,
@@ -749,8 +838,8 @@ mod helper {
     pub(crate) fn test_query_filter_materialize(
         config: impl Into<CompressorConfig>,
         round_scale: Option<usize>,
-        upper_bound: Option<f64>,
         lower_bound: Option<f64>,
+        upper_bound: Option<f64>,
         test_name: impl std::fmt::Display + Clone,
     ) {
         let config = config.into();
@@ -765,10 +854,10 @@ mod helper {
             test_name,
             true,
             round_scale,
-            upper_bound,
+            None,
+            None,
             lower_bound,
-            None,
-            None,
+            upper_bound,
         );
     }
 
@@ -905,30 +994,41 @@ mod helper {
 #[test]
 fn test_uncompressed_filter() {
     let config = CompressorConfig::uncompressed().build();
-    helper::test_query_filter(config, None, None, "Uncompressed");
+    helper::test_query_filter(config, None, None, None, "Uncompressed");
 }
 
 #[test]
 fn test_rle_filter() {
     let config = CompressorConfig::rle().build();
-    helper::test_query_filter(config, None, None, "RLE");
+    helper::test_query_filter(config, None, None, None, "RLE");
 }
 
 #[test]
 fn test_gorilla_filter() {
     let config = CompressorConfig::gorilla().build();
-    helper::test_query_filter(config, None, None, "Gorilla");
+    helper::test_query_filter(config, None, None, None, "Gorilla");
 }
 
 #[test]
 fn test_buff_filter() {
     let scale = 100;
+    let fractional_part_bits_length = 8;
+    let integer_part_max_bits_length = 32 - fractional_part_bits_length;
+
     let config = CompressorConfig::buff().scale(scale).build();
-    let lower_bound =
-        ((i64::MIN as f64 / (scale * 100) as f64) * scale as f64).round() / scale as f64;
-    let upper_bound =
-        ((i64::MAX as f64 / (scale * 100) as f64) * scale as f64).round() / scale as f64;
-    helper::test_query_filter(config, Some(upper_bound), Some(lower_bound), "BUFF");
+
+    let upper_bound = 2.0f64.powf(integer_part_max_bits_length as f64);
+    let lower_bound = -upper_bound;
+
+    let upper_bound = (upper_bound * scale as f64).floor() / scale as f64;
+    let lower_bound = (lower_bound * scale as f64).floor() / scale as f64;
+    helper::test_query_filter(
+        config,
+        Some(lower_bound),
+        Some(upper_bound),
+        Some(scale),
+        "BUFF",
+    );
 }
 
 #[test]
@@ -976,16 +1076,21 @@ fn test_gorilla_filter_materialize() {
 #[test]
 fn test_buff_filter_materialize() {
     let scale = 10;
+    let fractional_part_bits_length = 8;
+    let integer_part_max_bits_length = 32 - fractional_part_bits_length;
+
     let config = CompressorConfig::buff().scale(scale).build();
-    let lower_bound =
-        ((i64::MIN as f64 / (scale * 100) as f64) * scale as f64).round() / scale as f64;
-    let upper_bound =
-        ((i64::MAX as f64 / (scale * 100) as f64) * scale as f64).round() / scale as f64;
+
+    let upper_bound = 2.0f64.powf(integer_part_max_bits_length as f64);
+    let lower_bound = -upper_bound;
+
+    let upper_bound = (upper_bound * scale as f64).floor() / scale as f64;
+    let lower_bound = (lower_bound * scale as f64).floor() / scale as f64;
     helper::test_query_filter_materialize(
         config,
         Some(10),
-        Some(upper_bound),
         Some(lower_bound),
+        Some(upper_bound),
         "BUFF",
     );
 }

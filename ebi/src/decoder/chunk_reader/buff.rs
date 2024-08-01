@@ -57,7 +57,6 @@ impl<R: Read> Reader for BUFFReader<R> {
 
     fn decompress(&mut self) -> io::Result<&[f64]> {
         if self.decompressed.is_some() {
-            dbg!(self.decompressed.as_ref().unwrap().len());
             return Ok(self.decompressed.as_ref().unwrap());
         }
 
@@ -66,7 +65,6 @@ impl<R: Read> Reader for BUFFReader<R> {
 
         self.decompressed = Some(result);
 
-        dbg!(self.decompressed.as_ref().unwrap().len());
         Ok(self.decompressed.as_ref().unwrap())
     }
 
@@ -193,12 +191,14 @@ mod internal {
 
     pub(crate) mod query {
         use roaring::RoaringBitmap;
-        use simd::{equal_simd, greater_simd};
+        use simd::{comp_simd, equal_simd};
 
         use crate::compression_common::buff::{
             bit_packing::BitPack, flip, precision_bound::PrecisionBound,
         };
         use cfg_if::cfg_if;
+
+        const SIMD_THRESHOLD: f64 = 0.06;
 
         pub(crate) fn buff_simd256_cmp_filter<const IS_GREATER: bool, const INCLUSIVE: bool>(
             bytes: &[u8],
@@ -245,16 +245,56 @@ mod internal {
 
             let mut remaining_bits_length = fixed_representation_bits_length;
 
-            let mut quelified_bitmask = RoaringBitmap::new();
+            let comp_simd_specialized = if IS_GREATER {
+                comp_simd::<{ simd::GREATER }>
+            } else {
+                comp_simd::<{ simd::LESS }>
+            };
+
+            let mut qualified_bitmask = RoaringBitmap::new();
             let mut to_check_bitmask: Option<RoaringBitmap> = bitmask;
             while remaining_bits_length >= 8 {
                 remaining_bits_length -= 8;
 
                 let delta_fixed_pred_subcolumn = (delta_fixed_pred >> remaining_bits_length) as u8;
-                let next_to_check_bitmask = if let Some(bitmask) = &to_check_bitmask {
-                    let mut next_to_check_bitmask = RoaringBitmap::new();
-                    let mut expected_record_index_if_sequential = 0;
-                    for record_index in bitmask.iter().map(|x| x - logical_offset) {
+                let next_to_check_bitmask = if let Some(to_check_bitmask) = &to_check_bitmask {
+                    let use_simd =
+                        to_check_bitmask.len() as f64 / number_of_records as f64 > SIMD_THRESHOLD;
+                    let (mut next_to_check_bitmask, mut expected_record_index_if_sequential) =
+                        if use_simd {
+                            let simd_chunk = bitpack
+                                .read_n_byte(
+                                    number_of_records as usize
+                                        - number_of_records as usize % simd::VECTOR_SIZE,
+                                )
+                                .unwrap();
+                            let mut temporary_qualified_bitmask = RoaringBitmap::new();
+                            let mut next_to_check_bitmask = unsafe {
+                                comp_simd_specialized(
+                                    simd_chunk,
+                                    delta_fixed_pred_subcolumn,
+                                    &mut temporary_qualified_bitmask,
+                                    logical_offset,
+                                )
+                            };
+                            temporary_qualified_bitmask &= to_check_bitmask;
+                            qualified_bitmask |= temporary_qualified_bitmask;
+
+                            next_to_check_bitmask &= to_check_bitmask;
+
+                            (
+                                next_to_check_bitmask,
+                                number_of_records - number_of_records % simd::VECTOR_SIZE as u32,
+                            )
+                        } else {
+                            (RoaringBitmap::new(), 0)
+                        };
+
+                    for record_index in to_check_bitmask
+                        .iter()
+                        .filter(move |&x| x >= expected_record_index_if_sequential)
+                        .map(|x| x - logical_offset)
+                    {
                         bitpack
                             .skip_n_byte(
                                 (record_index - expected_record_index_if_sequential) as usize,
@@ -265,7 +305,7 @@ mod internal {
                         match subcolumn.cmp(&delta_fixed_pred_subcolumn) {
                             std::cmp::Ordering::Greater => {
                                 if IS_GREATER {
-                                    quelified_bitmask.insert(logical_offset + record_index);
+                                    qualified_bitmask.insert(logical_offset + record_index);
                                 }
                             }
                             std::cmp::Ordering::Equal => {
@@ -273,7 +313,7 @@ mod internal {
                             }
                             std::cmp::Ordering::Less => {
                                 if !IS_GREATER {
-                                    quelified_bitmask.insert(logical_offset + record_index);
+                                    qualified_bitmask.insert(logical_offset + record_index);
                                 }
                             }
                         }
@@ -290,22 +330,45 @@ mod internal {
                     next_to_check_bitmask
                 } else {
                     // TODO: use SIMD here
-                    let mut to_check_bitmask = RoaringBitmap::new();
                     let chunk = bitpack.read_n_byte(number_of_records as usize).unwrap();
-                    for (record_index, &subcolumn) in chunk.iter().enumerate() {
+                    cfg_if! {
+                        if #[cfg(miri)] {
+                            let mut to_check_bitmask = RoaringBitmap::new();
+                            let remaining_chunk = chunk;
+                            let record_index_offset = 0;
+                        } else {
+                            let (simd_chunk, scalar_chunk) =
+                                chunk.split_at(chunk.len() - (chunk.len() % simd::VECTOR_SIZE));
+                            let mut to_check_bitmask = unsafe {
+                                comp_simd_specialized(
+                                    simd_chunk,
+                                    delta_fixed_pred_subcolumn,
+                                    &mut qualified_bitmask,
+                                    logical_offset,
+                                )
+                            };
+                            let remaining_chunk = scalar_chunk;
+                            let record_index_offset = number_of_records - number_of_records % simd::VECTOR_SIZE as u32;
+                        }
+                    };
+                    for (record_index, subcolumn) in remaining_chunk
+                        .iter()
+                        .enumerate()
+                        .map(|(i, &x)| (i as u32 + record_index_offset, x))
+                    {
                         let subcolumn = flip(subcolumn);
                         match subcolumn.cmp(&delta_fixed_pred_subcolumn) {
                             std::cmp::Ordering::Greater => {
                                 if IS_GREATER {
-                                    quelified_bitmask.insert(logical_offset + record_index as u32);
+                                    qualified_bitmask.insert(logical_offset + record_index);
                                 }
                             }
                             std::cmp::Ordering::Equal => {
-                                to_check_bitmask.insert(logical_offset + record_index as u32);
+                                to_check_bitmask.insert(logical_offset + record_index);
                             }
                             std::cmp::Ordering::Less => {
                                 if !IS_GREATER {
-                                    quelified_bitmask.insert(logical_offset + record_index as u32);
+                                    qualified_bitmask.insert(logical_offset + record_index);
                                 }
                             }
                         }
@@ -315,7 +378,7 @@ mod internal {
                 };
 
                 if next_to_check_bitmask.is_empty() {
-                    return quelified_bitmask;
+                    return qualified_bitmask;
                 }
 
                 to_check_bitmask.replace(next_to_check_bitmask);
@@ -338,17 +401,17 @@ mod internal {
                         match subcolumn.cmp(&delta_fixed_pred_subcolumn) {
                             std::cmp::Ordering::Greater => {
                                 if IS_GREATER {
-                                    quelified_bitmask.insert(logical_offset + record_index);
+                                    qualified_bitmask.insert(logical_offset + record_index);
                                 }
                             }
                             std::cmp::Ordering::Equal => {
                                 if INCLUSIVE {
-                                    quelified_bitmask.insert(logical_offset + record_index);
+                                    qualified_bitmask.insert(logical_offset + record_index);
                                 }
                             }
                             std::cmp::Ordering::Less => {
                                 if !IS_GREATER {
-                                    quelified_bitmask.insert(logical_offset + record_index);
+                                    qualified_bitmask.insert(logical_offset + record_index);
                                 }
                             }
                         }
@@ -364,17 +427,17 @@ mod internal {
                         match subcolumn.cmp(&delta_fixed_pred_subcolumn) {
                             std::cmp::Ordering::Greater => {
                                 if IS_GREATER {
-                                    quelified_bitmask.insert(logical_offset + i);
+                                    qualified_bitmask.insert(logical_offset + i);
                                 }
                             }
                             std::cmp::Ordering::Equal => {
                                 if INCLUSIVE {
-                                    quelified_bitmask.insert(logical_offset + i);
+                                    qualified_bitmask.insert(logical_offset + i);
                                 }
                             }
                             std::cmp::Ordering::Less => {
                                 if !IS_GREATER {
-                                    quelified_bitmask.insert(logical_offset + i);
+                                    qualified_bitmask.insert(logical_offset + i);
                                 }
                             }
                         }
@@ -382,10 +445,10 @@ mod internal {
                 }
             } else if INCLUSIVE {
                 if let Some(to_check_bitmask) = to_check_bitmask {
-                    quelified_bitmask |= to_check_bitmask
+                    qualified_bitmask |= to_check_bitmask
                 }
             }
-            return quelified_bitmask;
+            return qualified_bitmask;
         }
 
         pub(crate) fn buff_simd256_equal_filter(
@@ -459,21 +522,20 @@ mod internal {
                 } else {
                     // TODO: use SIMD here
                     let chunk = bitpack.read_n_byte(number_of_records as usize).unwrap();
-                    let remaining_chunk;
-                    let mut bitmask: RoaringBitmap;
-                    {
-                        let (simd_chunk, scalar_chunk) =
-                            chunk.split_at(chunk.len() - (chunk.len() % simd::VECTOR_SIZE));
-                        println!(
-                            "\tsimd chunk: {}, scalar chunk: {}",
-                            simd_chunk.len(),
-                            scalar_chunk.len()
-                        );
-                        bitmask = unsafe {
-                            equal_simd(simd_chunk, delta_fixed_pred_subcolumn, logical_offset)
-                        };
 
-                        remaining_chunk = scalar_chunk;
+                    cfg_if! {
+                        if #[cfg(miri)] {
+                            let mut bitmask = RoaringBitmap::new();
+                            let remaining_chunk = chunk;
+                        } else {
+                            let (simd_chunk, scalar_chunk) =
+                                chunk.split_at(chunk.len() - (chunk.len() % simd::VECTOR_SIZE));
+                            let mut bitmask = unsafe {
+                                equal_simd(simd_chunk, delta_fixed_pred_subcolumn, logical_offset)
+                            };
+
+                            let remaining_chunk = scalar_chunk;
+                        }
                     }
                     for (record_index, &subcolumn) in remaining_chunk.iter().enumerate() {
                         let subcolumn = flip(subcolumn);
@@ -546,35 +608,53 @@ mod internal {
 
             use crate::compression_common::buff::flip;
 
-            pub unsafe fn greater_simd(x: &[u8], pred: u8, logical_offset: u32) -> RoaringBitmap {
+            pub const GREATER: u8 = 1;
+            pub const LESS: u8 = 1 << 1;
+            pub unsafe fn comp_simd<const FLAGS: u8>(
+                x: &[u8],
+                pred: u8,
+                qualified_bitmask: &mut RoaringBitmap,
+                logical_offset: u32,
+            ) -> RoaringBitmap {
                 debug_assert!(x.len() % VECTOR_SIZE == 0);
-                let haystack = x;
-                let start_ptr = haystack.as_ptr();
-                let end_ptr = haystack[haystack.len()..].as_ptr();
-                let mut ptr = start_ptr;
+                const {
+                    assert!(FLAGS & (GREATER | LESS) != 0);
+                };
+                let pred_word = _mm256_set1_epi8(std::mem::transmute::<u8, i8>(flip(pred)));
+                let mut to_check_bitmask = RoaringBitmap::new();
+                for (word_index, word) in x
+                    .chunks_exact(VECTOR_SIZE)
+                    .map(|chunk| _mm256_lddqu_si256(chunk.as_ptr().cast::<__m256i>()))
+                    .enumerate()
+                {
+                    let equal = _mm256_cmpeq_epi8(word, pred_word);
+                    let eq_mask = _mm256_movemask_epi8(equal);
 
-                let predicate = std::mem::transmute::<u8, i8>(flip(pred));
-                let pred_word = _mm256_set1_epi8(predicate);
-                let ep = end_ptr.sub(VECTOR_SIZE);
-                let mut middle = RoaringBitmap::new();
-
-                let mut count = 0;
-                while ptr <= ep {
-                    let word1 = _mm256_lddqu_si256(ptr as *const __m256i);
-                    let greater = _mm256_cmpgt_epi8(word1, pred_word);
-                    let greater_mask = _mm256_movemask_epi8(greater);
-
-                    // TODO: potentially, using custom `insert_direct_u32` could be faster
-                    for i in 0..32 {
-                        if (greater_mask & (1 << i)) != 0 {
-                            middle.insert(count + i + logical_offset);
+                    for i in 0..VECTOR_SIZE {
+                        if (eq_mask & (1 << i)) != 0 {
+                            to_check_bitmask
+                                .insert((word_index * VECTOR_SIZE + i) as u32 + logical_offset);
                         }
                     }
-                    count += 32;
-                    ptr = ptr.add(VECTOR_SIZE);
+
+                    let cmp_mask = if FLAGS & GREATER != 0 {
+                        let greater = _mm256_cmpgt_epi8(word, pred_word);
+                        _mm256_movemask_epi8(greater)
+                    } else {
+                        let less_or_eq = _mm256_cmpgt_epi8(pred_word, word);
+                        let less_or_eq_mask = _mm256_movemask_epi8(less_or_eq);
+                        less_or_eq_mask & (!eq_mask)
+                    };
+
+                    for i in 0..VECTOR_SIZE {
+                        if (cmp_mask & (1 << i)) != 0 {
+                            qualified_bitmask
+                                .insert((word_index * VECTOR_SIZE + i) as u32 + logical_offset);
+                        }
+                    }
                 }
-                println!("\tsimd greater than bitmap: {}", middle.len());
-                middle
+
+                to_check_bitmask
             }
 
             pub unsafe fn equal_simd(x: &[u8], pred: u8, logical_offset: u32) -> RoaringBitmap {

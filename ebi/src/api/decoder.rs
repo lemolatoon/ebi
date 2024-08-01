@@ -153,7 +153,6 @@ impl<R: Read + Seek> Decoder<R> {
             chunk_handles,
             ..
         } = self;
-        dbg!(&bitmask);
 
         for chunk_handle in chunk_handles
             .iter_mut()
@@ -163,7 +162,6 @@ impl<R: Read + Seek> Decoder<R> {
         {
             let mut chunk_range_bitmap = RoaringBitmap::new();
             chunk_range_bitmap.insert_range(chunk_handle.logical_record_range_u32());
-            dbg!(&chunk_range_bitmap);
             if bitmask.is_some_and(|bm| (bm & chunk_range_bitmap).is_empty()) {
                 continue;
             }
