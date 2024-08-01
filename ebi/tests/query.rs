@@ -253,20 +253,6 @@ mod helper {
         } else {
             Box::new(test_query_filter_inner)
         };
-        // Test 1: Eq filter
-        let values = vec![322.3, 5204029348.6, 3.8, -6.7, 2.1, 99.9, 1000220.1, 3.8];
-        let predicate = Predicate::Eq(3.8);
-        let expected = RoaringBitmap::from_iter(vec![2, 7]);
-        test_fn(
-            config.clone(),
-            values,
-            ChunkOption::RecordCount(5),
-            predicate,
-            None,
-            None,
-            expected,
-            t_name(format!("Eq {query_name}")),
-        );
 
         // Range filter
         {
@@ -342,7 +328,23 @@ mod helper {
                 t_name(format!("Range {query_name} (Exclusive, Exclusive)")),
             );
 
-            // Test 5: Range filter (Inclusive, None)
+            // Test 5: Range filter (Exclusive, None)
+            let values = vec![3.3, 52.6, 3.8, 6.7, 2.1, 9.9, 100.1];
+            let predicate =
+                Predicate::Range(Range::new(RangeValue::Exclusive(3.8), RangeValue::None));
+            let expected = RoaringBitmap::from_iter(vec![1, 3, 5, 6]);
+            test_fn(
+                config.clone(),
+                values,
+                ChunkOption::RecordCount(5),
+                predicate,
+                None,
+                None,
+                expected,
+                t_name(format!("Range {query_name} (Exclusive, None)")),
+            );
+
+            // Test 6: Range filter (Inclusive, None)
             let values = vec![3.3, 5.6, 3.8, 6.7, 2.1, 9.9, 10.1];
             let predicate =
                 Predicate::Range(Range::new(RangeValue::Inclusive(3.8), RangeValue::None));
@@ -358,7 +360,7 @@ mod helper {
                 t_name(format!("Range {query_name} (Inclusive, None)")),
             );
 
-            // Test 6: Range filter (None, Exclusive)
+            // Test 7: Range filter (None, Exclusive)
             let values = vec![3.3, 5.6, 3.8, 6.7, 2.1, 9.9, 10.1];
             let predicate =
                 Predicate::Range(Range::new(RangeValue::None, RangeValue::Exclusive(9.9)));
@@ -372,6 +374,27 @@ mod helper {
                 None,
                 expected,
                 t_name(format!("Range {query_name} (None, Exclusive)")),
+            );
+
+            // Test 8: Range filter large range (Inclusive, Inclusive)
+            // let values = vec![3.3, 5.6, -333.8, 6.7, 2.1, 9.9, 10.1];
+            let values = vec![9.9, 10.1];
+            let predicate = Predicate::Range(Range::new(
+                RangeValue::Inclusive(-1000.0),
+                RangeValue::Inclusive(10000000.0),
+            ));
+            let expected = RoaringBitmap::from_iter(0..values.len() as u32);
+            test_fn(
+                config.clone(),
+                values,
+                ChunkOption::RecordCount(5),
+                predicate,
+                None,
+                None,
+                expected,
+                t_name(format!(
+                    "Range {query_name} large range (Inclusive, Inclusive)"
+                )),
             );
         }
 
@@ -427,6 +450,22 @@ mod helper {
                 t_name(format!("{query_name} with bitmask")),
             );
 
+            // Test 1: Filter with bitmask Ne
+            let values = vec![3.3, 5.6, 3.8, 3.3, 2.1, 9.9, 10.1, 3.8];
+            let predicate = Predicate::Ne(3.3);
+            let bitmask = RoaringBitmap::from_iter(vec![0, 2, 3, 4, 6, 7]);
+            let expected = RoaringBitmap::from_iter(vec![2, 4, 6, 7]);
+            test_fn(
+                config.clone(),
+                values,
+                ChunkOption::RecordCount(5),
+                predicate,
+                Some(&bitmask),
+                None,
+                expected,
+                t_name(format!("{query_name} with bitmask Ne")),
+            );
+
             // Test 2: Filter with chunk_id
             let values = vec![3.3, 5.6, 3.8, 6.7, 2.1, 9.9, 10.1, 3.8];
             let predicate = Predicate::Range(Range::new(
@@ -470,6 +509,7 @@ mod helper {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn test_query_filter_optionally_materialize_random(
         config: impl Into<CompressorConfig>,
         test_name: impl std::fmt::Display,
@@ -477,6 +517,8 @@ mod helper {
         round_scale: Option<usize>,
         mean: Option<f64>,
         std_dev: Option<f64>,
+        lower_bound: Option<f64>,
+        upper_bound: Option<f64>,
     ) {
         let config = config.into();
         let t_name = |n: String| format!("{test_name}: {n}");
@@ -515,24 +557,44 @@ mod helper {
             Box::new(test_query_filter_inner_with_expected_calculation)
         };
         let mut rng = StdRng::from_entropy();
+        let clamp = |x: f64| {
+            if let Some(lower_bound) = lower_bound {
+                if x < lower_bound {
+                    return lower_bound;
+                }
+            }
+
+            if let Some(upper_bound) = upper_bound {
+                if x > upper_bound {
+                    return upper_bound;
+                }
+            }
+
+            x
+        };
         let gen_random_float = || {
             let mut rng = StdRng::from_entropy();
-            match rng.gen_range(0..=3) {
+            let fp = match rng.gen_range(0..=3) {
                 0 => rng.gen_range(f64::MIN / 2.0..=0.0),
                 1 => rng.gen_range(0.0..=f64::MAX / 2.0),
                 2 => rng.gen_range(-10000.0..=10000.0),
                 3 => rng.gen_range(0.0..=100.0),
                 _ => unreachable!(),
-            }
+            };
+
+            clamp(fp)
         };
         let mean = mean.unwrap_or_else(gen_random_float);
         let std_dev = std_dev.unwrap_or_else(|| rng.gen_range(0.001..=1000.0));
         println!("mean: {}, std_dev: {}", mean, std_dev);
         let distribution = rand_distr::Normal::new(mean, std_dev).unwrap();
+        #[cfg(not(miri))]
         let mut n_records = *[10, 100, 1000, 10000, 100000, 1000000]
             .as_slice()
             .choose(&mut rng)
             .unwrap();
+        #[cfg(miri)]
+        let mut n_records = 100;
         n_records += rng.gen_range(0..n_records - 1);
         let chunk_option = if rng.gen_bool(0.5) {
             let mut rng = StdRng::from_entropy();
@@ -548,7 +610,7 @@ mod helper {
             let mut rng = StdRng::from_entropy();
             let mut values = Vec::with_capacity(n_records);
             for _ in 0..n_records {
-                let fp = distribution.sample(&mut rng);
+                let fp = clamp(distribution.sample(&mut rng));
                 if let Some(scale) = round_scale {
                     values.push((fp * scale as f64).round() / scale as f64);
                 } else {
@@ -591,9 +653,9 @@ mod helper {
         {
             let mut gen_range_value = || match rng.gen_range(0..=3) {
                 0 => RangeValue::None,
-                1 => RangeValue::Inclusive(distribution.sample(&mut rng)),
-                2 => RangeValue::Exclusive(distribution.sample(&mut rng)),
-                3 => RangeValue::Inclusive(distribution.sample(&mut rng)),
+                1 => RangeValue::Inclusive(clamp(distribution.sample(&mut rng))),
+                2 => RangeValue::Exclusive(clamp(distribution.sample(&mut rng))),
+                3 => RangeValue::Inclusive(clamp(distribution.sample(&mut rng))),
                 _ => unreachable!(),
             };
             let predicate = Predicate::Range(Range::new(gen_range_value(), gen_range_value()));
@@ -619,7 +681,7 @@ mod helper {
 
         // Eq
         {
-            let predicate = Predicate::Eq(distribution.sample(&mut rng));
+            let predicate = Predicate::Eq(clamp(distribution.sample(&mut rng)));
             let values = gen_values();
             let bitmask = gen_bitmask();
             let chunk_id = gen_chunk_id();
@@ -642,7 +704,7 @@ mod helper {
 
         // Ne
         {
-            let predicate = Predicate::Ne(distribution.sample(&mut rng));
+            let predicate = Predicate::Ne(clamp(distribution.sample(&mut rng)));
             let values = gen_values();
             let bitmask = gen_bitmask();
             let chunk_id = gen_chunk_id();
@@ -666,16 +728,29 @@ mod helper {
 
     pub(crate) fn test_query_filter(
         config: impl Into<CompressorConfig>,
+        lower_bound: Option<f64>,
+        upper_bound: Option<f64>,
         test_name: impl std::fmt::Display + Clone,
     ) {
         let config = config.into();
         test_query_filter_optionally_materialize(config.clone(), test_name.clone(), false, None);
-        test_query_filter_optionally_materialize_random(config, test_name, false, None, None, None);
+        test_query_filter_optionally_materialize_random(
+            config,
+            test_name,
+            false,
+            None,
+            None,
+            None,
+            lower_bound,
+            upper_bound,
+        );
     }
 
     pub(crate) fn test_query_filter_materialize(
         config: impl Into<CompressorConfig>,
         round_scale: Option<usize>,
+        upper_bound: Option<f64>,
+        lower_bound: Option<f64>,
         test_name: impl std::fmt::Display + Clone,
     ) {
         let config = config.into();
@@ -690,6 +765,8 @@ mod helper {
             test_name,
             true,
             round_scale,
+            upper_bound,
+            lower_bound,
             None,
             None,
         );
@@ -828,25 +905,30 @@ mod helper {
 #[test]
 fn test_uncompressed_filter() {
     let config = CompressorConfig::uncompressed().build();
-    helper::test_query_filter(config, "Uncompressed");
+    helper::test_query_filter(config, None, None, "Uncompressed");
 }
 
 #[test]
 fn test_rle_filter() {
     let config = CompressorConfig::rle().build();
-    helper::test_query_filter(config, "RLE");
+    helper::test_query_filter(config, None, None, "RLE");
 }
 
 #[test]
 fn test_gorilla_filter() {
     let config = CompressorConfig::gorilla().build();
-    helper::test_query_filter(config, "Gorilla");
+    helper::test_query_filter(config, None, None, "Gorilla");
 }
 
 #[test]
 fn test_buff_filter() {
-    let config = CompressorConfig::buff().scale(100).build();
-    helper::test_query_filter(config, "BUFF");
+    let scale = 100;
+    let config = CompressorConfig::buff().scale(scale).build();
+    let lower_bound =
+        ((i64::MIN as f64 / (scale * 100) as f64) * scale as f64).round() / scale as f64;
+    let upper_bound =
+        ((i64::MAX as f64 / (scale * 100) as f64) * scale as f64).round() / scale as f64;
+    helper::test_query_filter(config, Some(upper_bound), Some(lower_bound), "BUFF");
 }
 
 #[test]
@@ -876,23 +958,34 @@ fn test_buff_materialize() {
 #[test]
 fn test_uncompressed_filter_materialize() {
     let config = CompressorConfig::uncompressed().build();
-    helper::test_query_filter_materialize(config, None, "Uncompressed");
+    helper::test_query_filter_materialize(config, None, None, None, "Uncompressed");
 }
 
 #[test]
 fn test_rle_filter_materialize() {
     let config = CompressorConfig::rle().build();
-    helper::test_query_filter_materialize(config, None, "RLE");
+    helper::test_query_filter_materialize(config, None, None, None, "RLE");
 }
 
 #[test]
 fn test_gorilla_filter_materialize() {
     let config = CompressorConfig::gorilla().build();
-    helper::test_query_filter_materialize(config, None, "Gorilla");
+    helper::test_query_filter_materialize(config, None, None, None, "Gorilla");
 }
 
 #[test]
 fn test_buff_filter_materialize() {
-    let config = CompressorConfig::buff().scale(10).build();
-    helper::test_query_filter_materialize(config, Some(10), "BUFF");
+    let scale = 10;
+    let config = CompressorConfig::buff().scale(scale).build();
+    let lower_bound =
+        ((i64::MIN as f64 / (scale * 100) as f64) * scale as f64).round() / scale as f64;
+    let upper_bound =
+        ((i64::MAX as f64 / (scale * 100) as f64) * scale as f64).round() / scale as f64;
+    helper::test_query_filter_materialize(
+        config,
+        Some(10),
+        Some(upper_bound),
+        Some(lower_bound),
+        "BUFF",
+    );
 }

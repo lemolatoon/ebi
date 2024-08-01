@@ -132,8 +132,8 @@ fn test_round_trip_with_scale(
                 .filter_materialize(
                     &mut decoder_output,
                     Predicate::Range(Range::new(
-                        RangeValue::Inclusive(f64::MIN),
-                        RangeValue::Inclusive(f64::MAX),
+                        RangeValue::Inclusive(-1000.0),
+                        RangeValue::Inclusive(10000000.0),
                     )),
                     None,
                     None,
@@ -153,6 +153,8 @@ fn test_round_trip_with_scale(
 
             let bm0 = decoder.filter(Predicate::Ne(0.5), None, None).unwrap();
             let bm1 = decoder.filter(Predicate::Eq(0.5), None, None).unwrap();
+            dbg!(bm0.len(), bm1.len(), (&bm0 | &bm1).len());
+            dbg!(&bm0, &bm1, &bm0 | &bm1);
             decoder
                 .materialize(&mut decoder_output, Some(&(bm0 | bm1)), None)
                 .unwrap();

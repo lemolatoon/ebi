@@ -24,7 +24,15 @@ pub fn into_fixed_representation(value: f64, decimal_length: i32) -> i64 {
     let exp = ((v_bits & EXP_MASK) >> 52) as i32 - 1023;
     let sign = v_bits & FIRST_ONE;
 
-    let mut fixed = ((v_bits << (11)) | FIRST_ONE) >> (63 - (exp) - decimal_length) as u64;
+    if (63 - exp - decimal_length) <= 0 || (63 - exp - decimal_length) >= 64 {
+        dbg!(value, exp, decimal_length, 63 - exp - decimal_length);
+    }
+    let mut fixed = if (63 - exp - decimal_length) >= 64 {
+        debug_assert!(63 - exp - decimal_length == 64);
+        0
+    } else {
+        ((v_bits << (11)) | FIRST_ONE) >> (63 - (exp) - decimal_length) as u64
+    };
 
     if sign != 0 {
         fixed = !(fixed - 1);
@@ -487,10 +495,6 @@ pub mod bit_packing {
                 );
                 return Err(bits);
             };
-            println!(
-                "read bits: bits: from({}), len({}) {:08b}",
-                self.bits, bits, self.buff[self.cursor]
-            );
 
             let mut bits_left = 0;
             let mut output = 0;
@@ -554,7 +558,6 @@ pub mod bit_packing {
 
         #[inline]
         pub fn skip_n_byte(&mut self, mut n: usize) -> Result<(), usize> {
-            println!("skip_n_byte: n: {}", n);
             self.cursor += n;
             // println!("current cursor{}, current bits:{}",self.cursor,self.bits);
             Ok(())
@@ -572,13 +575,9 @@ pub mod bit_packing {
             let bytes = bits / BYTE_BITS;
             let left = bits % BYTE_BITS;
 
-            println!("skip: bits: {bits}");
-            dbg!((self.cursor, self.bits));
-
             let cur_bits = (self.bits + left);
             self.cursor = self.cursor + bytes + cur_bits / BYTE_BITS;
             self.bits = cur_bits % BYTE_BITS;
-            dbg!((self.cursor, self.bits));
 
             // println!("current cursor{}, current bits:{}",self.cursor,self.bits);
             Ok(())
