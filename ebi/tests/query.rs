@@ -11,6 +11,7 @@ mod helper {
     use rand::{Rng, SeedableRng};
     use std::cmp::min;
     use std::io::Cursor;
+    use std::iter;
 
     use ebi::{
         api::{
@@ -49,6 +50,8 @@ mod helper {
             decoder.filter(predicate, bitmask, chunk_id).unwrap()
         };
 
+        println!("bitmap: {:?}", bitmap.iter().collect::<Vec<_>>());
+        println!("expected: {:?}", expected.iter().collect::<Vec<_>>());
         assert_eq!(bitmap, expected, "[{test_name}]: Filter result mismatch");
     }
 
@@ -131,6 +134,7 @@ mod helper {
                 .chunks_exact(8)
                 .map(|chunk| {
                     let fp = f64::from_ne_bytes(chunk.try_into().unwrap());
+                    print!("{} ", fp);
                     if let Some(scale) = round_scale {
                         (fp * scale as f64).round() / scale as f64
                     } else {
@@ -139,12 +143,14 @@ mod helper {
                 })
                 .collect()
         };
+        println!();
 
         let expected: Vec<f64> = values
             .into_iter()
             .enumerate()
             .filter_map(|(i, f)| {
                 if expected.contains(i as u32) {
+                    print!("{} ", f);
                     Some(if let Some(scale) = round_scale {
                         (f * scale as f64).round() / scale as f64
                     } else {
@@ -155,6 +161,7 @@ mod helper {
                 }
             })
             .collect();
+        println!();
 
         assert_eq!(
             materialized.len(),
@@ -482,6 +489,93 @@ mod helper {
                 None,
                 expected,
                 t_name(format!("Ne {query_name}")),
+            );
+
+            // Test 3: Eq simd
+            #[rustfmt::skip]
+            let values = vec![/*  0 */1.0, 1.0, 1.0, 1.0, 1.0,
+                                        /*  5 */2.0, 2.0, 2.0, 2.0, 2.0,
+                                        /* 10 */2.0, 2.0, 2.0, 2.0, 2.0,
+                                        /* 15 */2.0, 2.0, 2.0, 2.0, 2.0,
+                                        /* 20 */10.5, 10.6, 10.7, 10.9, 10.9,
+                                        /* 25 */100.0, 100.0, 100.0, 100.0, 100.0,
+                                        /* 30 */10.0, 10.0, 10.0, 10.0, 10.0];
+            let predicate = Predicate::Eq(10.5);
+            let expected = RoaringBitmap::from_iter(iter::once(20));
+            let chunk_option = ChunkOption::RecordCount(35);
+            test_fn(
+                config.clone(),
+                values,
+                chunk_option,
+                predicate,
+                None,
+                None,
+                expected,
+                t_name(format!("{query_name} Eq simd")),
+            );
+
+            // Test 3: Ne simd
+            #[rustfmt::skip]
+            let values = vec![/*  0 */1.0, 1.0, 1.0, 1.0, 1.0,
+                                        /*  5 */2.0, 2.0, 2.0, 2.0, 2.0,
+                                        /* 10 */2.0, 2.0, 2.0, 2.0, 2.0,
+                                        /* 15 */2.0, 2.0, 2.0, 2.0, 2.0,
+                                        /* 20 */10.5, 10.6, 10.7, 10.9, 10.9,
+                                        /* 25 */100.0, 100.0, 100.0, 100.0, 100.0,
+                                        /* 30 */10.0, 10.0, 10.0, 10.0, 10.0];
+            let predicate = Predicate::Ne(10.5);
+            let expected = RoaringBitmap::from_iter((0..20).chain(21..35));
+            let chunk_option = ChunkOption::RecordCount(35);
+            test_fn(
+                config.clone(),
+                values,
+                chunk_option,
+                predicate,
+                None,
+                None,
+                expected,
+                t_name(format!("{query_name} Ne simd")),
+            );
+
+            // Test 4: Random Failure Ne simd
+            let values: Vec<f64> = vec![-7072.1; 32]
+                .into_iter()
+                .chain(iter::once(-7071.2))
+                .collect();
+            let predicate = Predicate::Ne(-7071.2);
+            let expected = RoaringBitmap::from_iter(0..32);
+            let chunk_option = ChunkOption::RecordCount(35);
+            test_fn(
+                config.clone(),
+                values,
+                chunk_option,
+                predicate,
+                None,
+                None,
+                expected,
+                t_name(format!("{query_name} Random failure Ne simd")),
+            );
+
+            // Test 4: Random Failure Range simd (low selectivity, more than 2 subcolumns check will be run and more than 2 chunks)
+            let values = vec![41.4; 15].into_iter().chain(vec![41.5; 15]);
+            // let values = vec![/*0.4*/0.0; 15].into_iter().chain(vec![0.5; 15]);
+            let values: Vec<f64> = values.clone().chain(values).collect();
+            let predicate =
+                Predicate::Range(Range::new(RangeValue::Inclusive(41.4), RangeValue::None));
+            let expected = RoaringBitmap::from_iter(0..values.len() as u32);
+            // let expected = RoaringBitmap::from_iter(0..0);
+            let chunk_option = ChunkOption::RecordCount(32 + 1);
+            test_fn(
+                config.clone(),
+                values,
+                chunk_option,
+                predicate,
+                None,
+                None,
+                expected,
+                t_name(format!(
+                    "{query_name} Random failure Eq simd (low selectivity, 2 chunks)"
+                )),
             );
         }
 
@@ -933,6 +1027,19 @@ mod helper {
                 expected,
                 t_name("Materialize without bitmask and chunk_id"),
             );
+
+            let values = vec![0.4, 0.4, 0.5];
+            let expected = values.clone();
+            test_query_materialize_inner(
+                config.clone(),
+                values,
+                ChunkOption::RecordCount(5),
+                None,
+                None,
+                round_scale,
+                expected,
+                t_name("Materialize without bitmask and chunk_id almost the same values"),
+            );
         }
 
         // Test 2: Materialize with bitmask
@@ -1051,8 +1158,9 @@ fn test_gorilla_materialize() {
 
 #[test]
 fn test_buff_materialize() {
-    let config = CompressorConfig::buff().scale(10).build();
-    helper::test_query_materialize(config, Some(10), "BUFF");
+    let scale = 10;
+    let config = CompressorConfig::buff().scale(scale).build();
+    helper::test_query_materialize(config, Some(scale), "BUFF");
 }
 
 #[test]

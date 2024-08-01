@@ -233,11 +233,23 @@ mod internal {
             if fixed_pred < fixed_base64 {
                 return if IS_GREATER { all() } else { none() };
             }
+            if fixed_representation_bits_length == 0 {
+                let all_if_or_none = |p: bool| if p { all() } else { none() };
+                return match (IS_GREATER, INCLUSIVE) {
+                    (true, true) => all_if_or_none(fixed_base64 >= fixed_pred),
+                    (true, false) => all_if_or_none(fixed_base64 > fixed_pred),
+                    (false, true) => all_if_or_none(fixed_base64 <= fixed_pred),
+                    (false, false) => all_if_or_none(fixed_base64 < fixed_pred),
+                };
+            }
 
             let delta_fixed_pred = (fixed_pred - fixed_base64) as u64;
             {
-                let pred_fixed_representation_bits_length =
-                    std::cmp::max((delta_fixed_pred as f64).log2().ceil() as u32, 1);
+                let pred_fixed_representation_bits_length = if delta_fixed_pred == 0 {
+                    0
+                } else {
+                    64 - delta_fixed_pred.leading_zeros()
+                };
                 if fixed_representation_bits_length < pred_fixed_representation_bits_length {
                     return if IS_GREATER { none() } else { all() };
                 }
@@ -292,8 +304,8 @@ mod internal {
 
                     for record_index in to_check_bitmask
                         .iter()
-                        .filter(move |&x| x >= expected_record_index_if_sequential)
                         .map(|x| x - logical_offset)
+                        .filter(move |&x| x >= expected_record_index_if_sequential)
                     {
                         bitpack
                             .skip_n_byte(
@@ -484,6 +496,13 @@ mod internal {
             if fixed_pred < fixed_base64 {
                 return none();
             }
+            if fixed_representation_bits_length == 0 {
+                return if fixed_pred == fixed_base64 {
+                    all()
+                } else {
+                    none()
+                };
+            }
 
             let delta_fixed_pred = (fixed_pred - fixed_base64) as u64;
 
@@ -520,13 +539,13 @@ mod internal {
 
                     next_result_bitmask
                 } else {
-                    // TODO: use SIMD here
                     let chunk = bitpack.read_n_byte(number_of_records as usize).unwrap();
 
                     cfg_if! {
                         if #[cfg(miri)] {
                             let mut bitmask = RoaringBitmap::new();
                             let remaining_chunk = chunk;
+                            let record_index_offset = 0;
                         } else {
                             let (simd_chunk, scalar_chunk) =
                                 chunk.split_at(chunk.len() - (chunk.len() % simd::VECTOR_SIZE));
@@ -535,9 +554,14 @@ mod internal {
                             };
 
                             let remaining_chunk = scalar_chunk;
+                            let record_index_offset = chunk.len() - chunk.len() % simd::VECTOR_SIZE;
                         }
                     }
-                    for (record_index, &subcolumn) in remaining_chunk.iter().enumerate() {
+                    for (record_index, subcolumn) in remaining_chunk
+                        .iter()
+                        .enumerate()
+                        .map(|(i, &x)| (i + record_index_offset, x))
+                    {
                         let subcolumn = flip(subcolumn);
                         if subcolumn == delta_fixed_pred_subcolumn {
                             bitmask.insert(logical_offset + record_index as u32);
@@ -702,7 +726,9 @@ mod internal {
 
         let mut remaining_bits_length = fixed_representation_bits_length;
 
-        let expected_datapoints: Vec<f64> = if remaining_bits_length < 8 {
+        let expected_datapoints: Vec<f64> = if remaining_bits_length == 0 {
+            vec![base_fixed64 as f64 / scale; number_of_records as usize]
+        } else if remaining_bits_length < 8 {
             let mut expected_datapoints = Vec::with_capacity(number_of_records as usize);
             for _ in 0..number_of_records {
                 let cur = bitpack.read_bits(remaining_bits_length as usize).unwrap();

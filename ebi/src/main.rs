@@ -55,10 +55,11 @@ fn main() {
     // let compressor = GenericCompressor::Uncompressed(UncompressedCompressor::new(100));
     // let compressor_config = CompressorConfig::rle().build();
     // let compressor_config = CompressorConfig::gorilla().build();
-    let compressor_config = CompressorConfig::buff().scale(100).build();
+    let scale = 10;
+    let compressor_config = CompressorConfig::buff().scale(scale).build();
     let chunk_option = ChunkOption::RecordCount(RECORD_COUNT);
 
-    let binding = vec![9.9, 10.1];
+    let binding = vec![0.4, 0.5];
     let mut encoder = Encoder::new(
         // EncoderInput::from_file("uncompressed.bin").unwrap(),
         EncoderInput::from_f64_slice(&binding),
@@ -109,7 +110,7 @@ fn main() {
         .chunks_exact(8)
         .map(|chunk| {
             let fp = f64::from_ne_bytes(chunk.try_into().unwrap());
-            (fp * 100.0).round() / 100.0
+            (fp * scale as f64).round() / scale as f64
         })
         .collect();
 

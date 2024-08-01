@@ -73,6 +73,7 @@ fn test_api_round_trip_rle() {
 #[test]
 fn test_api_round_trip_buff() {
     for scale in [1, 10, 100, 1000] {
+        println!("scale: {}", scale);
         let compressor_config = CompressorConfig::buff().scale(scale).build();
         test_round_trip_with_scale(
             generate_and_write_random_f64_with_precision,
@@ -83,6 +84,7 @@ fn test_api_round_trip_buff() {
 
     let compressor_config = CompressorConfig::buff().scale(100).build();
 
+    println!("single values");
     // sigle value
     test_round_trip_with_scale(|n, _scale| vec![100.19; n], compressor_config.into(), 100);
 }
@@ -170,6 +172,7 @@ fn test_round_trip_with_scale(
                 decoded.len(),
                 "The length of the decoded values is not equal to the length of the original values. {} != {}", random_values_bytes.len(), decoded.len()
             );
+            println!("passed");
 
             let random_floats_rounded = random_values
                 .iter()

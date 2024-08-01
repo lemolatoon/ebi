@@ -101,8 +101,11 @@ mod internal {
             .map(|x| (x - base_fixed64) as u64)
             .collect::<Vec<u64>>();
 
-        let fixed_representation_bits_length =
-            std::cmp::max((delta as f64).log2().ceil() as u32, 1);
+        let fixed_representation_bits_length = if delta == 0 {
+            0
+        } else {
+            64 - delta.leading_zeros()
+        };
 
         let fractional_part_bits_length = fractional_part_bits_length as usize;
         let mut bitpack_vec = BitPack::<Vec<u8>>::with_capacity(8);
@@ -127,7 +130,7 @@ mod internal {
 
         let mut remaining_bits_length = fixed_representation_bits_length as usize;
 
-        if remaining_bits_length < 8 {
+        if 0 < remaining_bits_length && remaining_bits_length < 8 {
             for delta_fixed in delta_fixed_representation_values {
                 bitpack_vec
                     .write_bits(delta_fixed as u32, remaining_bits_length)
