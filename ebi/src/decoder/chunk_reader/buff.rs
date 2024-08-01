@@ -193,11 +193,12 @@ mod internal {
 
     pub(crate) mod query {
         use roaring::RoaringBitmap;
-        use simd::{equal_simd_myroaring, greater_simd};
+        use simd::{equal_simd, greater_simd};
 
         use crate::compression_common::buff::{
             bit_packing::BitPack, flip, precision_bound::PrecisionBound,
         };
+        use cfg_if::cfg_if;
 
         pub(crate) fn buff_simd256_cmp_filter<const IS_GREATER: bool, const INCLUSIVE: bool>(
             bytes: &[u8],
@@ -457,9 +458,24 @@ mod internal {
                     next_result_bitmask
                 } else {
                     // TODO: use SIMD here
-                    let mut bitmask = RoaringBitmap::new();
                     let chunk = bitpack.read_n_byte(number_of_records as usize).unwrap();
-                    for (record_index, &subcolumn) in chunk.iter().enumerate() {
+                    let remaining_chunk;
+                    let mut bitmask: RoaringBitmap;
+                    {
+                        let (simd_chunk, scalar_chunk) =
+                            chunk.split_at(chunk.len() - (chunk.len() % simd::VECTOR_SIZE));
+                        println!(
+                            "\tsimd chunk: {}, scalar chunk: {}",
+                            simd_chunk.len(),
+                            scalar_chunk.len()
+                        );
+                        bitmask = unsafe {
+                            equal_simd(simd_chunk, delta_fixed_pred_subcolumn, logical_offset)
+                        };
+
+                        remaining_chunk = scalar_chunk;
+                    }
+                    for (record_index, &subcolumn) in remaining_chunk.iter().enumerate() {
                         let subcolumn = flip(subcolumn);
                         if subcolumn == delta_fixed_pred_subcolumn {
                             bitmask.insert(logical_offset + record_index as u32);
@@ -524,7 +540,7 @@ mod internal {
                 __m256i, _mm256_cmpeq_epi8, _mm256_cmpgt_epi8, _mm256_lddqu_si256,
                 _mm256_movemask_epi8, _mm256_set1_epi8, _popcnt32,
             };
-            const VECTOR_SIZE: usize = size_of::<__m256i>();
+            pub(super) const VECTOR_SIZE: usize = size_of::<__m256i>();
 
             use roaring::RoaringBitmap;
 
@@ -561,49 +577,30 @@ mod internal {
                 middle
             }
 
-            pub unsafe fn equal_simd_myroaring(
-                x: &[u8],
-                pred: u8,
-                logical_offset: u32,
-            ) -> RoaringBitmap {
-                debug_assert!(x.len() % VECTOR_SIZE == 0);
-                let haystack = x;
-                let start_ptr = haystack.as_ptr();
-                let end_ptr = haystack[haystack.len()..].as_ptr();
-                let mut ptr = start_ptr;
-
-                let predicate = std::mem::transmute::<u8, i8>(flip(pred));
-                println!("current predicate:{}", pred);
-                let mut pred_word = _mm256_set1_epi8(predicate);
-                let ep = end_ptr.sub(VECTOR_SIZE);
-                let mut middle = RoaringBitmap::new();
-                // let mut gt = Vec::<i32>::new();
-                let mut qualified = 0;
-                let mut count = 0;
-                while ptr <= ep {
-                    let word1 = _mm256_lddqu_si256(ptr as *const __m256i);
-
-                    let equal = _mm256_cmpeq_epi8(word1, pred_word);
+            pub unsafe fn equal_simd(x: &[u8], pred: u8, logical_offset: u32) -> RoaringBitmap {
+                debug_assert_eq!(
+                    x.len() % VECTOR_SIZE,
+                    0,
+                    "simd chunk size is not a multiple of 32"
+                );
+                let pred_word = _mm256_set1_epi8(std::mem::transmute::<u8, i8>(flip(pred)));
+                let mut result = RoaringBitmap::new();
+                for (word_index, word) in x
+                    .chunks_exact(VECTOR_SIZE)
+                    .map(|chunk| _mm256_lddqu_si256(chunk.as_ptr().cast::<__m256i>()))
+                    .enumerate()
+                {
+                    let equal = _mm256_cmpeq_epi8(word, pred_word);
                     let eq_mask = _mm256_movemask_epi8(equal);
-                    // TODO: potentially, using custom `insert_direct_u32` could be faster
-                    // middle.insert_direct_u32(
-                    //     count + logical_offset,
-                    //     std::mem::transmute::<i32, u32>(eq_mask),
-                    // );
-                    for i in 0..32 {
+
+                    for i in 0..VECTOR_SIZE {
                         if (eq_mask & (1 << i)) != 0 {
-                            middle.insert(count + i + logical_offset);
+                            result.insert((word_index * VECTOR_SIZE + i) as u32 + logical_offset);
                         }
                     }
-
-                    // println!("{:?}{:?}{:b}", word1, pred_word, mask);
-                    // gt.push(mask);
-                    qualified += _popcnt32(eq_mask);
-                    count += 32;
-                    ptr = ptr.add(VECTOR_SIZE);
                 }
-                println!("\tsimd equal bitmap: {}", qualified);
-                middle
+
+                result
             }
         }
     }
