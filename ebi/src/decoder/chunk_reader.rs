@@ -136,7 +136,6 @@ impl<R: Read> GeneralChunkReaderInner<R> {
             CompressionScheme::BUFF => {
                 GeneralChunkReaderInner::BUFF(buff::BUFFReader::new(handle, reader))
             }
-            c => unimplemented!("Unimplemented compression scheme: {:?}", c),
         })
     }
 }

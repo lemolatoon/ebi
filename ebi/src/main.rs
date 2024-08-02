@@ -101,8 +101,7 @@ fn main() {
         .chunks_exact(8)
         .map(|chunk| {
             let fp = f64::from_ne_bytes(chunk.try_into().unwrap());
-            // (fp * 100.0).round() / 100.0
-            fp
+            (fp * scale as f64).round() / scale as f64
         })
         .collect();
 

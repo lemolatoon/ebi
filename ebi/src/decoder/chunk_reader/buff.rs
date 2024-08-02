@@ -7,7 +7,7 @@ use std::{
 use either::Either;
 
 use crate::decoder::{
-    query::{Predicate, QueryExecutor, Range, RangeValue},
+    query::{Predicate, QueryExecutor, RangeValue},
     FileMetadataLike, GeneralChunkHandle,
 };
 
@@ -103,7 +103,7 @@ impl<R: Read> QueryExecutor for BUFFReader<R> {
         bitmask: Option<&roaring::RoaringBitmap>,
         logical_offset: usize,
     ) -> crate::decoder::Result<roaring::RoaringBitmap> {
-        use internal::query::{buff_simd256_cmp_filter, buff_simd256_equal_filter};
+        use internal::query::buff_simd256_cmp_filter;
         let logical_offset = logical_offset as u32;
         let number_of_records = self.number_of_records as u32;
         let bitmask: Option<roaring::RoaringBitmap> = bitmask.map(|x| {
@@ -126,7 +126,7 @@ impl<R: Read> QueryExecutor for BUFFReader<R> {
                     logical_offset,
                 );
 
-                let result = if let Predicate::Eq(_) = p {
+                if let Predicate::Eq(_) = p {
                     result
                 } else {
                     // Predicate::Ne
@@ -136,9 +136,7 @@ impl<R: Read> QueryExecutor for BUFFReader<R> {
                     } else {
                         all() - result
                     }
-                };
-
-                result
+                }
             }
             Predicate::Range(r) => {
                 let left = match r.start() {
@@ -194,7 +192,9 @@ mod internal {
         use simd::{comp_simd, equal_simd};
 
         use crate::compression_common::buff::{
-            bit_packing::BitPack, flip, precision_bound::PrecisionBound,
+            bit_packing::BitPack,
+            flip,
+            precision_bound::{self},
         };
         use cfg_if::cfg_if;
 
@@ -218,10 +218,11 @@ mod internal {
             let fixed_representation_bits_length = bitpack.read_u32().unwrap();
             let fractional_part_bits_length = bitpack.read_u32().unwrap();
 
-            let fixed_pred = PrecisionBound::into_fixed_representation_with_decimal_length(
-                pred,
-                fractional_part_bits_length as i32,
-            );
+            let fixed_pred =
+                precision_bound::into_fixed_representation_with_fractional_part_bits_length(
+                    pred,
+                    fractional_part_bits_length as i32,
+                );
 
             let all = || {
                 let mut all = RoaringBitmap::new();
@@ -344,7 +345,7 @@ mod internal {
                     // TODO: use SIMD here
                     let chunk = bitpack.read_n_byte(number_of_records as usize).unwrap();
                     cfg_if! {
-                        if #[cfg(miri)] {
+                        if #[cfg(not(target_arch = "x86_64"))] {
                             let mut to_check_bitmask = RoaringBitmap::new();
                             let remaining_chunk = chunk;
                             let record_index_offset = 0;
@@ -460,7 +461,7 @@ mod internal {
                     qualified_bitmask |= to_check_bitmask
                 }
             }
-            return qualified_bitmask;
+            qualified_bitmask
         }
 
         pub(crate) fn buff_simd256_equal_filter(
@@ -481,10 +482,11 @@ mod internal {
             let fixed_representation_bits_length = bitpack.read_u32().unwrap();
             let fractional_part_bits_length = bitpack.read_u32().unwrap();
 
-            let fixed_pred = PrecisionBound::into_fixed_representation_with_decimal_length(
-                pred,
-                fractional_part_bits_length as i32,
-            );
+            let fixed_pred =
+                precision_bound::into_fixed_representation_with_fractional_part_bits_length(
+                    pred,
+                    fractional_part_bits_length as i32,
+                );
 
             let all = || {
                 let mut all = RoaringBitmap::new();
@@ -542,7 +544,7 @@ mod internal {
                     let chunk = bitpack.read_n_byte(number_of_records as usize).unwrap();
 
                     cfg_if! {
-                        if #[cfg(miri)] {
+                        if #[cfg(not(target_arch = "x86_64"))] {
                             let mut bitmask = RoaringBitmap::new();
                             let remaining_chunk = chunk;
                             let record_index_offset = 0;
@@ -579,7 +581,7 @@ mod internal {
             }
 
             // last subcolumn
-            let r = if remaining_bits_length > 0 {
+            if remaining_bits_length > 0 {
                 if let Some(bitmask) = &result_bitmask {
                     let mask_for_remaining_bits = (1 << remaining_bits_length) - 1;
                     let delta_fixed_pred_subcolumn =
@@ -617,14 +619,13 @@ mod internal {
                 }
             } else {
                 result_bitmask.unwrap_or_else(all)
-            };
-            return r;
+            }
         }
 
         mod simd {
             use std::arch::x86_64::{
                 __m256i, _mm256_cmpeq_epi8, _mm256_cmpgt_epi8, _mm256_lddqu_si256,
-                _mm256_movemask_epi8, _mm256_set1_epi8, _popcnt32,
+                _mm256_movemask_epi8, _mm256_set1_epi8,
             };
             pub(super) const VECTOR_SIZE: usize = size_of::<__m256i>();
 

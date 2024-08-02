@@ -21,7 +21,10 @@ impl BUFFCompressor {
 
 impl Compressor for BUFFCompressor {
     fn compress(&mut self, data: &[f64]) -> usize {
-        self.data.extend_from_slice(data);
+        if self.compressed.is_some() {
+            return 0;
+        }
+        self.compressed = Some(internal::buff_simd256_encode(self.scale, data));
 
         let n_bytes_compressed = size_of_val(data);
         self.total_bytes_in += n_bytes_compressed;
@@ -37,11 +40,7 @@ impl Compressor for BUFFCompressor {
         self.compressed.as_ref().map_or(0, |v| v.len())
     }
 
-    fn prepare(&mut self) {
-        let data = internal::buff_simd256_encode(self.scale, &self.data);
-
-        self.compressed = Some(data);
-    }
+    fn prepare(&mut self) {}
 
     fn buffers(&self) -> [&[u8]; super::MAX_BUFFERS] {
         const EMPTY: &[u8] = &[];
@@ -61,11 +60,11 @@ mod internal {
 
     use crate::compression_common::buff::{
         bit_packing::BitPack,
-        flip, get_precision_bound,
-        precision_bound::{PrecisionBound, PRECISION_MAP},
+        flip,
+        precision_bound::{self, PRECISION_MAP},
     };
 
-    pub fn buff_simd256_encode(scale: usize, floats: &Vec<f64>) -> Vec<u8> {
+    pub fn buff_simd256_encode(scale: usize, floats: &[f64]) -> Vec<u8> {
         let mut fixed_representation_values = Vec::new();
 
         let number_of_records: u32 = floats.len() as u32;
@@ -74,17 +73,16 @@ mod internal {
         } else {
             (scale as f32).log10() as i32
         };
-        let precision_delta = get_precision_bound(precision);
 
-        let mut bound = PrecisionBound::new(precision_delta);
-        // let start1 = Instant::now();
         let fractional_part_bits_length = *PRECISION_MAP.get(precision as usize).unwrap();
-        bound.set_length(0, fractional_part_bits_length);
         let mut min = i64::MAX;
         let mut max = i64::MIN;
 
         for &f in floats {
-            let fixed = bound.into_fixed_representation(f);
+            let fixed = precision_bound::into_fixed_representation_with_fractional_part_bits_length(
+                f,
+                fractional_part_bits_length as i32,
+            );
             if fixed < min {
                 min = fixed;
             }
@@ -153,7 +151,7 @@ mod internal {
                 bitpack_vec.finish_write_byte();
                 for d in delta_fixed_representation_values {
                     bitpack_vec
-                        .write_bits(d as u32, remaining_bits_length as usize)
+                        .write_bits(d as u32, remaining_bits_length)
                         .unwrap();
                 }
             }
