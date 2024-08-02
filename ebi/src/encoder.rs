@@ -1,7 +1,7 @@
 use cfg_if::cfg_if;
 
 use crate::{
-    compressor::{CompressorConfig, GenericCompressor},
+    compressor::{Compressor, CompressorConfig, GenericCompressor},
     format::{
         self,
         serialize::{AsBytes, ToLe},
@@ -346,6 +346,7 @@ impl<'a, R: AlignedBufRead> ChunkWriter<'a, R> {
     }
 
     pub fn write<W: Write>(&mut self, mut f: W) -> Result<(), io::Error> {
+        return unimplemented!();
         let chunk_option = *self.file_writer.chunk_option();
 
         loop {
@@ -370,7 +371,7 @@ impl<'a, R: AlignedBufRead> ChunkWriter<'a, R> {
             }
 
             let n_bytes_compressed = self.compressor.compress(buf.as_ref());
-            buf.set_n_consumed_bytes(n_bytes_compressed);
+            // buf.set_n_consumed_bytes(n_bytes_compressed);
         }
 
         if self.compressor.total_bytes_in() == 0 {

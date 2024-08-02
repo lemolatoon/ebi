@@ -1,11 +1,14 @@
-use std::mem::{size_of, size_of_val};
+use std::{
+    iter,
+    mem::{size_of, size_of_val},
+};
 
 use crate::format::{
     run_length::RunLengthHeader,
     serialize::{AsBytes, ToLe},
 };
 
-use super::{size_estimater::NaiveSlowSizeEstimator, Compressor};
+use super::{size_estimater::AppendCompressingSizeEstimator, AppendableCompressor, Compressor};
 
 /// Run Length Encoding (RLE) Compression Scheme
 /// Chunk Layout:
@@ -51,9 +54,10 @@ impl Default for RunLengthCompressor {
 
 impl Compressor for RunLengthCompressor {
     // TODO: Implement RLE size estimator
-    type SizeEstimatorImpl<'comp, 'buf> = NaiveSlowSizeEstimator<'comp, 'buf, Self>;
+    type SizeEstimatorImpl<'comp, 'buf> = AppendCompressingSizeEstimator<'comp, 'buf, Self>;
 
-    fn compress(&mut self, input: &[f64]) -> usize {
+    fn compress(&mut self, input: &[f64]) {
+        self.reset();
         let is_starting = self.previous_run_count == 0;
         if is_starting {
             self.previous_value = input[0];
@@ -78,8 +82,18 @@ impl Compressor for RunLengthCompressor {
         }
 
         self.total_bytes_in += n_bytes_compressed;
+    }
 
-        n_bytes_compressed
+    fn size_estimater<'comp, 'buf>(
+        &'comp mut self,
+        input: &'buf [f64],
+        estimate_option: super::size_estimater::EstimateOption,
+    ) -> Option<Self::SizeEstimatorImpl<'comp, 'buf>> {
+        Some(AppendCompressingSizeEstimator::new(
+            self,
+            input,
+            estimate_option,
+        ))
     }
 
     fn total_bytes_in(&self) -> usize {
@@ -121,5 +135,102 @@ impl Compressor for RunLengthCompressor {
         self.previous_run_count = 0;
 
         self.total_bytes_in = 0;
+    }
+}
+
+impl AppendableCompressor for RunLengthCompressor {
+    fn append_compress(&mut self, input: &[f64]) {
+        dbg!(input);
+        let is_starting = self.previous_run_count == 0;
+        if is_starting {
+            self.previous_value = input[0];
+            self.previous_run_count = 1;
+        }
+        let n_bytes_compressed = size_of_val(input);
+
+        let input = if is_starting { &input[1..] } else { input };
+        for value in input {
+            // byte level comparison
+            if self.previous_value.to_le_bytes() == value.to_le_bytes()
+                && self.previous_run_count < u8::MAX
+            {
+                self.previous_run_count += 1;
+                continue;
+            };
+
+            self.add_field(self.previous_value, self.previous_run_count);
+
+            self.previous_value = *value;
+            self.previous_run_count = 1;
+        }
+
+        self.total_bytes_in += n_bytes_compressed;
+    }
+
+    fn rewind(&mut self, mut n: usize) -> bool {
+        println!("Rewind Print State");
+        println!("Run Count , Value");
+        println!("{}, {}", self.previous_run_count, self.previous_value);
+        for field in self.bytes.chunks_exact(9).rev() {
+            let run_count = u8::from_le_bytes(field[..1].try_into().unwrap());
+            let value = f64::from_le_bytes(field[1..9].try_into().unwrap());
+            println!("{}, {}", run_count, value);
+        }
+        if self.previous_run_count == 0 {
+            return false;
+        }
+
+        let mut previous_value_run_count_set = false;
+
+        let mut number_of_fields_to_rewind = 0;
+        let fileds_iter = self.bytes.chunks_exact(9).rev().map(|field| {
+            let run_count = u8::from_le_bytes(field[..1].try_into().unwrap());
+            let value = f64::from_le_bytes(field[1..9].try_into().unwrap());
+            (run_count, value)
+        });
+        for (run_count, value) in
+            iter::once((self.previous_run_count, self.previous_value)).chain(fileds_iter)
+        {
+            dbg!((run_count, value, n, number_of_fields_to_rewind));
+
+            if n >= run_count as usize {
+                n -= run_count as usize;
+                number_of_fields_to_rewind += 1;
+                continue;
+            }
+
+            self.previous_value = value;
+            self.previous_run_count = run_count - n as u8;
+            n = 0;
+            number_of_fields_to_rewind += 1;
+            previous_value_run_count_set = true;
+            break;
+        }
+
+        if n != 0 {
+            return false;
+        }
+
+        if !previous_value_run_count_set {
+            self.previous_run_count = 0;
+        }
+
+        // rewind fields
+        self.bytes
+            .truncate(self.bytes.len() - (number_of_fields_to_rewind - 1) * 9);
+        self.header.set_number_of_fields(
+            self.header.number_of_fields() - (number_of_fields_to_rewind - 1) as u64,
+        );
+        self.total_bytes_in -= n * size_of::<f64>();
+
+        println!("[END] Rewind Print State");
+        println!("Run Count , Value");
+        println!("{}, {}", self.previous_run_count, self.previous_value);
+        for field in self.bytes.chunks_exact(9).rev() {
+            let run_count = u8::from_le_bytes(field[..1].try_into().unwrap());
+            let value = f64::from_le_bytes(field[1..9].try_into().unwrap());
+            println!("{}, {}", run_count, value);
+        }
+        true
     }
 }

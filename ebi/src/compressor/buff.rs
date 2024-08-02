@@ -23,16 +23,11 @@ impl Compressor for BUFFCompressor {
     // TODO: Implement BUFF size estimator
     type SizeEstimatorImpl<'comp, 'buf> = NaiveSlowSizeEstimator<'comp, 'buf, Self>;
 
-    fn compress(&mut self, data: &[f64]) -> usize {
-        if self.compressed.is_some() {
-            return 0;
-        }
+    fn compress(&mut self, data: &[f64]) {
         self.compressed = Some(internal::buff_simd256_encode(self.scale, data));
 
         let n_bytes_compressed = size_of_val(data);
         self.total_bytes_in += n_bytes_compressed;
-
-        n_bytes_compressed
     }
 
     fn total_bytes_in(&self) -> usize {

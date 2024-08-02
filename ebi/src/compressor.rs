@@ -3,7 +3,10 @@ use derive_builder::Builder;
 use gorilla::GorillaCompressor;
 use quick_impl::QuickImpl;
 use run_length::RunLengthCompressor;
-use size_estimater::{EstimateOption, NaiveSlowSizeEstimator, SizeEstimator};
+use size_estimater::{
+    AppendCompressingSizeEstimator, EstimateOption, NaiveSlowSizeEstimator, SizeEstimator,
+    StaticSizeEstimator,
+};
 // use run_length::RunLengthCompressor;
 use uncompressed::UncompressedCompressor;
 
@@ -22,7 +25,7 @@ pub trait Compressor {
         Self: 'comp;
 
     /// Perform the compression and return the size of the compressed data.
-    fn compress(&mut self, input: &[f64]) -> usize;
+    fn compress(&mut self, input: &[f64]);
 
     /// If the size of the compressed data is known by O(1) operation, return it.
     fn estimate_size_static(
@@ -39,17 +42,6 @@ pub trait Compressor {
         _estimate_option: EstimateOption,
     ) -> Option<Self::SizeEstimatorImpl<'comp, 'buf>> {
         None
-    }
-
-    fn naive_slow_size_estimater<'comp, 'buf>(
-        &'comp mut self,
-        input: &'buf [f64],
-        estimate_option: EstimateOption,
-    ) -> NaiveSlowSizeEstimator<'comp, 'buf, Self>
-    where
-        Self: Clone,
-    {
-        NaiveSlowSizeEstimator::new(self, input, estimate_option)
     }
 
     /// Returns the total number of input bytes which have been processed by this Compressor.
@@ -71,6 +63,17 @@ pub trait Compressor {
     fn reset(&mut self);
 }
 
+pub trait AppendableCompressor: Compressor {
+    /// Append the input data and compress with the existing data.
+    /// This method is NOT re-compressing the existing data.
+    /// Returns the total size of the compressed data.
+    fn append_compress(&mut self, input: &[f64]);
+
+    /// Rewind the n records from the end of the compressed data
+    /// Returns true if the rewind is successful, false otherwise.
+    fn rewind(&mut self, n: usize) -> bool;
+}
+
 #[derive(Debug, Clone, PartialEq, PartialOrd)]
 pub enum GenericCompressor {
     Uncompressed(UncompressedCompressor),
@@ -79,42 +82,131 @@ pub enum GenericCompressor {
     BUFF(BUFFCompressor),
 }
 
+#[derive(Debug, PartialEq, PartialOrd, QuickImpl)]
+pub enum GenericSizeEstimator<'comp, 'buf> {
+    #[quick_impl(impl From)]
+    Uncompressed(StaticSizeEstimator<'comp, 'buf, UncompressedCompressor>),
+    #[quick_impl(impl From)]
+    RLE(AppendCompressingSizeEstimator<'comp, 'buf, RunLengthCompressor>),
+    #[quick_impl(impl From)]
+    Gorilla(AppendCompressingSizeEstimator<'comp, 'buf, GorillaCompressor>),
+    #[quick_impl(impl From)]
+    BUFF(NaiveSlowSizeEstimator<'comp, 'buf, BUFFCompressor>),
+}
+
+macro_rules! impl_generic_size_estimator {
+    ($enum_name:ident, $($variant:ident),*) => {
+        impl<'comp, 'buf> SizeEstimator for $enum_name<'comp, 'buf> {
+            fn size(&self) -> usize {
+                match self {
+                    $( $enum_name::$variant(e) => e.size(), )*
+                }
+            }
+
+            fn advance_n(&mut self, n: usize) -> size_estimater::Result<()> {
+                match self {
+                    $( $enum_name::$variant(e) => e.advance_n(n), )*
+                }
+            }
+
+            fn advance(&mut self) -> size_estimater::Result<()> {
+                match self {
+                    $( $enum_name::$variant(e) => e.advance(), )*
+                }
+            }
+
+            fn unload_value(&mut self) -> size_estimater::Result<()> {
+                match self {
+                    $( $enum_name::$variant(e) => e.unload_value(), )*
+                }
+            }
+
+            fn number_of_records_advanced(&self) -> usize {
+                match self {
+                    $( $enum_name::$variant(e) => e.number_of_records_advanced(), )*
+                }
+            }
+
+            fn inner_buffer(&self) -> &[f64] {
+                match self {
+                    $( $enum_name::$variant(e) => e.inner_buffer(), )*
+                }
+            }
+
+            fn estimate_option(&self) -> EstimateOption {
+                match self {
+                    $( $enum_name::$variant(e) => e.estimate_option(), )*
+                }
+            }
+
+            fn compress(self) -> usize {
+                match self {
+                    $( $enum_name::$variant(e) => e.compress(), )*
+                }
+            }
+        }
+    };
+}
+
+impl_generic_size_estimator!(GenericSizeEstimator, Uncompressed, RLE, Gorilla, BUFF);
+
 macro_rules! impl_generic_compressor {
     ($enum_name:ident, $($variant:ident),*) => {
-        impl $enum_name {
-            pub fn compress(&mut self, input: &[f64]) -> usize {
+        impl Compressor for $enum_name {
+            type SizeEstimatorImpl<'comp, 'buf> = GenericSizeEstimator<'comp, 'buf>;
+            fn compress(&mut self, input: &[f64]) {
                 match self {
                     $( $enum_name::$variant(c) => c.compress(input), )*
                 }
             }
 
-            pub fn total_bytes_in(&self) -> usize {
+            fn total_bytes_in(&self) -> usize {
                 match self {
                     $( $enum_name::$variant(c) => c.total_bytes_in(), )*
                 }
             }
 
-            pub fn total_bytes_buffered(&self) -> usize {
+            fn total_bytes_buffered(&self) -> usize {
                 match self {
                     $( $enum_name::$variant(c) => c.total_bytes_buffered(), )*
                 }
             }
 
-            pub fn prepare(&mut self) {
+            fn prepare(&mut self) {
                 match self {
                     $( $enum_name::$variant(c) => c.prepare(), )*
                 }
             }
 
-            pub fn buffers(&mut self) -> [&[u8]; MAX_BUFFERS] {
+            fn buffers(&self) -> [&[u8]; MAX_BUFFERS] {
                 match self {
                     $( $enum_name::$variant(c) => c.buffers(), )*
                 }
             }
 
-            pub fn reset(&mut self) {
+            fn reset(&mut self) {
                 match self {
                     $( $enum_name::$variant(c) => c.reset(), )*
+                }
+            }
+
+            fn estimate_size_static(
+                &self,
+                number_of_records: usize,
+                estimate_option: EstimateOption,
+            ) -> Option<usize> {
+                match self {
+                    $( $enum_name::$variant(c) => c.estimate_size_static(number_of_records, estimate_option), )*
+                }
+            }
+
+            fn size_estimater<'comp, 'buf>(
+                &'comp mut self,
+                input: &'buf [f64],
+                estimate_option: EstimateOption,
+            ) -> Option<Self::SizeEstimatorImpl<'comp, 'buf>> {
+                match self {
+                    $( $enum_name::$variant(c) => c.size_estimater(input, estimate_option).map(|se| se.into()), )*
                 }
             }
         }
@@ -284,6 +376,8 @@ impl BUFFCompressorConfigBuilder {
 mod tests {
     use std::mem::size_of_val;
 
+    use crate::compressor::Compressor;
+
     use super::{gorilla::GorillaCompressor, CompressorConfig, GenericCompressor};
 
     fn test_total_bytes_in(compressor: &mut GenericCompressor) {
@@ -294,13 +388,7 @@ mod tests {
             "total_bytes_in() should be 0 before compressing"
         );
 
-        let bytes0 = compressor.compress(&floats);
-
-        assert_eq!(
-            bytes0,
-            size_of_val(&floats[..]),
-            "the return value of compress() should be the size of the input"
-        );
+        compressor.compress(&floats);
 
         assert_eq!(
             compressor.total_bytes_in(),
@@ -309,13 +397,7 @@ mod tests {
         );
 
         floats.reverse();
-        let bytes1 = compressor.compress(&floats[..3]);
-
-        assert_eq!(
-            bytes1,
-            size_of_val(&floats[..3]),
-            "the return value of compress() should be the size of the input"
-        );
+        compressor.compress(&floats[..3]);
 
         assert_eq!(
             compressor.total_bytes_in(),
