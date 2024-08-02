@@ -5,7 +5,7 @@ use crate::format::{
     serialize::{AsBytes, ToLe},
 };
 
-use super::Compressor;
+use super::{size_estimater::NaiveSlowSizeEstimator, Compressor};
 
 /// Run Length Encoding (RLE) Compression Scheme
 /// Chunk Layout:
@@ -50,6 +50,9 @@ impl Default for RunLengthCompressor {
 }
 
 impl Compressor for RunLengthCompressor {
+    // TODO: Implement RLE size estimator
+    type SizeEstimatorImpl<'comp, 'buf> = NaiveSlowSizeEstimator<'comp, 'buf, Self>;
+
     fn compress(&mut self, input: &[f64]) -> usize {
         let is_starting = self.previous_run_count == 0;
         if is_starting {

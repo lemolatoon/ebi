@@ -1,6 +1,6 @@
 use std::mem::size_of_val;
 
-use super::Compressor;
+use super::{size_estimater::NaiveSlowSizeEstimator, Compressor};
 
 #[derive(Debug, Clone, PartialEq, PartialOrd)]
 pub struct GorillaCompressor {
@@ -30,6 +30,8 @@ impl Default for GorillaCompressor {
 }
 
 impl Compressor for GorillaCompressor {
+    type SizeEstimatorImpl<'comp, 'buf> = NaiveSlowSizeEstimator<'comp, 'buf, Self>;
+
     fn compress(&mut self, input: &[f64]) -> usize {
         for value in input {
             self.encoder.encode(*value);

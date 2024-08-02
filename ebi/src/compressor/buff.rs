@@ -1,4 +1,4 @@
-use super::Compressor;
+use super::{size_estimater::NaiveSlowSizeEstimator, Compressor};
 
 #[derive(Debug, Clone, PartialEq, PartialOrd)]
 pub struct BUFFCompressor {
@@ -20,6 +20,9 @@ impl BUFFCompressor {
 }
 
 impl Compressor for BUFFCompressor {
+    // TODO: Implement BUFF size estimator
+    type SizeEstimatorImpl<'comp, 'buf> = NaiveSlowSizeEstimator<'comp, 'buf, Self>;
+
     fn compress(&mut self, data: &[f64]) -> usize {
         if self.compressed.is_some() {
             return 0;

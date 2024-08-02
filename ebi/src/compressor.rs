@@ -3,6 +3,7 @@ use derive_builder::Builder;
 use gorilla::GorillaCompressor;
 use quick_impl::QuickImpl;
 use run_length::RunLengthCompressor;
+use size_estimater::{EstimateOption, NaiveSlowSizeEstimator, SizeEstimator};
 // use run_length::RunLengthCompressor;
 use uncompressed::UncompressedCompressor;
 
@@ -11,13 +12,45 @@ use crate::format::{self, CompressionScheme};
 pub mod buff;
 pub mod gorilla;
 pub mod run_length;
+pub mod size_estimater;
 pub mod uncompressed;
 
 const MAX_BUFFERS: usize = 5;
 pub trait Compressor {
-    /// Take as many values from input, and compress and write it to the internal buffer as possible.
-    /// Returns the number of bytes consumed from input.
+    type SizeEstimatorImpl<'comp, 'buf>: SizeEstimator + Sized
+    where
+        Self: 'comp;
+
+    /// Perform the compression and return the size of the compressed data.
     fn compress(&mut self, input: &[f64]) -> usize;
+
+    /// If the size of the compressed data is known by O(1) operation, return it.
+    fn estimate_size_static(
+        &self,
+        _number_of_records: usize,
+        _estimate_option: EstimateOption,
+    ) -> Option<usize> {
+        None
+    }
+
+    fn size_estimater<'comp, 'buf>(
+        &'comp mut self,
+        _input: &'buf [f64],
+        _estimate_option: EstimateOption,
+    ) -> Option<Self::SizeEstimatorImpl<'comp, 'buf>> {
+        None
+    }
+
+    fn naive_slow_size_estimater<'comp, 'buf>(
+        &'comp mut self,
+        input: &'buf [f64],
+        estimate_option: EstimateOption,
+    ) -> NaiveSlowSizeEstimator<'comp, 'buf, Self>
+    where
+        Self: Clone,
+    {
+        NaiveSlowSizeEstimator::new(self, input, estimate_option)
+    }
 
     /// Returns the total number of input bytes which have been processed by this Compressor.
     fn total_bytes_in(&self) -> usize;
