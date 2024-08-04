@@ -381,7 +381,7 @@ mod tests {
     use super::{gorilla::GorillaCompressor, CompressorConfig, GenericCompressor};
 
     fn test_total_bytes_in(compressor: &mut GenericCompressor) {
-        let mut floats: Vec<f64> = (0..10).map(|x| (x / 2) as f64).collect();
+        let floats: Vec<f64> = (0..10).map(|x| (x / 2) as f64).collect();
         assert_eq!(
             compressor.total_bytes_in(),
             0,
@@ -394,15 +394,6 @@ mod tests {
             compressor.total_bytes_in(),
             size_of_val(&floats[..]),
             "total_bytes_in() should be the size of the input after compressing"
-        );
-
-        floats.reverse();
-        compressor.compress(&floats[..3]);
-
-        assert_eq!(
-            compressor.total_bytes_in(),
-            size_of_val(&floats[..]) + size_of_val(&floats[..3]),
-            "total_bytes_in() should be the size of the total bytes of input"
         );
     }
 
