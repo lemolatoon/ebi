@@ -114,15 +114,6 @@ impl<'a, R: AlignedBufRead> BufWrapper<'a, R> {
         ))
     }
 
-    pub fn n_bytes(&self) -> usize {
-        size_of_val(self.buf)
-    }
-
-    pub fn shrink(&mut self, len: usize) {
-        self.buf = &self.buf[..len];
-        self.n_consumed_bytes = len * size_of::<f64>();
-    }
-
     pub fn set_n_consumed_bytes(&mut self, consumed: usize) {
         self.n_consumed_bytes = consumed;
     }
@@ -480,74 +471,6 @@ impl<'a, R: AlignedBufRead> ChunkWriter<'a, R> {
         total_bytes_out += size_of::<GeneralChunkHeader>();
 
         self.compressor.prepare();
-
-        for bytes in self.compressor.buffers() {
-            total_bytes_out += bytes.len();
-            f.write_all(bytes)?;
-        }
-
-        self.file_writer
-            .increment_total_bytes_in_by(self.compressor.total_bytes_in());
-        self.file_writer
-            .increment_total_bytes_out_by(total_bytes_out);
-
-        let next_physical_offset =
-            (size_of::<FileHeader>() + self.file_writer.total_bytes_out()) as u64;
-        let next_logical_offset = self
-            .file_writer
-            .chunk_footers_with_next_chunk_footer()
-            .last()
-            .map_or(0, |f| f.logical_offset)
-            + (self.compressor.total_bytes_in() / size_of::<f64>()) as u64;
-        let next_chunk_footer = ChunkFooter {
-            physical_offset: next_physical_offset,
-            logical_offset: next_logical_offset,
-        };
-
-        self.file_writer.push_chunk_footer(next_chunk_footer);
-
-        return Ok(());
-
-        self.file_writer.push_chunk_footer(next_chunk_footer);
-
-        loop {
-            let reaches_limit = chunk_option.reach_limit(
-                self.compressor.total_bytes_in(),
-                self.compressor.total_bytes_buffered(),
-            );
-            if reaches_limit {
-                break;
-            }
-            let (mut buf, reaches_eof) = self.file_writer.f64_buf()?;
-            if reaches_eof {
-                drop(buf);
-                self.file_writer.set_reaches_eof();
-                break;
-            }
-
-            if let ChunkOption::RecordCount(count) = chunk_option {
-                if count * size_of::<f64>() <= self.compressor.total_bytes_in() + buf.n_bytes() {
-                    buf.shrink(count - self.compressor.total_bytes_in() / size_of::<f64>());
-                }
-            }
-
-            let n_bytes_compressed = self.compressor.compress(buf.as_ref());
-            // buf.set_n_consumed_bytes(n_bytes_compressed);
-        }
-
-        if self.compressor.total_bytes_in() == 0 {
-            return Ok(());
-        }
-
-        self.compressor.prepare();
-
-        let mut general_header = GeneralChunkHeader {};
-
-        let mut total_bytes_out = 0;
-
-        // TODO: handle error especially for `f` is too small to write.
-        f.write_all(general_header.to_le().as_bytes())?;
-        total_bytes_out += size_of::<GeneralChunkHeader>();
 
         for bytes in self.compressor.buffers() {
             total_bytes_out += bytes.len();

@@ -1,9 +1,4 @@
-use std::mem::size_of_val;
-
-use super::{
-    size_estimater::{AppendCompressingSizeEstimator, NaiveSlowSizeEstimator},
-    AppendableCompressor, Compressor,
-};
+use super::{size_estimater::AppendCompressingSizeEstimator, AppendableCompressor, Compressor};
 
 #[derive(Debug, Clone, PartialEq, PartialOrd)]
 pub struct GorillaCompressor {
@@ -362,10 +357,6 @@ pub(crate) mod modified_tsz {
 
         fn last_index(&self) -> usize {
             self.buf.len() - 1
-        }
-
-        fn total_bits_raw(&self) -> usize {
-            self.buf.len() * 8 + self.pos as usize - 8
         }
 
         fn set_cursor_at(&mut self, n_total_bits: u32) {

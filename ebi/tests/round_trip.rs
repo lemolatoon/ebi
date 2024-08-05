@@ -8,7 +8,6 @@ use ebi::{
     compressor::CompressorConfig,
     decoder::query::{Predicate, Range, RangeValue},
     encoder::ChunkOption,
-    format::Chunk,
 };
 use rand::Rng;
 

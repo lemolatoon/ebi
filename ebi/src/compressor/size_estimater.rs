@@ -126,7 +126,7 @@ impl<C: Compressor + Clone> SizeEstimator for NaiveSlowSizeEstimator<'_, '_, C> 
     }
 
     fn inner_buffer(&self) -> &[f64] {
-        &self.buffer
+        self.buffer
     }
 
     fn estimate_option(&self) -> EstimateOption {
@@ -169,10 +169,6 @@ impl<'comp, 'buf, C: Compressor + Clone> StaticSizeEstimator<'comp, 'buf, C> {
             number_of_records_advanced: 0,
         }
     }
-
-    fn loaded_buffer(&self) -> &[f64] {
-        &self.buffer[..self.cursor]
-    }
 }
 
 impl<C: Compressor + Clone> SizeEstimator for StaticSizeEstimator<'_, '_, C> {
@@ -211,7 +207,7 @@ impl<C: Compressor + Clone> SizeEstimator for StaticSizeEstimator<'_, '_, C> {
     }
 
     fn inner_buffer(&self) -> &[f64] {
-        &self.buffer
+        self.buffer
     }
 
     fn estimate_option(&self) -> EstimateOption {
@@ -315,7 +311,7 @@ impl<C: AppendableCompressor> SizeEstimator for AppendCompressingSizeEstimator<'
 
 #[cfg(test)]
 mod tests {
-    use crate::compressor::{CompressorConfig, GenericCompressor, GenericSizeEstimator};
+    use crate::compressor::{CompressorConfig, GenericCompressor};
 
     use super::*;
 

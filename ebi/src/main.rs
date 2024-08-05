@@ -16,7 +16,7 @@ use ebi::{
         encoder::{Encoder, EncoderInput, EncoderOutput},
     },
     compressor::CompressorConfig,
-    decoder::query::{Predicate, Range, RangeValue},
+    decoder::query::Predicate,
     encoder::ChunkOption,
 };
 use rand::Rng;
