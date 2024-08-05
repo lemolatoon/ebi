@@ -42,7 +42,9 @@ pub trait AppendableCompressor: Compressor {
     /// This method is NOT re-compressing the existing data.
     /// Returns the total size of the compressed data.
     fn append_compress(&mut self, input: &[f64]);
+}
 
+pub trait RewindableCompressor: AppendableCompressor {
     /// Rewind the n records from the end of the compressed data
     /// Returns true if the rewind is successful, false otherwise.
     fn rewind(&mut self, n: usize) -> bool;

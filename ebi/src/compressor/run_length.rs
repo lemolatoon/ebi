@@ -8,7 +8,7 @@ use crate::format::{
     serialize::{AsBytes, ToLe},
 };
 
-use super::{AppendableCompressor, Compressor};
+use super::{AppendableCompressor, Compressor, RewindableCompressor};
 
 /// Run Length Encoding (RLE) Compression Scheme
 /// Chunk Layout:
@@ -150,7 +150,9 @@ impl AppendableCompressor for RunLengthCompressor {
 
         self.total_bytes_in += n_bytes_compressed;
     }
+}
 
+impl RewindableCompressor for RunLengthCompressor {
     fn rewind(&mut self, n: usize) -> bool {
         let mut remaining_records = n;
         if self.previous_run_count == 0 {
