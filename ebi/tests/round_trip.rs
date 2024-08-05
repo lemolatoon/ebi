@@ -65,10 +65,7 @@ fn test_api_round_trip_uncompressed_bytesize() {
         .capacity(8000)
         .header(header)
         .build();
-    test_round_trip(
-        compressor_config.into(),
-        ChunkOption::ByteSizeBestEffort(1024),
-    );
+    test_round_trip(compressor_config.into(), ChunkOption::ByteSize(1024));
 }
 
 #[test]
@@ -80,10 +77,7 @@ fn test_api_round_trip_gorilla() {
 #[test]
 fn test_api_round_trip_gorilla_bytesize() {
     let compressor_config = CompressorConfig::gorilla().capacity(8000).build();
-    test_round_trip(
-        compressor_config.into(),
-        ChunkOption::ByteSizeBestEffort(1024),
-    );
+    test_round_trip(compressor_config.into(), ChunkOption::ByteSize(1024));
 }
 
 #[test]
@@ -95,10 +89,7 @@ fn test_api_round_trip_rle() {
 #[test]
 fn test_api_round_trip_rle_bytesize() {
     let compressor_config = CompressorConfig::rle().build();
-    test_round_trip(
-        compressor_config.into(),
-        ChunkOption::ByteSizeBestEffort(1024),
-    );
+    test_round_trip(compressor_config.into(), ChunkOption::ByteSize(1024));
 }
 
 fn test_round_trip_with_scale(
@@ -335,7 +326,7 @@ fn test_api_round_trip_buff_bytesize() {
             generate_and_write_random_f64_with_precision,
             compressor_config.into(),
             scale,
-            ChunkOption::ByteSizeBestEffort(1024),
+            ChunkOption::ByteSize(1024),
         );
     }
 
@@ -347,6 +338,6 @@ fn test_api_round_trip_buff_bytesize() {
         |n, _scale| vec![100.19; n],
         compressor_config.into(),
         100,
-        ChunkOption::ByteSizeBestEffort(1024),
+        ChunkOption::ByteSize(1024),
     );
 }

@@ -1,4 +1,4 @@
-use super::{AppendableCompressor, Compressor};
+use super::{size_estimater::AppendCompressingSizeEstimator, AppendableCompressor, Compressor};
 
 #[derive(Debug, Clone, PartialEq, PartialOrd)]
 pub struct GorillaCompressor {
@@ -28,6 +28,8 @@ impl Default for GorillaCompressor {
 }
 
 impl Compressor for GorillaCompressor {
+    type SizeEstimatorImpl<'comp, 'buf> = AppendCompressingSizeEstimator<'comp, 'buf, Self>;
+
     fn compress(&mut self, input: &[f64]) {
         self.reset();
         for value in input {
@@ -41,6 +43,18 @@ impl Compressor for GorillaCompressor {
 
     fn total_bytes_buffered(&self) -> usize {
         self.encoder.total_bytes_buffered()
+    }
+
+    fn size_estimator<'comp, 'buf>(
+        &'comp mut self,
+        input: &'buf [f64],
+        estimate_option: super::size_estimater::EstimateOption,
+    ) -> Option<Self::SizeEstimatorImpl<'comp, 'buf>> {
+        Some(AppendCompressingSizeEstimator::new(
+            self,
+            input,
+            estimate_option,
+        ))
     }
 
     fn prepare(&mut self) {
@@ -63,6 +77,14 @@ impl AppendableCompressor for GorillaCompressor {
         for value in input {
             self.encoder.encode(*value);
         }
+    }
+
+    fn rewind(&mut self, n: usize) -> bool {
+        if n != 1 {
+            return false;
+        }
+
+        self.encoder.rewind()
     }
 }
 
@@ -138,6 +160,7 @@ pub(crate) mod modified_tsz {
     /// StdEncoder is used to encode `DataPoint`s
     #[derive(Debug, Clone, PartialEq, PartialOrd)]
     pub struct GorillaFloatEncoder {
+        prev_state: Option<GorillaFloatEncoderState>,
         state: GorillaFloatEncoderState,
 
         w: BufferedWriterExt,
@@ -148,6 +171,7 @@ pub(crate) mod modified_tsz {
         /// bytes to `w`
         pub fn new(w: BufferedWriterExt) -> Self {
             Self {
+                prev_state: None,
                 state: GorillaFloatEncoderState::new(),
                 w,
             }
@@ -221,6 +245,7 @@ pub(crate) mod modified_tsz {
 
     impl GorillaFloatEncoder {
         pub fn encode(&mut self, value: f64) {
+            let prev_state = self.state;
             let value_bits = value.to_bits();
 
             self.state.total_bytes_in += 8;
@@ -230,6 +255,19 @@ pub(crate) mod modified_tsz {
                 self.state.first = false;
             } else {
                 self.write_next_value(value_bits)
+            }
+
+            self.prev_state = Some(prev_state);
+        }
+
+        pub fn rewind(&mut self) -> bool {
+            if let Some(prev_state) = self.prev_state {
+                self.state = prev_state;
+                self.prev_state = None;
+                self.w.set_cursor_at(self.state.total_bits_buffered as u32);
+                true
+            } else {
+                false
             }
         }
 
@@ -258,6 +296,7 @@ pub(crate) mod modified_tsz {
         /// Reset the encoder
         pub fn reset(&mut self) {
             self.state = GorillaFloatEncoderState::new();
+            self.prev_state = None;
 
             self.w.reset();
         }
@@ -318,6 +357,18 @@ pub(crate) mod modified_tsz {
 
         fn last_index(&self) -> usize {
             self.buf.len() - 1
+        }
+
+        fn set_cursor_at(&mut self, n_total_bits: u32) {
+            let n_bytes = (n_total_bits + 7) / 8;
+            let n_bits = n_total_bits % 8;
+
+            self.buf.truncate(n_bytes as usize);
+            if n_bits == 0 {
+                self.pos = 8;
+            } else {
+                self.pos = n_bits;
+            }
         }
     }
 

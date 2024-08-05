@@ -8,7 +8,7 @@ use crate::format::{
     serialize::{AsBytes, ToLe},
 };
 
-use super::{AppendableCompressor, Compressor, RewindableCompressor};
+use super::{size_estimater::AppendCompressingSizeEstimator, AppendableCompressor, Compressor};
 
 /// Run Length Encoding (RLE) Compression Scheme
 /// Chunk Layout:
@@ -53,6 +53,9 @@ impl Default for RunLengthCompressor {
 }
 
 impl Compressor for RunLengthCompressor {
+    // TODO: Implement RLE size estimator
+    type SizeEstimatorImpl<'comp, 'buf> = AppendCompressingSizeEstimator<'comp, 'buf, Self>;
+
     fn compress(&mut self, input: &[f64]) {
         self.reset();
         let is_starting = self.previous_run_count == 0;
@@ -79,6 +82,18 @@ impl Compressor for RunLengthCompressor {
         }
 
         self.total_bytes_in += n_bytes_compressed;
+    }
+
+    fn size_estimator<'comp, 'buf>(
+        &'comp mut self,
+        input: &'buf [f64],
+        estimate_option: super::size_estimater::EstimateOption,
+    ) -> Option<Self::SizeEstimatorImpl<'comp, 'buf>> {
+        Some(AppendCompressingSizeEstimator::new(
+            self,
+            input,
+            estimate_option,
+        ))
     }
 
     fn total_bytes_in(&self) -> usize {
@@ -150,9 +165,7 @@ impl AppendableCompressor for RunLengthCompressor {
 
         self.total_bytes_in += n_bytes_compressed;
     }
-}
 
-impl RewindableCompressor for RunLengthCompressor {
     fn rewind(&mut self, n: usize) -> bool {
         let mut remaining_records = n;
         if self.previous_run_count == 0 {

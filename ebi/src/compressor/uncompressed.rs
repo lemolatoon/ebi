@@ -8,7 +8,7 @@ use crate::format::{
     uncompressed::UncompressedHeader0,
 };
 
-use super::{AppendableCompressor, Compressor, RewindableCompressor, MAX_BUFFERS};
+use super::{size_estimater::StaticSizeEstimator, AppendableCompressor, Compressor, MAX_BUFFERS};
 
 #[derive(Debug, Clone, PartialEq, PartialOrd)]
 pub struct UncompressedCompressor {
@@ -35,6 +35,7 @@ impl UncompressedCompressor {
 }
 
 impl Compressor for UncompressedCompressor {
+    type SizeEstimatorImpl<'comp, 'buf> = StaticSizeEstimator<'comp, 'buf, Self>;
     fn compress(&mut self, input: &[f64]) {
         self.reset();
         for &value in input {
@@ -43,6 +44,26 @@ impl Compressor for UncompressedCompressor {
 
         let size = size_of_val(input);
         self.total_bytes_in += size;
+    }
+
+    fn estimate_size_static(
+        &self,
+        number_of_records: usize,
+        _estimate_option: super::size_estimater::EstimateOption,
+    ) -> Option<usize> {
+        Some(
+            size_of::<UncompressedHeader0>()
+                + self.header.as_ref().map_or(0, |h| h.len())
+                + size_of::<f64>() * number_of_records,
+        )
+    }
+
+    fn size_estimator<'comp, 'buf>(
+        &'comp mut self,
+        input: &'buf [f64],
+        estimate_option: super::size_estimater::EstimateOption,
+    ) -> Option<Self::SizeEstimatorImpl<'comp, 'buf>> {
+        Some(StaticSizeEstimator::new(self, input, estimate_option))
     }
 
     fn total_bytes_in(&self) -> usize {
@@ -93,9 +114,7 @@ impl AppendableCompressor for UncompressedCompressor {
         let size = size_of_val(input);
         self.total_bytes_in += size;
     }
-}
 
-impl RewindableCompressor for UncompressedCompressor {
     fn rewind(&mut self, n: usize) -> bool {
         if self.buffer.len() < n {
             return false;
