@@ -194,6 +194,12 @@ fn test_round_trip_with_scale(
                 .collect::<Vec<f64>>();
 
             assert_eq!(
+                random_floats_rounded.len(),
+                decoded_floats_rounded.len(),
+                "The length of the decoded values is not equal to the length of the original values"
+            );
+
+            assert_eq!(
                 random_floats_rounded, decoded_floats_rounded,
                 "The decoded values are not equal to the original values"
             );

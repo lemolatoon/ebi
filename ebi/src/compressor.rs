@@ -1,11 +1,10 @@
-use buff::BUFFCompressor;
+use buff::{BUFFCompressor, BUFFSizeEstimator};
 use derive_builder::Builder;
 use gorilla::GorillaCompressor;
 use quick_impl::QuickImpl;
 use run_length::RunLengthCompressor;
 use size_estimater::{
-    AppendCompressingSizeEstimator, EstimateOption, NaiveSlowSizeEstimator, SizeEstimator,
-    StaticSizeEstimator,
+    AppendCompressingSizeEstimator, EstimateOption, SizeEstimator, StaticSizeEstimator,
 };
 // use run_length::RunLengthCompressor;
 use uncompressed::UncompressedCompressor;
@@ -91,7 +90,7 @@ pub enum GenericSizeEstimator<'comp, 'buf> {
     #[quick_impl(impl From)]
     Gorilla(AppendCompressingSizeEstimator<'comp, 'buf, GorillaCompressor>),
     #[quick_impl(impl From)]
-    BUFF(NaiveSlowSizeEstimator<'comp, 'buf, BUFFCompressor>),
+    BUFF(BUFFSizeEstimator<'comp, 'buf>),
 }
 
 macro_rules! impl_generic_size_estimator {

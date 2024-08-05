@@ -497,4 +497,18 @@ mod tests {
             test_rewind(comp.clone().build(), estimate_option);
         }
     }
+
+    #[test]
+    fn test_buff_estimator() {
+        let comp: CompressorConfig = CompressorConfig::buff().scale(10).build().into();
+        let options = [
+            EstimateOption::Exact,
+            EstimateOption::Overestimate,
+            EstimateOption::BestEffort,
+        ];
+        for &estimate_option in &options {
+            test_size(comp.clone().build(), estimate_option);
+            test_rewind(comp.clone().build(), estimate_option);
+        }
+    }
 }

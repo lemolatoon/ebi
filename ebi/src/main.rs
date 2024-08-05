@@ -22,7 +22,7 @@ use ebi::{
 use rand::Rng;
 
 #[allow(dead_code)]
-fn generate_and_write_random_f64(path: impl AsRef<Path>, n: usize) -> io::Result<()> {
+fn generate_and_write_random_f64(path: impl AsRef<Path>, n: usize, scale: usize) -> io::Result<()> {
     let mut rng = rand::thread_rng();
     let mut random_values: Vec<f64> = Vec::with_capacity(n);
 
@@ -32,7 +32,7 @@ fn generate_and_write_random_f64(path: impl AsRef<Path>, n: usize) -> io::Result
         } else {
             let mut fp: f64 = rng.gen_range(0.0..1000.0);
             // let mut fp: f64 = rng.gen_range(0.0..1.0);
-            fp = 10.0 + (fp * 100.0).floor() / 100.0;
+            fp = 10.0 + (fp * scale as f64).floor() / scale as f64;
             random_values.push(fp);
         }
     }
@@ -51,20 +51,20 @@ fn generate_and_write_random_f64(path: impl AsRef<Path>, n: usize) -> io::Result
 
 fn main() {
     const RECORD_COUNT: usize = 32;
-    generate_and_write_random_f64("uncompressed.bin", RECORD_COUNT * 3000 + 3).unwrap();
+    let scale = 10;
+    generate_and_write_random_f64("uncompressed.bin", RECORD_COUNT + 3, scale).unwrap();
     // let compressor = GenericCompressor::Uncompressed(UncompressedCompressor::new(100));
     // let compressor_config = CompressorConfig::rle().build();
     // let compressor_config = CompressorConfig::gorilla().build();
-    let scale = 10;
-    let compressor_config = CompressorConfig::uncompressed().build();
+    let compressor_config = CompressorConfig::buff().scale(scale).build();
     // let chunk_option = ChunkOption::RecordCount(RECORD_COUNT * 3000 + 3);
-    let chunk_option = ChunkOption::ByteSize(32);
+    let chunk_option = ChunkOption::ByteSize(1024 * 8);
     dbg!(chunk_option);
 
-    let binding = vec![0.4, 0.5, 0.5, 0.6, 0.7, 0.8, 0.9, 0.9, 1.0];
+    // let binding = vec![0.4, 100000000.5, 0.5, 0.6, 0.7, 0.8, 0.9, 0.9, 1.0];
     let mut encoder = Encoder::new(
-        // EncoderInput::from_file_with_capacity("uncompressed.bin", 1024 * 16).unwrap(),
-        EncoderInput::from_f64_slice(&binding),
+        EncoderInput::from_file_with_capacity("uncompressed.bin", 1024 * 16).unwrap(),
+        // EncoderInput::from_f64_slice(&binding),
         EncoderOutput::from_file("compressed.bin").unwrap(),
         chunk_option,
         compressor_config,
@@ -80,7 +80,7 @@ fn main() {
     dbg!(reader.footer().number_of_records() as usize * size_of::<f64>());
     dbg!(reader.footer().number_of_chunks());
     let chunk_footers = reader.footer().chunk_footers();
-    println!("{:X?}", &chunk_footers[0..chunk_footers.len().min(3)]);
+    println!("{:X?}", &chunk_footers[0..chunk_footers.len().min(10)]);
 
     let mut output = DecoderOutput::from_vec(Vec::with_capacity(RECORD_COUNT * 3000 + 3));
     let mut output2 = DecoderOutput::from_vec(Vec::with_capacity(RECORD_COUNT * 3000 + 3));
@@ -121,6 +121,12 @@ fn main() {
         })
         .collect();
     // let input_f64 = binding;
+
+    assert_eq!(
+        &output_f64[..10],
+        &input_f64[..10],
+        "Decompressed Floats mismatch"
+    );
 
     assert_eq!(&output_f64, &input_f64, "Decompressed Floats mismatch");
 }
