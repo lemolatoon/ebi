@@ -23,6 +23,12 @@ impl<R: Read> EncoderInput<AlignedBufReader<R>> {
             inner: AlignedBufReader::new(reader),
         }
     }
+
+    pub fn from_reader_with_capacity(reader: R, capacity: usize) -> Self {
+        Self {
+            inner: AlignedBufReader::with_capacity(capacity, reader),
+        }
+    }
 }
 
 impl<'a> EncoderInput<AlignedBufReader<&'a [u8]>> {
@@ -66,6 +72,14 @@ impl EncoderInput<AlignedBufReader<File>> {
     pub fn from_file(file_path: impl AsRef<Path>) -> std::io::Result<Self> {
         let file = std::fs::File::open(file_path)?;
         Ok(Self::from_reader(file))
+    }
+
+    pub fn from_file_with_capacity(
+        file_path: impl AsRef<Path>,
+        capacity: usize,
+    ) -> std::io::Result<Self> {
+        let file = std::fs::File::open(file_path)?;
+        Ok(Self::from_reader_with_capacity(file, capacity))
     }
 }
 
@@ -162,6 +176,44 @@ impl<R: AlignedBufRead> AppendableEncoderInput<R> {
         // Safety:
         // Any slice can be safely casted to a slice of u8.
         unsafe { std::slice::from_raw_parts(ptr, byte_len) }
+    }
+}
+
+impl<R: AlignedBufRead> Read for AppendableEncoderInput<R> {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        let Self {
+            inner,
+            additional_data,
+            additional_data_cursor,
+        } = self;
+        let result = AlignedBufRead::fill_buf(inner)?;
+
+        if !result.is_empty() {
+            return Read::read(inner, buf);
+        }
+
+        let cursor_mut = additional_data_cursor.get_or_insert(0);
+        let cursor = *cursor_mut;
+
+        if Self::additional_data_bytes(additional_data).is_empty() {
+            return Ok(0);
+        }
+
+        if Self::additional_data_bytes(additional_data).len() <= cursor {
+            return Ok(0);
+        }
+
+        let read_len = std::cmp::min(
+            buf.len(),
+            Self::additional_data_bytes(additional_data)[cursor..].len(),
+        );
+        *cursor_mut += read_len;
+
+        buf[..read_len].copy_from_slice(
+            &Self::additional_data_bytes(additional_data)[cursor..(cursor + read_len)],
+        );
+
+        Ok(read_len)
     }
 }
 

@@ -91,8 +91,8 @@ pub enum RangeValue {
 
 #[derive(Debug, Clone, Copy, PartialEq, PartialOrd)]
 pub struct Range {
-    start: RangeValue,
-    end: RangeValue,
+    pub start: RangeValue,
+    pub end: RangeValue,
 }
 
 impl Range {
@@ -106,6 +106,10 @@ impl Range {
 
     pub fn end(&self) -> RangeValue {
         self.end
+    }
+
+    pub fn swap(&mut self) {
+        std::mem::swap(&mut self.start, &mut self.end);
     }
 
     pub fn eval(&self, value: f64) -> bool {

@@ -1,3 +1,4 @@
+use cfg_if::cfg_if;
 use thiserror::Error;
 
 use crate::format;
@@ -15,5 +16,11 @@ pub enum DecoderError {
     #[error("Preconditions not met")]
     PreconditionsNotMet,
 }
+cfg_if!(
+    if #[cfg(debug_assertions)] {
+        pub type Result<T> = anyhow::Result<T>;
+    } else {
 
-pub type Result<T> = std::result::Result<T, DecoderError>;
+        pub type Result<T> = std::result::Result<T, DecoderError>;
+    }
+);

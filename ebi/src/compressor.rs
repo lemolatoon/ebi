@@ -1,3 +1,4 @@
+use buff::BUFFCompressor;
 use derive_builder::Builder;
 use gorilla::GorillaCompressor;
 use quick_impl::QuickImpl;
@@ -7,15 +8,15 @@ use uncompressed::UncompressedCompressor;
 
 use crate::format::{self, CompressionScheme};
 
+pub mod buff;
 pub mod gorilla;
 pub mod run_length;
 pub mod uncompressed;
 
 const MAX_BUFFERS: usize = 5;
 pub trait Compressor {
-    /// Take as many values from input, and compress and write it to the internal buffer as possible.
-    /// Returns the number of bytes consumed from input.
-    fn compress(&mut self, input: &[f64]) -> usize;
+    /// Perform the compression and return the size of the compressed data.
+    fn compress(&mut self, input: &[f64]);
 
     /// Returns the total number of input bytes which have been processed by this Compressor.
     fn total_bytes_in(&self) -> usize;
@@ -36,47 +37,61 @@ pub trait Compressor {
     fn reset(&mut self);
 }
 
+pub trait AppendableCompressor: Compressor {
+    /// Append the input data and compress with the existing data.
+    /// This method is NOT re-compressing the existing data.
+    /// Returns the total size of the compressed data.
+    fn append_compress(&mut self, input: &[f64]);
+}
+
+pub trait RewindableCompressor: AppendableCompressor {
+    /// Rewind the n records from the end of the compressed data
+    /// Returns true if the rewind is successful, false otherwise.
+    fn rewind(&mut self, n: usize) -> bool;
+}
+
 #[derive(Debug, Clone, PartialEq, PartialOrd)]
 pub enum GenericCompressor {
     Uncompressed(UncompressedCompressor),
     RLE(RunLengthCompressor),
     Gorilla(GorillaCompressor),
+    BUFF(BUFFCompressor),
 }
 
 macro_rules! impl_generic_compressor {
     ($enum_name:ident, $($variant:ident),*) => {
-        impl $enum_name {
-            pub fn compress(&mut self, input: &[f64]) -> usize {
+        impl Compressor for $enum_name {
+            fn compress(&mut self, input: &[f64]) {
                 match self {
                     $( $enum_name::$variant(c) => c.compress(input), )*
                 }
             }
 
-            pub fn total_bytes_in(&self) -> usize {
+            fn total_bytes_in(&self) -> usize {
                 match self {
                     $( $enum_name::$variant(c) => c.total_bytes_in(), )*
                 }
             }
 
-            pub fn total_bytes_buffered(&self) -> usize {
+            fn total_bytes_buffered(&self) -> usize {
                 match self {
                     $( $enum_name::$variant(c) => c.total_bytes_buffered(), )*
                 }
             }
 
-            pub fn prepare(&mut self) {
+            fn prepare(&mut self) {
                 match self {
                     $( $enum_name::$variant(c) => c.prepare(), )*
                 }
             }
 
-            pub fn buffers(&mut self) -> [&[u8]; MAX_BUFFERS] {
+            fn buffers(&self) -> [&[u8]; MAX_BUFFERS] {
                 match self {
                     $( $enum_name::$variant(c) => c.buffers(), )*
                 }
             }
 
-            pub fn reset(&mut self) {
+            fn reset(&mut self) {
                 match self {
                     $( $enum_name::$variant(c) => c.reset(), )*
                 }
@@ -91,11 +106,12 @@ impl GenericCompressor {
             GenericCompressor::Uncompressed(_) => format::CompressionScheme::Uncompressed,
             GenericCompressor::RLE(_) => format::CompressionScheme::RLE,
             GenericCompressor::Gorilla(_) => format::CompressionScheme::Gorilla,
+            GenericCompressor::BUFF(_) => format::CompressionScheme::BUFF,
         }
     }
 }
 
-impl_generic_compressor!(GenericCompressor, Uncompressed, RLE, Gorilla);
+impl_generic_compressor!(GenericCompressor, Uncompressed, RLE, Gorilla, BUFF);
 
 #[derive(QuickImpl, Debug, Clone)]
 pub enum CompressorConfig {
@@ -105,6 +121,8 @@ pub enum CompressorConfig {
     RLE(RunLengthCompressorConfig),
     #[quick_impl(impl From)]
     Gorilla(GorillaCompressorConfig),
+    #[quick_impl(impl From)]
+    BUFF(BUFFCompressorConfig),
 }
 
 impl CompressorConfig {
@@ -123,6 +141,7 @@ impl CompressorConfig {
             CompressorConfig::Gorilla(c) => {
                 GenericCompressor::Gorilla(GorillaCompressor::with_capacity(c.capacity.0))
             }
+            CompressorConfig::BUFF(c) => GenericCompressor::BUFF(BUFFCompressor::new(c.scale)),
         }
     }
 
@@ -137,6 +156,7 @@ impl From<&CompressorConfig> for CompressionScheme {
             CompressorConfig::Uncompressed(_) => Self::Uncompressed,
             CompressorConfig::RLE(_) => Self::RLE,
             CompressorConfig::Gorilla(_) => Self::Gorilla,
+            CompressorConfig::BUFF(_) => Self::BUFF,
         }
     }
 }
@@ -152,6 +172,10 @@ impl CompressorConfig {
 
     pub fn gorilla() -> GorillaCompressorConfigBuilder {
         GorillaCompressorConfigBuilder::default()
+    }
+
+    pub fn buff() -> BUFFCompressorConfigBuilder {
+        BUFFCompressorConfigBuilder::default()
     }
 }
 
@@ -221,47 +245,42 @@ impl GorillaCompressorConfigBuilder {
     }
 }
 
+#[derive(Builder, Debug, Clone, Copy)]
+#[builder(pattern = "owned", build_fn(skip))]
+pub struct BUFFCompressorConfig {
+    scale: usize,
+}
+
+impl BUFFCompressorConfigBuilder {
+    pub fn build(self) -> BUFFCompressorConfig {
+        BUFFCompressorConfig {
+            scale: self.scale.unwrap_or(1),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::mem::size_of_val;
 
-    use super::{gorilla::GorillaCompressor, GenericCompressor};
+    use crate::compressor::Compressor;
+
+    use super::{gorilla::GorillaCompressor, CompressorConfig, GenericCompressor};
 
     fn test_total_bytes_in(compressor: &mut GenericCompressor) {
-        let mut floats: Vec<f64> = (0..10).map(|x| (x / 2) as f64).collect();
+        let floats: Vec<f64> = (0..10).map(|x| (x / 2) as f64).collect();
         assert_eq!(
             compressor.total_bytes_in(),
             0,
             "total_bytes_in() should be 0 before compressing"
         );
 
-        let bytes0 = compressor.compress(&floats);
-
-        assert_eq!(
-            bytes0,
-            size_of_val(&floats[..]),
-            "the return value of compress() should be the size of the input"
-        );
+        compressor.compress(&floats);
 
         assert_eq!(
             compressor.total_bytes_in(),
             size_of_val(&floats[..]),
             "total_bytes_in() should be the size of the input after compressing"
-        );
-
-        floats.reverse();
-        let bytes1 = compressor.compress(&floats[..3]);
-
-        assert_eq!(
-            bytes1,
-            size_of_val(&floats[..3]),
-            "the return value of compress() should be the size of the input"
-        );
-
-        assert_eq!(
-            compressor.total_bytes_in(),
-            size_of_val(&floats[..]) + size_of_val(&floats[..3]),
-            "total_bytes_in() should be the size of the total bytes of input"
         );
     }
 
@@ -328,6 +347,20 @@ mod tests {
     #[test]
     fn test_gorilla() {
         let mut compressor = GenericCompressor::Gorilla(GorillaCompressor::new());
+
+        test_total_bytes_in(&mut compressor);
+        test_total_bytes_buffered(&mut compressor);
+
+        test_reset(&mut compressor);
+
+        test_total_bytes_in(&mut compressor);
+        test_total_bytes_buffered(&mut compressor);
+    }
+
+    #[test]
+    fn test_buff() {
+        let config: CompressorConfig = CompressorConfig::buff().build().into();
+        let mut compressor = config.build();
 
         test_total_bytes_in(&mut compressor);
         test_total_bytes_buffered(&mut compressor);

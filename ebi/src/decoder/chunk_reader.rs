@@ -1,3 +1,4 @@
+pub mod buff;
 pub mod gorilla;
 pub mod run_length;
 pub mod uncompressed;
@@ -7,7 +8,7 @@ use std::io::{self, Read, Write};
 use quick_impl::QuickImpl;
 use roaring::RoaringBitmap;
 
-use crate::format::native::{NativeFileFooter, NativeFileHeader};
+use crate::format::native::{NativeChunkFooter, NativeFileFooter, NativeFileHeader};
 use crate::format::CompressionScheme;
 
 use super::query::{Predicate, QueryExecutor};
@@ -47,6 +48,10 @@ impl<'handle, R: Read, T: FileMetadataLike> GeneralChunkReader<'handle, R, T> {
 
     pub fn footer(&self) -> &NativeFileFooter {
         self.handle.footer()
+    }
+
+    pub fn chunk_footer(&self) -> &NativeChunkFooter {
+        self.handle.chunk_footer()
     }
 
     pub fn inner(&self) -> &GeneralChunkReaderInner<R> {
@@ -109,6 +114,7 @@ pub enum GeneralChunkReaderInner<R: Read> {
     Uncompressed(uncompressed::UncompressedReader<R>),
     RLE(run_length::RunLengthReader<R>),
     Gorilla(gorilla::GorillaReader<R>),
+    BUFF(buff::BUFFReader<R>),
 }
 
 impl<R: Read> GeneralChunkReaderInner<R> {
@@ -127,7 +133,9 @@ impl<R: Read> GeneralChunkReaderInner<R> {
             CompressionScheme::Gorilla => {
                 GeneralChunkReaderInner::Gorilla(gorilla::GorillaReader::new(handle, reader))
             }
-            c => unimplemented!("Unimplemented compression scheme: {:?}", c),
+            CompressionScheme::BUFF => {
+                GeneralChunkReaderInner::BUFF(buff::BUFFReader::new(handle, reader))
+            }
         })
     }
 }
@@ -138,6 +146,7 @@ impl<R: Read> From<&GeneralChunkReaderInner<R>> for CompressionScheme {
             GeneralChunkReaderInner::Uncompressed(_) => CompressionScheme::Uncompressed,
             GeneralChunkReaderInner::RLE(_) => CompressionScheme::RLE,
             GeneralChunkReaderInner::Gorilla(_) => CompressionScheme::Gorilla,
+            GeneralChunkReaderInner::BUFF(_) => CompressionScheme::BUFF,
         }
     }
 }
@@ -183,6 +192,8 @@ pub enum GeneralDecompressIterator<'a, R: Read> {
     RLE(run_length::RunLengthIterator<'a, R>),
     #[quick_impl(impl From)]
     Gorilla(gorilla::GorillaIterator<'a, R>),
+    #[quick_impl(impl From)]
+    BUFF(buff::BUFFIterator<'a>),
 }
 
 impl<'a, R: Read> Iterator for GeneralDecompressIterator<'a, R> {
@@ -193,6 +204,7 @@ impl<'a, R: Read> Iterator for GeneralDecompressIterator<'a, R> {
             GeneralDecompressIterator::Uncompressed(c) => c.next(),
             GeneralDecompressIterator::RLE(c) => c.next(),
             GeneralDecompressIterator::Gorilla(c) => c.next(),
+            GeneralDecompressIterator::BUFF(c) => c.next(),
         }
     }
 }
@@ -289,7 +301,7 @@ macro_rules! impl_generic_reader {
     };
 }
 
-impl_generic_reader!(GeneralChunkReaderInner, Uncompressed, RLE, Gorilla);
+impl_generic_reader!(GeneralChunkReaderInner, Uncompressed, RLE, Gorilla, BUFF);
 
 #[cfg(test)]
 mod tests {
@@ -315,7 +327,27 @@ mod tests {
             if rng.gen_bool(0.5) && random_values.last().is_some() {
                 random_values.push(random_values[i - 1]);
             } else {
-                random_values.push(rng.gen());
+                random_values.push(rng.gen_range(0.0..10000.0));
+            }
+        }
+
+        random_values
+    }
+
+    fn generate_and_write_random_f64_with_precision(n: usize, scale: usize) -> Vec<f64> {
+        let mut rng = rand::thread_rng();
+        let mut random_values: Vec<f64> = Vec::with_capacity(n);
+
+        fn round_by_scale(value: f64, scale: usize) -> f64 {
+            let scale = scale as f64;
+            (value * scale).round() / scale
+        }
+
+        for i in 0..n {
+            if rng.gen_bool(0.5) && random_values.last().is_some() {
+                random_values.push(random_values[i - 1]);
+            } else {
+                random_values.push(round_by_scale(rng.gen_range(0.0..10000.0), scale));
             }
         }
 
@@ -353,6 +385,17 @@ mod tests {
     fn test_all(compresor_config: impl Into<CompressorConfig>) {
         let values = generate_and_write_random_f64(1003);
         let mut decoder = decoder(values.as_slice(), compresor_config.into());
+
+        let mut reader = decoder.chunk_reader(ChunkId::new(0)).unwrap();
+
+        test_compressed_result(reader.inner_mut());
+
+        test_decompress_iter(&mut decoder);
+    }
+
+    fn test_all_with_precision(compresor_config: CompressorConfig, scale: usize) {
+        let values = generate_and_write_random_f64_with_precision(1003, scale);
+        let mut decoder = decoder(values.as_slice(), compresor_config.clone());
 
         let mut reader = decoder.chunk_reader(ChunkId::new(0)).unwrap();
 
@@ -414,5 +457,11 @@ mod tests {
     #[test]
     fn test_uncompressed() {
         test_all(CompressorConfig::uncompressed().build());
+    }
+
+    #[test]
+    fn test_buff() {
+        let scale = 100;
+        test_all_with_precision(CompressorConfig::buff().scale(scale).build().into(), scale);
     }
 }

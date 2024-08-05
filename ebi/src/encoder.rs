@@ -1,7 +1,7 @@
 use cfg_if::cfg_if;
 
 use crate::{
-    compressor::{CompressorConfig, GenericCompressor},
+    compressor::{Compressor, CompressorConfig, GenericCompressor},
     format::{
         self,
         serialize::{AsBytes, ToLe},
@@ -12,7 +12,7 @@ use crate::{
 };
 use core::slice;
 use std::{
-    io::{self, Write},
+    io::{self, Read, Write},
     mem::{offset_of, size_of, size_of_val},
     time::Instant,
 };
@@ -21,7 +21,7 @@ use std::{
 pub enum ChunkOption {
     Full,
     RecordCount(usize),
-    ByteSize(usize),
+    ByteSizeBestEffort(usize),
 }
 
 impl From<&ChunkOption> for format::ChunkOption {
@@ -37,7 +37,7 @@ impl From<&ChunkOption> for format::ChunkOption {
                 reserved: 0,
                 value: *value as u64,
             },
-            ChunkOption::ByteSize(value) => format::ChunkOption {
+            ChunkOption::ByteSizeBestEffort(value) => format::ChunkOption {
                 kind: format::ChunkOptionKind::ByteSize,
                 reserved: 0,
                 value: *value as u64,
@@ -51,7 +51,7 @@ impl ChunkOption {
         match self {
             ChunkOption::Full => false,
             ChunkOption::RecordCount(count) => count * size_of::<f64>() <= total_bytes_in,
-            ChunkOption::ByteSize(n_bytes) => *n_bytes <= total_bytes_out,
+            ChunkOption::ByteSizeBestEffort(n_bytes) => *n_bytes <= total_bytes_out,
         }
     }
 }
@@ -111,15 +111,7 @@ impl<'a, R: AlignedBufRead> BufWrapper<'a, R> {
         ))
     }
 
-    pub fn n_bytes(&self) -> usize {
-        size_of_val(self.buf)
-    }
-
-    pub fn shrink(&mut self, len: usize) {
-        self.buf = &self.buf[..len];
-        self.n_consumed_bytes = len * size_of::<f64>();
-    }
-
+    #[allow(unused)]
     pub fn set_n_consumed_bytes(&mut self, consumed: usize) {
         self.n_consumed_bytes = consumed;
     }
@@ -175,6 +167,7 @@ impl<R: AlignedBufRead> FileWriter<R> {
             + size_of::<FileFooter2>()
     }
 
+    #[allow(unused)]
     /// Returns the wrapper of the contents of the internal buffer, filling it with more data from the inner reader.
     /// If input has already reached EOF, the second element of tuple will be set.
     fn f64_buf(&mut self) -> Result<(BufWrapper<'_, R>, bool), io::Error> {
@@ -333,6 +326,34 @@ pub struct ChunkWriter<'a, R: AlignedBufRead> {
     compressor: GenericCompressor,
 }
 
+fn read_less_or_equal<R: Read>(mut f: R, n_bytes: usize) -> Result<Vec<f64>, io::Error> {
+    let mut buf = vec![0.0; (n_bytes + 7) / size_of::<f64>()];
+    let u8_slice = unsafe {
+        let ptr = buf.as_mut_ptr().cast::<u8>();
+        slice::from_raw_parts_mut(ptr, n_bytes)
+    };
+    let mut n_read = 0;
+    while n_read < n_bytes {
+        match f.read(&mut u8_slice[n_read..]) {
+            Ok(0) => break,
+            Ok(n) => n_read += n,
+            Err(e)
+                if e.kind() == io::ErrorKind::Interrupted
+                    || e.kind() == io::ErrorKind::UnexpectedEof =>
+            {
+                if n_read == 0 {
+                    return Err(e);
+                }
+                break;
+            }
+            Err(e) => return Err(e),
+        }
+    }
+
+    buf.truncate(n_read / size_of::<f64>());
+    Ok(buf)
+}
+
 impl<'a, R: AlignedBufRead> ChunkWriter<'a, R> {
     fn new(file_writer: &'a mut FileWriter<R>, compressor: GenericCompressor) -> Self {
         Self {
@@ -348,44 +369,54 @@ impl<'a, R: AlignedBufRead> ChunkWriter<'a, R> {
     pub fn write<W: Write>(&mut self, mut f: W) -> Result<(), io::Error> {
         let chunk_option = *self.file_writer.chunk_option();
 
-        loop {
-            let reaches_limit = chunk_option.reach_limit(
-                self.compressor.total_bytes_in(),
-                self.compressor.total_bytes_buffered(),
-            );
-            if reaches_limit {
-                break;
-            }
-            let (mut buf, reaches_eof) = self.file_writer.f64_buf()?;
-            if reaches_eof {
-                drop(buf);
-                self.file_writer.set_reaches_eof();
-                break;
-            }
+        match chunk_option {
+            opt @ (ChunkOption::RecordCount(_) | ChunkOption::Full) => {
+                let mut buf = if let ChunkOption::RecordCount(count) = opt {
+                    read_less_or_equal(self.file_writer.input_mut(), count * size_of::<f64>())?
+                } else {
+                    let mut buf = Vec::new();
+                    self.file_writer.input_mut().read_to_end(&mut buf)?;
 
-            if let ChunkOption::RecordCount(count) = chunk_option {
-                if count * size_of::<f64>() <= self.compressor.total_bytes_in() + buf.n_bytes() {
-                    buf.shrink(count - self.compressor.total_bytes_in() / size_of::<f64>());
+                    buf.chunks_exact(size_of::<f64>())
+                        .map(|chunk| f64::from_le_bytes(chunk.try_into().unwrap()))
+                        .collect::<Vec<f64>>()
+                };
+                if buf.is_empty() {
+                    self.file_writer.set_reaches_eof();
+                    return Ok(());
                 }
+
+                self.compressor.compress(buf.as_mut_slice());
             }
+            ChunkOption::ByteSizeBestEffort(n) => {
+                // TODO: implement good estimation
+                // Simple heuristic to estimate the number of records to read.
+                let record_count = ((n as f64 / size_of::<f64>() as f64) * 1.5).ceil() as usize;
+                let mut buf = read_less_or_equal(
+                    self.file_writer.input_mut(),
+                    record_count * size_of::<f64>(),
+                )?;
+                if buf.is_empty() {
+                    self.file_writer.set_reaches_eof();
+                    return Ok(());
+                }
 
-            let n_bytes_compressed = self.compressor.compress(buf.as_ref());
-            buf.set_n_consumed_bytes(n_bytes_compressed);
+                self.compressor.compress(buf.as_mut_slice());
+            }
         }
-
         if self.compressor.total_bytes_in() == 0 {
+            self.file_writer.set_reaches_eof();
             return Ok(());
         }
-
-        self.compressor.prepare();
 
         let mut general_header = GeneralChunkHeader {};
 
         let mut total_bytes_out = 0;
-
         // TODO: handle error especially for `f` is too small to write.
         f.write_all(general_header.to_le().as_bytes())?;
         total_bytes_out += size_of::<GeneralChunkHeader>();
+
+        self.compressor.prepare();
 
         for bytes in self.compressor.buffers() {
             total_bytes_out += bytes.len();
@@ -486,7 +517,7 @@ mod tests {
                 env!("CARGO_PKG_VERSION_MINOR"),
                 env!("CARGO_PKG_VERSION_PATCH")
             ]
-            .map(|v| v.parse().unwrap())
+            .map(|v| v.parse::<u16>().unwrap())
         );
         assert_eq!(file_header.config.field_type, FieldType::F64);
         assert_eq!(

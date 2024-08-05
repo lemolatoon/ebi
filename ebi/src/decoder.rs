@@ -172,7 +172,7 @@ impl FileReader {
         }
 
         if self.header().is_none() {
-            return Err(DecoderError::PreconditionsNotMet);
+            return Err(DecoderError::PreconditionsNotMet.into());
         }
 
         let mut buf = vec![0u8; size_of::<FileFooter0>()];
