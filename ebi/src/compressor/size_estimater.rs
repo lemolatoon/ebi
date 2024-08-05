@@ -257,10 +257,6 @@ impl<'comp, 'buf, C: AppendableCompressor> AppendCompressingSizeEstimator<'comp,
             size,
         }
     }
-
-    fn loaded_buffer(&self) -> &[f64] {
-        &self.buffer[..self.cursor]
-    }
 }
 
 impl<C: AppendableCompressor> SizeEstimator for AppendCompressingSizeEstimator<'_, '_, C> {
@@ -275,7 +271,6 @@ impl<C: AppendableCompressor> SizeEstimator for AppendCompressingSizeEstimator<'
             ));
         }
 
-        dbg!(self.cursor, n);
         self.compressor
             .append_compress(&self.buffer[self.cursor..self.cursor + n]);
 
@@ -354,9 +349,10 @@ mod tests {
 
     fn test_size(mut comp: GenericCompressor, estimate_option: EstimateOption) {
         let mut se = comp
-            .size_estimater(
+            .size_estimator(
                 &[
-                    0.5, 1.9, 1000.8, -2323.3, 33.7, 22.5, 907.8, 298.9, 298.9, 28.0, 0.9, 2182.2,
+                    0.5, 0.5, 1.9, 1000.8, -2323.3, 33.7, 22.5, 907.8, 298.9, 298.9, 28.0, 28.0,
+                    28.0, 0.9, 2182.2,
                 ],
                 estimate_option,
             )
@@ -391,9 +387,10 @@ mod tests {
 
     fn test_rewind(mut comp: GenericCompressor, estimate_option: EstimateOption) {
         let mut se = comp
-            .size_estimater(
+            .size_estimator(
                 &[
-                    0.5, 1.9, 1000.8, -2323.3, 33.7, 22.5, 907.8, 298.9, 298.9, 28.0, 0.9, 2182.2,
+                    0.5, 0.5, 1.9, 1000.8, -2323.3, 33.7, 22.5, 907.8, 298.9, 298.9, 28.0, 28.0,
+                    28.0, 0.9, 2182.2,
                 ],
                 estimate_option,
             )

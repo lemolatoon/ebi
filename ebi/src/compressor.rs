@@ -36,7 +36,7 @@ pub trait Compressor {
         None
     }
 
-    fn size_estimater<'comp, 'buf>(
+    fn size_estimator<'comp, 'buf>(
         &'comp mut self,
         _input: &'buf [f64],
         _estimate_option: EstimateOption,
@@ -200,13 +200,13 @@ macro_rules! impl_generic_compressor {
                 }
             }
 
-            fn size_estimater<'comp, 'buf>(
+            fn size_estimator<'comp, 'buf>(
                 &'comp mut self,
                 input: &'buf [f64],
                 estimate_option: EstimateOption,
             ) -> Option<Self::SizeEstimatorImpl<'comp, 'buf>> {
                 match self {
-                    $( $enum_name::$variant(c) => c.size_estimater(input, estimate_option).map(|se| se.into()), )*
+                    $( $enum_name::$variant(c) => c.size_estimator(input, estimate_option).map(|se| se.into()), )*
                 }
             }
         }

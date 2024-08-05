@@ -58,7 +58,7 @@ impl Compressor for UncompressedCompressor {
         )
     }
 
-    fn size_estimater<'comp, 'buf>(
+    fn size_estimator<'comp, 'buf>(
         &'comp mut self,
         input: &'buf [f64],
         estimate_option: super::size_estimater::EstimateOption,

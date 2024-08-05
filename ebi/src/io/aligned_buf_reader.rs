@@ -14,7 +14,7 @@ use std::{
 /// - The implementation must ensure the buffer must be aligned to 8 bytes as long as the internal cursor is 8 byte aligned.
 /// - e.g. If you read 4 bytes from the buffer, the buffer can be not aligned.
 /// - Unless you read the bytes of not multiple of 8 bytes, the buffer must be always aligned.
-pub unsafe trait AlignedBufRead {
+pub unsafe trait AlignedBufRead: Read {
     /// Returns the contents of the internal buffer, filling it with more data
     /// from the inner reader if it is empty.
     ///

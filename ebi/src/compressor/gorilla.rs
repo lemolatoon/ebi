@@ -50,7 +50,7 @@ impl Compressor for GorillaCompressor {
         self.encoder.total_bytes_buffered()
     }
 
-    fn size_estimater<'comp, 'buf>(
+    fn size_estimator<'comp, 'buf>(
         &'comp mut self,
         input: &'buf [f64],
         estimate_option: super::size_estimater::EstimateOption,

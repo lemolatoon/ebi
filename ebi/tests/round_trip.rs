@@ -8,6 +8,7 @@ use ebi::{
     compressor::CompressorConfig,
     decoder::query::{Predicate, Range, RangeValue},
     encoder::ChunkOption,
+    format::Chunk,
 };
 use rand::Rng;
 
@@ -55,44 +56,48 @@ fn test_api_round_trip_uncompressed() {
         .capacity(8000)
         .header(header)
         .build();
-    test_round_trip(compressor_config.into());
+    test_round_trip(compressor_config.into(), ChunkOption::RecordCount(1024 * 8));
+}
+
+#[test]
+fn test_api_round_trip_uncompressed_bytesize() {
+    let header = b"my_header".to_vec().into_boxed_slice();
+    let compressor_config = CompressorConfig::uncompressed()
+        .capacity(8000)
+        .header(header)
+        .build();
+    test_round_trip(compressor_config.into(), ChunkOption::ByteSize(1024));
 }
 
 #[test]
 fn test_api_round_trip_gorilla() {
     let compressor_config = CompressorConfig::gorilla().capacity(8000).build();
-    test_round_trip(compressor_config.into());
+    test_round_trip(compressor_config.into(), ChunkOption::RecordCount(1024 * 8));
+}
+
+#[test]
+fn test_api_round_trip_gorilla_bytesize() {
+    let compressor_config = CompressorConfig::gorilla().capacity(8000).build();
+    test_round_trip(compressor_config.into(), ChunkOption::ByteSize(1024));
 }
 
 #[test]
 fn test_api_round_trip_rle() {
     let compressor_config = CompressorConfig::rle().build();
-    test_round_trip(compressor_config.into());
+    test_round_trip(compressor_config.into(), ChunkOption::RecordCount(1024 * 8));
 }
 
 #[test]
-fn test_api_round_trip_buff() {
-    for scale in [1, 10, 100, 1000] {
-        println!("scale: {}", scale);
-        let compressor_config = CompressorConfig::buff().scale(scale).build();
-        test_round_trip_with_scale(
-            generate_and_write_random_f64_with_precision,
-            compressor_config.into(),
-            scale,
-        );
-    }
-
-    let compressor_config = CompressorConfig::buff().scale(100).build();
-
-    println!("single values");
-    // sigle value
-    test_round_trip_with_scale(|n, _scale| vec![100.19; n], compressor_config.into(), 100);
+fn test_api_round_trip_rle_bytesize() {
+    let compressor_config = CompressorConfig::rle().build();
+    test_round_trip(compressor_config.into(), ChunkOption::ByteSize(1024));
 }
 
 fn test_round_trip_with_scale(
     generator: fn(usize, usize) -> Vec<f64>,
     compressor_config: CompressorConfig,
     scale: usize,
+    chunk_option: ChunkOption,
 ) {
     for n in [1003, 10003, 100004, 100005] {
         #[cfg(miri)] // miri is too slow
@@ -106,8 +111,6 @@ fn test_round_trip_with_scale(
             let encoder_input = EncoderInput::from_f64_slice(&random_values);
 
             let encoder_output = EncoderOutput::from_vec(Vec::new());
-
-            let chunk_option = ChunkOption::RecordCount(1024 * 8);
 
             let mut encoder = Encoder::new(
                 encoder_input,
@@ -199,7 +202,7 @@ fn test_round_trip_with_scale(
     }
 }
 
-fn test_round_trip(compressor_config: CompressorConfig) {
+fn test_round_trip(compressor_config: CompressorConfig, chunk_option: ChunkOption) {
     for n in [1003, 10003, 100004, 100005] {
         #[cfg(miri)] // miri is too slow
         if n > 1003 {
@@ -212,8 +215,6 @@ fn test_round_trip(compressor_config: CompressorConfig) {
             let encoder_input = EncoderInput::from_f64_slice(&random_values);
 
             let encoder_output = EncoderOutput::from_vec(Vec::new());
-
-            let chunk_option = ChunkOption::RecordCount(1024 * 8);
 
             let mut encoder = Encoder::new(
                 encoder_input,
@@ -284,4 +285,54 @@ fn test_round_trip(compressor_config: CompressorConfig) {
             );
         }
     }
+}
+
+#[test]
+fn test_api_round_trip_buff() {
+    for scale in [1, 10, 100, 1000] {
+        println!("scale: {}", scale);
+        let compressor_config = CompressorConfig::buff().scale(scale).build();
+        test_round_trip_with_scale(
+            generate_and_write_random_f64_with_precision,
+            compressor_config.into(),
+            scale,
+            ChunkOption::RecordCount(1024 * 8),
+        );
+    }
+
+    let compressor_config = CompressorConfig::buff().scale(100).build();
+
+    println!("single values");
+    // sigle value
+    test_round_trip_with_scale(
+        |n, _scale| vec![100.19; n],
+        compressor_config.into(),
+        100,
+        ChunkOption::RecordCount(1024 * 8),
+    );
+}
+
+#[test]
+fn test_api_round_trip_buff_bytesize() {
+    for scale in [1, 10, 100, 1000] {
+        println!("scale: {}", scale);
+        let compressor_config = CompressorConfig::buff().scale(scale).build();
+        test_round_trip_with_scale(
+            generate_and_write_random_f64_with_precision,
+            compressor_config.into(),
+            scale,
+            ChunkOption::ByteSize(1024),
+        );
+    }
+
+    let compressor_config = CompressorConfig::buff().scale(100).build();
+
+    println!("single values");
+    // sigle value
+    test_round_trip_with_scale(
+        |n, _scale| vec![100.19; n],
+        compressor_config.into(),
+        100,
+        ChunkOption::ByteSize(1024),
+    );
 }

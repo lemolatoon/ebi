@@ -84,7 +84,7 @@ impl Compressor for RunLengthCompressor {
         self.total_bytes_in += n_bytes_compressed;
     }
 
-    fn size_estimater<'comp, 'buf>(
+    fn size_estimator<'comp, 'buf>(
         &'comp mut self,
         input: &'buf [f64],
         estimate_option: super::size_estimater::EstimateOption,
@@ -140,7 +140,6 @@ impl Compressor for RunLengthCompressor {
 
 impl AppendableCompressor for RunLengthCompressor {
     fn append_compress(&mut self, input: &[f64]) {
-        dbg!(input);
         let is_starting = self.previous_run_count == 0;
         if is_starting {
             self.previous_value = input[0];
@@ -167,15 +166,8 @@ impl AppendableCompressor for RunLengthCompressor {
         self.total_bytes_in += n_bytes_compressed;
     }
 
-    fn rewind(&mut self, mut n: usize) -> bool {
-        println!("Rewind Print State");
-        println!("Run Count , Value");
-        println!("{}, {}", self.previous_run_count, self.previous_value);
-        for field in self.bytes.chunks_exact(9).rev() {
-            let run_count = u8::from_le_bytes(field[..1].try_into().unwrap());
-            let value = f64::from_le_bytes(field[1..9].try_into().unwrap());
-            println!("{}, {}", run_count, value);
-        }
+    fn rewind(&mut self, n: usize) -> bool {
+        let mut remaining_records = n;
         if self.previous_run_count == 0 {
             return false;
         }
@@ -191,23 +183,21 @@ impl AppendableCompressor for RunLengthCompressor {
         for (run_count, value) in
             iter::once((self.previous_run_count, self.previous_value)).chain(fileds_iter)
         {
-            dbg!((run_count, value, n, number_of_fields_to_rewind));
-
-            if n >= run_count as usize {
-                n -= run_count as usize;
+            if remaining_records >= run_count as usize {
+                remaining_records -= run_count as usize;
                 number_of_fields_to_rewind += 1;
                 continue;
             }
 
             self.previous_value = value;
-            self.previous_run_count = run_count - n as u8;
-            n = 0;
+            self.previous_run_count = run_count - remaining_records as u8;
+            remaining_records = 0;
             number_of_fields_to_rewind += 1;
             previous_value_run_count_set = true;
             break;
         }
 
-        if n != 0 {
+        if remaining_records != 0 {
             return false;
         }
 
@@ -223,14 +213,6 @@ impl AppendableCompressor for RunLengthCompressor {
         );
         self.total_bytes_in -= n * size_of::<f64>();
 
-        println!("[END] Rewind Print State");
-        println!("Run Count , Value");
-        println!("{}, {}", self.previous_run_count, self.previous_value);
-        for field in self.bytes.chunks_exact(9).rev() {
-            let run_count = u8::from_le_bytes(field[..1].try_into().unwrap());
-            let value = f64::from_le_bytes(field[1..9].try_into().unwrap());
-            println!("{}, {}", run_count, value);
-        }
         true
     }
 }

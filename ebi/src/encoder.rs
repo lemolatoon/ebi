@@ -1,7 +1,10 @@
 use cfg_if::cfg_if;
 
 use crate::{
-    compressor::{Compressor, CompressorConfig, GenericCompressor},
+    compressor::{
+        size_estimater::{EstimateOption, SizeEstimator},
+        Compressor, CompressorConfig, GenericCompressor,
+    },
     format::{
         self,
         serialize::{AsBytes, ToLe},
@@ -12,7 +15,7 @@ use crate::{
 };
 use core::slice;
 use std::{
-    io::{self, Write},
+    io::{self, Read, Write},
     mem::{offset_of, size_of, size_of_val},
     time::Instant,
 };
@@ -333,6 +336,34 @@ pub struct ChunkWriter<'a, R: AlignedBufRead> {
     compressor: GenericCompressor,
 }
 
+fn read_less_or_equal<R: Read>(mut f: R, n_bytes: usize) -> Result<Vec<f64>, io::Error> {
+    let mut buf = vec![0.0; (n_bytes + 7) / size_of::<f64>()];
+    let u8_slice = unsafe {
+        let ptr = buf.as_mut_ptr().cast::<u8>();
+        slice::from_raw_parts_mut(ptr, n_bytes)
+    };
+    let mut n_read = 0;
+    while n_read < n_bytes {
+        match f.read(&mut u8_slice[n_read..]) {
+            Ok(0) => break,
+            Ok(n) => n_read += n,
+            Err(e)
+                if e.kind() == io::ErrorKind::Interrupted
+                    || e.kind() == io::ErrorKind::UnexpectedEof =>
+            {
+                if n_read == 0 {
+                    return Err(e);
+                }
+                break;
+            }
+            Err(e) => return Err(e),
+        }
+    }
+
+    buf.truncate(n_read / size_of::<f64>());
+    Ok(buf)
+}
+
 impl<'a, R: AlignedBufRead> ChunkWriter<'a, R> {
     fn new(file_writer: &'a mut FileWriter<R>, compressor: GenericCompressor) -> Self {
         Self {
@@ -346,8 +377,135 @@ impl<'a, R: AlignedBufRead> ChunkWriter<'a, R> {
     }
 
     pub fn write<W: Write>(&mut self, mut f: W) -> Result<(), io::Error> {
-        return unimplemented!();
         let chunk_option = *self.file_writer.chunk_option();
+
+        match chunk_option {
+            opt @ (ChunkOption::RecordCount(_) | ChunkOption::Full) => {
+                let mut buf = if let ChunkOption::RecordCount(count) = opt {
+                    read_less_or_equal(self.file_writer.input_mut(), count * size_of::<f64>())?
+                } else {
+                    let mut buf = Vec::new();
+                    self.file_writer.input_mut().read_to_end(&mut buf)?;
+
+                    buf.chunks_exact(size_of::<f64>())
+                        .map(|chunk| f64::from_le_bytes(chunk.try_into().unwrap()))
+                        .collect::<Vec<f64>>()
+                };
+                if buf.is_empty() {
+                    self.file_writer.set_reaches_eof();
+                    return Ok(());
+                }
+
+                self.compressor.compress(buf.as_mut_slice());
+            }
+            ChunkOption::ByteSize(n) => {
+                let estimate_option = EstimateOption::BestEffort;
+                if self
+                    .compressor
+                    .estimate_size_static(0, estimate_option)
+                    .is_some()
+                {
+                    let mut number_of_records = 0;
+                    // TODO: replace this with binary search
+                    for i in 1..usize::MAX {
+                        let size = self
+                            .compressor
+                            .estimate_size_static(i, EstimateOption::BestEffort)
+                            .unwrap();
+
+                        if size > n {
+                            number_of_records = i - 1;
+                            break;
+                        }
+                    }
+
+                    let buf = read_less_or_equal(
+                        self.file_writer.input_mut(),
+                        number_of_records * size_of::<f64>(),
+                    )?;
+                    self.compressor.compress(buf.as_slice());
+                } else if self
+                    .compressor
+                    .size_estimator(&[], estimate_option)
+                    .is_some()
+                {
+                    let (mut buf, reaches_eof) = self.file_writer.f64_buf()?;
+                    if reaches_eof {
+                        drop(buf);
+                        self.file_writer.set_reaches_eof();
+                        return Ok(());
+                    }
+                    let mut estimator = self
+                        .compressor
+                        .size_estimator(buf.as_ref(), estimate_option)
+                        .unwrap();
+
+                    loop {
+                        let size = estimator.size();
+                        if size > n {
+                            if estimator.unload_value().is_err()
+                                && estimate_option
+                                    .is_stricter_or_equal(&EstimateOption::Overestimate)
+                            {
+                                panic!("Failed to unload value from the estimator while we are in the overestimation or exact mode");
+                            }
+                            break;
+                        }
+                        if estimator.advance().is_err() {
+                            break;
+                        };
+                    }
+
+                    estimator.compress();
+
+                    buf.set_n_consumed_bytes(self.compressor.total_bytes_in());
+                } else {
+                    panic!("No size estimator is available for the compressor");
+                };
+            }
+        }
+        if self.compressor.total_bytes_in() == 0 {
+            self.file_writer.set_reaches_eof();
+            return Ok(());
+        }
+
+        let mut general_header = GeneralChunkHeader {};
+
+        let mut total_bytes_out = 0;
+        // TODO: handle error especially for `f` is too small to write.
+        f.write_all(general_header.to_le().as_bytes())?;
+        total_bytes_out += size_of::<GeneralChunkHeader>();
+
+        self.compressor.prepare();
+
+        for bytes in self.compressor.buffers() {
+            total_bytes_out += bytes.len();
+            f.write_all(bytes)?;
+        }
+
+        self.file_writer
+            .increment_total_bytes_in_by(self.compressor.total_bytes_in());
+        self.file_writer
+            .increment_total_bytes_out_by(total_bytes_out);
+
+        let next_physical_offset =
+            (size_of::<FileHeader>() + self.file_writer.total_bytes_out()) as u64;
+        let next_logical_offset = self
+            .file_writer
+            .chunk_footers_with_next_chunk_footer()
+            .last()
+            .map_or(0, |f| f.logical_offset)
+            + (self.compressor.total_bytes_in() / size_of::<f64>()) as u64;
+        let next_chunk_footer = ChunkFooter {
+            physical_offset: next_physical_offset,
+            logical_offset: next_logical_offset,
+        };
+
+        self.file_writer.push_chunk_footer(next_chunk_footer);
+
+        return Ok(());
+
+        self.file_writer.push_chunk_footer(next_chunk_footer);
 
         loop {
             let reaches_limit = chunk_option.reach_limit(

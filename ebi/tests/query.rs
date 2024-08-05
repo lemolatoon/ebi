@@ -50,8 +50,8 @@ mod helper {
             decoder.filter(predicate, bitmask, chunk_id).unwrap()
         };
 
-        println!("bitmap: {:?}", bitmap.iter().collect::<Vec<_>>());
-        println!("expected: {:?}", expected.iter().collect::<Vec<_>>());
+        // println!("bitmap: {:?}", bitmap.iter().collect::<Vec<_>>());
+        // println!("expected: {:?}", expected.iter().collect::<Vec<_>>());
         assert_eq!(bitmap, expected, "[{test_name}]: Filter result mismatch");
     }
 
@@ -704,6 +704,7 @@ mod helper {
         } else {
             Box::new(test_query_filter_inner_with_expected_calculation)
         };
+
         let mut rng = StdRng::from_entropy();
         let round = |x: f64| {
             if let Some(scale) = round_scale {
