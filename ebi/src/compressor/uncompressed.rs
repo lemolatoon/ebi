@@ -8,7 +8,7 @@ use crate::format::{
     uncompressed::UncompressedHeader0,
 };
 
-use super::{AppendableCompressor, Compressor, RewindableCompressor, MAX_BUFFERS};
+use super::{AppendableCompressor, Compressor, MAX_BUFFERS};
 
 #[derive(Debug, Clone, PartialEq, PartialOrd)]
 pub struct UncompressedCompressor {
@@ -93,9 +93,7 @@ impl AppendableCompressor for UncompressedCompressor {
         let size = size_of_val(input);
         self.total_bytes_in += size;
     }
-}
 
-impl RewindableCompressor for UncompressedCompressor {
     fn rewind(&mut self, n: usize) -> bool {
         if self.buffer.len() < n {
             return false;
