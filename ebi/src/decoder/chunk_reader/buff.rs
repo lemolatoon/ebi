@@ -159,20 +159,26 @@ impl<R: Read> QueryExecutor for BUFFReader<R> {
                     RangeValue::Inclusive(pred) => Some(buff_simd256_cmp_filter::<false, true>(
                         bytes,
                         pred,
-                        bitmask,
+                        bitmask.clone(),
                         logical_offset,
                     )),
                     RangeValue::Exclusive(pred) => Some(buff_simd256_cmp_filter::<false, false>(
                         bytes,
                         pred,
-                        bitmask,
+                        bitmask.clone(),
                         logical_offset,
                     )),
                     RangeValue::None => None,
                 };
 
                 match (left, right) {
-                    (None, None) => all(),
+                    (None, None) => {
+                        if let Some(bitmask) = bitmask {
+                            bitmask
+                        } else {
+                            all()
+                        }
+                    }
                     (None, Some(right)) => right,
                     (Some(left), None) => left,
                     (Some(left), Some(right)) => left & right,

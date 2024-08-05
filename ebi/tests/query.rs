@@ -390,6 +390,22 @@ mod helper {
                 t_name(format!("Range {query_name} (None, Exclusive)")),
             );
 
+            // Test 7: Range filter with bitmask (None, None)
+            let values = vec![3.3, 5.6, 3.8, 6.7, 2.1, 9.9, 10.1];
+            let predicate = Predicate::Range(Range::new(RangeValue::None, RangeValue::None));
+            let bitmask = RoaringBitmap::from_iter(vec![0, 1, 3, 4, 6]);
+            let expected = bitmask.clone();
+            test_fn(
+                config.clone(),
+                values,
+                ChunkOption::RecordCount(5),
+                predicate,
+                Some(&bitmask),
+                None,
+                expected,
+                t_name(format!("Range {query_name} (None, None) with bitmask")),
+            );
+
             // Test 8: Range filter large range (Inclusive, Inclusive)
             // let values = vec![3.3, 5.6, -333.8, 6.7, 2.1, 9.9, 10.1];
             let values = vec![9.9, 10.1];
