@@ -173,6 +173,7 @@ pub enum CompressionScheme {
     RLE = 1,
     BUFF = 2,
     Gorilla = 3,
+    Chimp = 4,
 }
 
 // =============== Chunk ===================

@@ -136,6 +136,7 @@ impl<R: Read> GeneralChunkReaderInner<R> {
             CompressionScheme::BUFF => {
                 GeneralChunkReaderInner::BUFF(buff::BUFFReader::new(handle, reader))
             }
+            CompressionScheme::Chimp => todo!(),
         })
     }
 }
