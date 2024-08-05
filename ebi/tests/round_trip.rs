@@ -101,6 +101,21 @@ fn test_api_round_trip_rle_bytesize() {
     );
 }
 
+#[test]
+fn test_api_round_trip_chimp() {
+    let compressor_config = CompressorConfig::chimp().build();
+    test_round_trip(compressor_config.into(), ChunkOption::RecordCount(1024 * 8));
+}
+
+#[test]
+fn test_api_round_trip_chimp_bytesize() {
+    let compressor_config = CompressorConfig::chimp().build();
+    test_round_trip(
+        compressor_config.into(),
+        ChunkOption::ByteSizeBestEffort(1024),
+    );
+}
+
 fn test_round_trip_with_scale(
     generator: fn(usize, usize) -> Vec<f64>,
     compressor_config: CompressorConfig,

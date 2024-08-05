@@ -62,10 +62,15 @@ impl Compressor for ChimpCompressor {
             self.encoder.size().next_multiple_of(8) as usize / 8,
             self.encoder.get_out().len()
         );
-        self.encoder.get_out().len()
+        // EOF: f64::NAN + 1 bit
+        let n_bits = self.encoder.simulate_add_value(f64::NAN) + 1;
+
+        n_bits.next_multiple_of(8) as usize / 8
     }
 
-    fn prepare(&mut self) {}
+    fn prepare(&mut self) {
+        self.encoder.close();
+    }
 
     fn buffers(&self) -> [&[u8]; super::MAX_BUFFERS] {
         const E: &[u8] = &[];
@@ -189,6 +194,69 @@ impl ChimpEncoder {
             }
         }
         self.stored_val = value;
+    }
+
+    /// Simulates adding a value to the encoder and returns the resulting size.
+    ///
+    /// This function calculates the size of the encoded data after adding a
+    /// given value without actually modifying the encoder's state. It is useful
+    /// for estimating the impact on size before performing the actual addition.
+    ///
+    /// # Arguments
+    ///
+    /// * `value` - The floating point value to be added to the encoder.
+    ///
+    /// # Returns
+    ///
+    /// * `u32` - The size of the encoded data in bits after adding the value.
+    ///     /// # Example
+    ///
+    /// ```
+    /// use ebi::compressor::chimp::ChimpEncoder;
+    /// let mut encoder = ChimpEncoder::new();
+    ///
+    /// // Simulate adding a value
+    /// let simulated_size = encoder.simulate_add_value(42.0);
+    /// assert_eq!(simulated_size, 64);
+    ///
+    /// // Actual addition of the value
+    /// encoder.add_value(42.0);
+    /// assert_eq!(encoder.size(), 64);
+    ///
+    /// encoder.add_value(44.0);
+    ///
+    /// // Simulate adding a value
+    /// let simulated_size = encoder.simulate_add_value(22.0);
+    /// // Actual addition of the value
+    /// encoder.add_value(22.0);
+    /// assert_eq!(simulated_size, encoder.size());
+    /// ```
+    pub fn simulate_add_value(&self, value: f64) -> u32 {
+        let value_bits = value.to_bits();
+        let mut simulated_size = self.size;
+        let xor = self.stored_val ^ value_bits;
+
+        if self.first {
+            simulated_size += 64;
+        } else if xor == 0 {
+            simulated_size += 2;
+        } else {
+            let leading_zeros = Self::LEADING_ROUND[xor.leading_zeros() as usize] as u32;
+            let trailing_zeros = xor.trailing_zeros();
+
+            if trailing_zeros > Self::THRESHOLD {
+                let significant_bits = 64 - leading_zeros - trailing_zeros;
+                simulated_size += 11 + significant_bits;
+            } else if leading_zeros == self.stored_leading_zeros {
+                let significant_bits = 64 - leading_zeros;
+                simulated_size += 2 + significant_bits;
+            } else {
+                let significant_bits = 64 - leading_zeros;
+                simulated_size += 5 + significant_bits;
+            }
+        }
+
+        simulated_size
     }
 
     /// Returns the number of bits written to the buffer.
