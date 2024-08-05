@@ -447,7 +447,7 @@ impl<'a, R: AlignedBufRead> ChunkWriter<'a, R> {
                                 && estimate_option
                                     .is_stricter_or_equal(&EstimateOption::Overestimate)
                             {
-                                panic!("Failed to unload value from the estimator while we are in the overestimation or exact mode");
+                                panic!("Failed to unload value from the estimator while we are in the overestimation or exact mode: {:?}", self.compressor.compression_scheme());
                             }
                             break;
                         }
@@ -460,7 +460,10 @@ impl<'a, R: AlignedBufRead> ChunkWriter<'a, R> {
 
                     buf.set_n_consumed_bytes(self.compressor.total_bytes_in());
                 } else {
-                    panic!("No size estimator is available for the compressor");
+                    panic!(
+                        "No size estimator is available for the compressor: {:?}",
+                        self.compressor.compression_scheme()
+                    );
                 };
             }
         }
