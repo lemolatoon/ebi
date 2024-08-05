@@ -189,6 +189,7 @@ mod internal {
 
     pub(crate) mod query {
         use roaring::RoaringBitmap;
+        #[allow(unused_imports)]
         use simd::{comp_simd, equal_simd};
 
         use crate::compression_common::buff::{
@@ -198,6 +199,7 @@ mod internal {
         };
         use cfg_if::cfg_if;
 
+        #[cfg(not(miri))]
         const SIMD_THRESHOLD: f64 = 0.06;
 
         pub(crate) fn buff_simd256_cmp_filter<const IS_GREATER: bool, const INCLUSIVE: bool>(
@@ -271,8 +273,14 @@ mod internal {
 
                 let delta_fixed_pred_subcolumn = (delta_fixed_pred >> remaining_bits_length) as u8;
                 let next_to_check_bitmask = if let Some(to_check_bitmask) = &to_check_bitmask {
-                    let use_simd =
-                        to_check_bitmask.len() as f64 / number_of_records as f64 > SIMD_THRESHOLD;
+                    cfg_if! {
+                        if #[cfg(any(not(target_arch = "x86_64"), miri))] {
+                            let use_simd = false;
+                        } else {
+                            let use_simd =
+                                to_check_bitmask.len() as f64 / number_of_records as f64 > SIMD_THRESHOLD;
+                        }
+                    }
                     let (mut next_to_check_bitmask, mut expected_record_index_if_sequential) =
                         if use_simd {
                             let simd_chunk = bitpack
@@ -345,7 +353,7 @@ mod internal {
                     // TODO: use SIMD here
                     let chunk = bitpack.read_n_byte(number_of_records as usize).unwrap();
                     cfg_if! {
-                        if #[cfg(not(target_arch = "x86_64"))] {
+                        if #[cfg(any(not(target_arch = "x86_64"), miri))] {
                             let mut to_check_bitmask = RoaringBitmap::new();
                             let remaining_chunk = chunk;
                             let record_index_offset = 0;
@@ -544,7 +552,7 @@ mod internal {
                     let chunk = bitpack.read_n_byte(number_of_records as usize).unwrap();
 
                     cfg_if! {
-                        if #[cfg(not(target_arch = "x86_64"))] {
+                        if #[cfg(any(not(target_arch = "x86_64"), miri))] {
                             let mut bitmask = RoaringBitmap::new();
                             let remaining_chunk = chunk;
                             let record_index_offset = 0;
@@ -635,6 +643,7 @@ mod internal {
 
             pub const GREATER: u8 = 1;
             pub const LESS: u8 = 1 << 1;
+            #[allow(dead_code)]
             pub unsafe fn comp_simd<const FLAGS: u8>(
                 x: &[u8],
                 pred: u8,
@@ -682,6 +691,7 @@ mod internal {
                 to_check_bitmask
             }
 
+            #[allow(dead_code)]
             pub unsafe fn equal_simd(x: &[u8], pred: u8, logical_offset: u32) -> RoaringBitmap {
                 debug_assert_eq!(
                     x.len() % VECTOR_SIZE,

@@ -7,6 +7,7 @@ mod helper {
     use ebi::decoder::query::{Range, RangeValue};
     use rand::prelude::Distribution;
     use rand::rngs::StdRng;
+    #[cfg(not(miri))]
     use rand::seq::SliceRandom as _;
     use rand::{Rng, SeedableRng};
     use std::cmp::min;
