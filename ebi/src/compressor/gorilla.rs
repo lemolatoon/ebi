@@ -1,4 +1,4 @@
-use super::{AppendableCompressor, Compressor};
+use super::{size_estimater::AppendCompressingSizeEstimator, AppendableCompressor, Compressor};
 
 #[derive(Debug, Clone, PartialEq, PartialOrd)]
 pub struct GorillaCompressor {
@@ -28,6 +28,8 @@ impl Default for GorillaCompressor {
 }
 
 impl Compressor for GorillaCompressor {
+    type SizeEstimatorImpl<'comp, 'buf> = AppendCompressingSizeEstimator<'comp, 'buf, Self>;
+
     fn compress(&mut self, input: &[f64]) {
         self.reset();
         for value in input {
@@ -41,6 +43,18 @@ impl Compressor for GorillaCompressor {
 
     fn total_bytes_buffered(&self) -> usize {
         self.encoder.total_bytes_buffered()
+    }
+
+    fn size_estimator<'comp, 'buf>(
+        &'comp mut self,
+        input: &'buf [f64],
+        estimate_option: super::size_estimater::EstimateOption,
+    ) -> Option<Self::SizeEstimatorImpl<'comp, 'buf>> {
+        Some(AppendCompressingSizeEstimator::new(
+            self,
+            input,
+            estimate_option,
+        ))
     }
 
     fn prepare(&mut self) {

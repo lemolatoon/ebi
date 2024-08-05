@@ -52,7 +52,7 @@ impl From<&FileConfig> for NativeFileConfig {
         let chunk_option = match config.chunk_option.kind {
             super::ChunkOptionKind::Full => ChunkOption::Full,
             super::ChunkOptionKind::RecordCount => ChunkOption::RecordCount(value),
-            super::ChunkOptionKind::ByteSize => ChunkOption::ByteSizeBestEffort(value),
+            super::ChunkOptionKind::ByteSize => ChunkOption::ByteSize(value),
         };
         let field_type = config.field_type;
         let compression_scheme = config.compression_scheme;

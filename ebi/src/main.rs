@@ -58,7 +58,7 @@ fn main() {
     // let compressor_config = CompressorConfig::gorilla().build();
     let compressor_config = CompressorConfig::buff().scale(scale).build();
     // let chunk_option = ChunkOption::RecordCount(RECORD_COUNT * 3000 + 3);
-    let chunk_option = ChunkOption::ByteSizeBestEffort(1024 * 8);
+    let chunk_option = ChunkOption::ByteSize(1024 * 8);
     dbg!(chunk_option);
 
     // let binding = vec![0.4, 100000000.5, 0.5, 0.6, 0.7, 0.8, 0.9, 0.9, 1.0];
