@@ -1,10 +1,7 @@
 use cfg_if::cfg_if;
 
 use crate::{
-    compressor::{
-        size_estimater::{EstimateOption, SizeEstimator},
-        Compressor, CompressorConfig, GenericCompressor,
-    },
+    compressor::{Compressor, CompressorConfig, GenericCompressor},
     format::{
         self,
         serialize::{AsBytes, ToLe},
@@ -24,7 +21,7 @@ use std::{
 pub enum ChunkOption {
     Full,
     RecordCount(usize),
-    ByteSize(usize),
+    ByteSizeBestEffort(usize),
 }
 
 impl From<&ChunkOption> for format::ChunkOption {
@@ -40,7 +37,7 @@ impl From<&ChunkOption> for format::ChunkOption {
                 reserved: 0,
                 value: *value as u64,
             },
-            ChunkOption::ByteSize(value) => format::ChunkOption {
+            ChunkOption::ByteSizeBestEffort(value) => format::ChunkOption {
                 kind: format::ChunkOptionKind::ByteSize,
                 reserved: 0,
                 value: *value as u64,
@@ -54,7 +51,7 @@ impl ChunkOption {
         match self {
             ChunkOption::Full => false,
             ChunkOption::RecordCount(count) => count * size_of::<f64>() <= total_bytes_in,
-            ChunkOption::ByteSize(n_bytes) => *n_bytes <= total_bytes_out,
+            ChunkOption::ByteSizeBestEffort(n_bytes) => *n_bytes <= total_bytes_out,
         }
     }
 }
@@ -114,6 +111,7 @@ impl<'a, R: AlignedBufRead> BufWrapper<'a, R> {
         ))
     }
 
+    #[allow(unused)]
     pub fn set_n_consumed_bytes(&mut self, consumed: usize) {
         self.n_consumed_bytes = consumed;
     }
@@ -169,6 +167,7 @@ impl<R: AlignedBufRead> FileWriter<R> {
             + size_of::<FileFooter2>()
     }
 
+    #[allow(unused)]
     /// Returns the wrapper of the contents of the internal buffer, filling it with more data from the inner reader.
     /// If input has already reached EOF, the second element of tuple will be set.
     fn f64_buf(&mut self) -> Result<(BufWrapper<'_, R>, bool), io::Error> {
@@ -389,73 +388,20 @@ impl<'a, R: AlignedBufRead> ChunkWriter<'a, R> {
 
                 self.compressor.compress(buf.as_mut_slice());
             }
-            ChunkOption::ByteSize(n) => {
-                let estimate_option = EstimateOption::BestEffort;
-                if self
-                    .compressor
-                    .estimate_size_static(0, estimate_option)
-                    .is_some()
-                {
-                    let mut number_of_records = 0;
-                    // TODO: replace this with binary search
-                    for i in 1..usize::MAX {
-                        let size = self
-                            .compressor
-                            .estimate_size_static(i, EstimateOption::BestEffort)
-                            .unwrap();
+            ChunkOption::ByteSizeBestEffort(n) => {
+                // TODO: implement good estimation
+                // Simple heuristic to estimate the number of records to read.
+                let record_count = ((n as f64 / size_of::<f64>() as f64) * 1.5).ceil() as usize;
+                let mut buf = read_less_or_equal(
+                    self.file_writer.input_mut(),
+                    record_count * size_of::<f64>(),
+                )?;
+                if buf.is_empty() {
+                    self.file_writer.set_reaches_eof();
+                    return Ok(());
+                }
 
-                        if size > n {
-                            number_of_records = i - 1;
-                            break;
-                        }
-                    }
-
-                    let buf = read_less_or_equal(
-                        self.file_writer.input_mut(),
-                        number_of_records * size_of::<f64>(),
-                    )?;
-                    self.compressor.compress(buf.as_slice());
-                } else if self
-                    .compressor
-                    .size_estimator(&[], estimate_option)
-                    .is_some()
-                {
-                    let (mut buf, reaches_eof) = self.file_writer.f64_buf()?;
-                    if reaches_eof {
-                        drop(buf);
-                        self.file_writer.set_reaches_eof();
-                        return Ok(());
-                    }
-                    let mut estimator = self
-                        .compressor
-                        .size_estimator(buf.as_ref(), estimate_option)
-                        .unwrap();
-
-                    loop {
-                        let size = estimator.size();
-                        if size > n {
-                            if estimator.unload_value().is_err()
-                                && estimate_option
-                                    .is_stricter_or_equal(&EstimateOption::Overestimate)
-                            {
-                                panic!("Failed to unload value from the estimator while we are in the overestimation or exact mode: {:?}", self.compressor.compression_scheme());
-                            }
-                            break;
-                        }
-                        if estimator.advance().is_err() {
-                            break;
-                        };
-                    }
-
-                    estimator.compress();
-
-                    buf.set_n_consumed_bytes(self.compressor.total_bytes_in());
-                } else {
-                    panic!(
-                        "No size estimator is available for the compressor: {:?}",
-                        self.compressor.compression_scheme()
-                    );
-                };
+                self.compressor.compress(buf.as_mut_slice());
             }
         }
         if self.compressor.total_bytes_in() == 0 {

@@ -776,7 +776,7 @@ mod helper {
             ChunkOption::RecordCount(n_records / n_chunks)
         } else {
             let byte_size = rng.gen_range(100..=1024 * 10);
-            ChunkOption::ByteSize(byte_size)
+            ChunkOption::ByteSizeBestEffort(byte_size)
         };
         println!("n_records: {}, chunk_option: {:?}", n_records, chunk_option);
         let gen_values = || {
