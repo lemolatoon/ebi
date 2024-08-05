@@ -1,3 +1,5 @@
+use crate::compression_common::buff::precision_bound::{self, PRECISION_MAP};
+
 use super::{size_estimater::NaiveSlowSizeEstimator, Compressor};
 
 #[derive(Debug, Clone, PartialEq, PartialOrd)]
@@ -24,7 +26,9 @@ impl Compressor for BUFFCompressor {
     type SizeEstimatorImpl<'comp, 'buf> = NaiveSlowSizeEstimator<'comp, 'buf, Self>;
 
     fn compress(&mut self, data: &[f64]) {
-        self.compressed = Some(internal::buff_simd256_encode(self.scale, data));
+        self.compressed = Some(internal::buff_simd256_encode(Precalculated::precalculate(
+            self.scale, data,
+        )));
 
         let n_bytes_compressed = size_of_val(data);
         self.total_bytes_in += n_bytes_compressed;
@@ -53,58 +57,124 @@ impl Compressor for BUFFCompressor {
     }
 }
 
-mod internal {
-    use std::mem;
+struct Precalculated {
+    min: usize,
+    max: usize,
+    fixed_representation_values: Vec<i64>,
+    precision: usize,
+}
 
-    use crate::compression_common::buff::{
-        bit_packing::BitPack,
-        flip,
-        precision_bound::{self, PRECISION_MAP},
-    };
-
-    pub fn buff_simd256_encode(scale: usize, floats: &[f64]) -> Vec<u8> {
+impl Precalculated {
+    pub fn precalculate(scale: usize, floats: &[f64]) -> Self {
         let mut fixed_representation_values = Vec::new();
 
-        let number_of_records: u32 = floats.len() as u32;
         let precision = if scale == 0 {
             0
         } else {
-            (scale as f32).log10() as i32
+            (scale as f32).log10() as usize
         };
 
-        let fractional_part_bits_length = *PRECISION_MAP.get(precision as usize).unwrap();
+        let fractional_part_bits_length = *PRECISION_MAP.get(precision).unwrap();
         let mut min = i64::MAX;
+        let mut min_index = 0;
         let mut max = i64::MIN;
+        let mut max_index = 0;
 
-        for &f in floats {
+        for (i, &f) in floats.iter().enumerate() {
             let fixed = precision_bound::into_fixed_representation_with_fractional_part_bits_length(
                 f,
                 fractional_part_bits_length as i32,
             );
             if fixed < min {
                 min = fixed;
+                min_index = i;
             }
             if fixed > max {
                 max = fixed;
+                max_index = i;
             }
             fixed_representation_values.push(fixed);
         }
-        let delta = max - min;
-        let base_fixed64 = min;
+
+        Self {
+            min: min_index,
+            max: max_index,
+            fixed_representation_values,
+            precision,
+        }
+    }
+
+    pub fn max(&self) -> i64 {
+        self.fixed_representation_values[self.max]
+    }
+
+    pub fn min(&self) -> i64 {
+        self.fixed_representation_values[self.min]
+    }
+
+    pub fn delta(&self) -> i64 {
+        self.max() - self.min()
+    }
+
+    pub fn base_fixed64(&self) -> i64 {
+        self.fixed_representation_values[self.min]
+    }
+
+    pub fn fixed_representation_bits_length(&self) -> u32 {
+        if self.delta() == 0 {
+            0
+        } else {
+            64 - self.delta().leading_zeros()
+        }
+    }
+
+    pub fn fixed_representation_values(&self) -> &[i64] {
+        &self.fixed_representation_values[..]
+    }
+
+    pub fn fractional_part_bits_length(&self) -> u64 {
+        *PRECISION_MAP.get(self.precision).unwrap()
+    }
+
+    pub fn number_of_records(&self) -> usize {
+        self.fixed_representation_values.len()
+    }
+
+    pub fn compressed_size(&self) -> usize {
+        let fixed_representation_bits_length = self.fixed_representation_bits_length() as usize;
+
+        let number_of_records = self.number_of_records();
+
+        let header_size = size_of::<u32>() * 5;
+
+        let fixed_floats_size =
+            (fixed_representation_bits_length * number_of_records).next_multiple_of(8) / 8;
+
+        header_size + fixed_floats_size
+    }
+}
+
+mod internal {
+    use std::mem;
+
+    use crate::compression_common::buff::{bit_packing::BitPack, flip};
+
+    use super::Precalculated;
+
+    pub fn buff_simd256_encode(precalculated: Precalculated) -> Vec<u8> {
+        let fixed_representation_values = precalculated.fixed_representation_values();
+        let base_fixed64 = precalculated.base_fixed64();
 
         let delta_fixed_representation_values = fixed_representation_values
-            .into_iter()
+            .iter()
             .map(|x| (x - base_fixed64) as u64)
             .collect::<Vec<u64>>();
 
-        let fixed_representation_bits_length = if delta == 0 {
-            0
-        } else {
-            64 - delta.leading_zeros()
-        };
+        let fixed_representation_bits_length = precalculated.fixed_representation_bits_length();
+        let fractional_part_bits_length = precalculated.fractional_part_bits_length() as usize;
+        let number_of_records = precalculated.number_of_records() as u32;
 
-        let fractional_part_bits_length = fractional_part_bits_length as usize;
-        let mut bitpack_vec = BitPack::<Vec<u8>>::with_capacity(8);
+        let mut bitpack_vec = BitPack::<Vec<u8>>::with_capacity(precalculated.compressed_size());
 
         let base_fixed64_bits: u64 = unsafe { mem::transmute(base_fixed64) };
         let base_fixed64_low = base_fixed64_bits as u32;
