@@ -275,7 +275,7 @@ impl<R: Read> BitRead for BitReader<R> {
 mod tests {
     use tsz::stream::Write as _;
 
-    use crate::compressor::gorilla::modified_tsz::BufferedWriterExt;
+    use crate::io::buffered_bit_writer::BufferedWriterExt;
 
     use super::*;
 
