@@ -33,13 +33,16 @@ jobs:
           rustup +nightly component add miri
           cargo +nightly miri setup
 
+      - name: Install nextest
+        uses: taiki-e/install-action@nextest
+
       - name: Build
         run: cargo build --verbose
       - name: Run tests
         run: cargo test --verbose
 
       - name: Run Miri test
-        run: cargo +nightly miri test --verbose
+        run: cargo +nightly miri nextest run --verbose
 
       - name: Run lint
         run: cargo clippy --all-targets --all-features
