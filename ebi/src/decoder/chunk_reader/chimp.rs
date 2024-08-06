@@ -175,7 +175,6 @@ impl<R: BitRead> ChimpDecoder<R> {
                 if significant_bits == 0 {
                     significant_bits = 64;
                 }
-                dbg!(significant_bits, self.stored_leading_zeros);
                 self.stored_trailing_zeros = 64 - significant_bits - self.stored_leading_zeros;
                 let value = self.bit_reader.read_bits(
                     (64 - self.stored_leading_zeros - self.stored_trailing_zeros) as u8,
