@@ -21,6 +21,24 @@ pub trait BitRead {
     fn peak_bits(&mut self, n: u8) -> io::Result<u64>;
 }
 
+impl<T: BitRead> BitRead for &mut T {
+    fn read_bit(&mut self) -> io::Result<bool> {
+        (*self).read_bit()
+    }
+
+    fn read_byte(&mut self) -> io::Result<u8> {
+        (*self).read_byte()
+    }
+
+    fn read_bits(&mut self, n: u8) -> io::Result<u64> {
+        (*self).read_bits(n)
+    }
+
+    fn peak_bits(&mut self, n: u8) -> io::Result<u64> {
+        (*self).peak_bits(n)
+    }
+}
+
 #[derive(Clone, PartialEq, PartialOrd)]
 pub struct BitReader<R: Read> {
     /// The underlying reader.
@@ -275,7 +293,7 @@ impl<R: Read> BitRead for BitReader<R> {
 mod tests {
     use tsz::stream::Write as _;
 
-    use crate::compressor::gorilla::modified_tsz::BufferedWriterExt;
+    use crate::io::buffered_bit_writer::BufferedWriterExt;
 
     use super::*;
 

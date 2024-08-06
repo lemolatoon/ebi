@@ -1135,6 +1135,18 @@ fn test_gorilla_filter() {
 }
 
 #[test]
+fn test_chimp_filter() {
+    let config = CompressorConfig::chimp().build();
+    helper::test_query_filter(config, None, None, None, "Chimp");
+}
+
+#[test]
+fn test_chimp128_filter() {
+    let config = CompressorConfig::chimp128().build();
+    helper::test_query_filter(config, None, None, None, "Chimp128");
+}
+
+#[test]
 fn test_buff_filter() {
     let scale = 100;
     let fractional_part_bits_length = 8;
@@ -1175,6 +1187,18 @@ fn test_gorilla_materialize() {
 }
 
 #[test]
+fn test_chimp_materialize() {
+    let config = CompressorConfig::chimp().build();
+    helper::test_query_materialize(config, None, "Chimp");
+}
+
+#[test]
+fn test_chimp128_materialize() {
+    let config = CompressorConfig::chimp128().build();
+    helper::test_query_materialize(config, None, "Chimp128");
+}
+
+#[test]
 fn test_buff_materialize() {
     let scale = 10;
     let config = CompressorConfig::buff().scale(scale).build();
@@ -1197,6 +1221,18 @@ fn test_rle_filter_materialize() {
 fn test_gorilla_filter_materialize() {
     let config = CompressorConfig::gorilla().build();
     helper::test_query_filter_materialize(config, None, None, None, "Gorilla");
+}
+
+#[test]
+fn test_chimp_filter_materialize() {
+    let config = CompressorConfig::chimp().build();
+    helper::test_query_filter_materialize(config, None, None, None, "Chimp");
+}
+
+#[test]
+fn test_chimp128_filter_materialize() {
+    let config = CompressorConfig::chimp128().build();
+    helper::test_query_filter_materialize(config, None, None, None, "Chimp128");
 }
 
 #[test]

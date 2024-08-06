@@ -1,4 +1,6 @@
 pub mod buff;
+pub mod chimp;
+pub mod chimp_n;
 pub mod gorilla;
 pub mod run_length;
 pub mod uncompressed;
@@ -115,6 +117,8 @@ pub enum GeneralChunkReaderInner<R: Read> {
     RLE(run_length::RunLengthReader<R>),
     Gorilla(gorilla::GorillaReader<R>),
     BUFF(buff::BUFFReader<R>),
+    Chimp(chimp::ChimpReader<R>),
+    Chimp128(chimp_n::Chimp128Reader<R>),
 }
 
 impl<R: Read> GeneralChunkReaderInner<R> {
@@ -136,6 +140,12 @@ impl<R: Read> GeneralChunkReaderInner<R> {
             CompressionScheme::BUFF => {
                 GeneralChunkReaderInner::BUFF(buff::BUFFReader::new(handle, reader))
             }
+            CompressionScheme::Chimp => {
+                GeneralChunkReaderInner::Chimp(chimp::ChimpReader::new(handle, reader))
+            }
+            CompressionScheme::Chimp128 => {
+                GeneralChunkReaderInner::Chimp128(chimp_n::Chimp128Reader::new(handle, reader))
+            }
         })
     }
 }
@@ -147,6 +157,8 @@ impl<R: Read> From<&GeneralChunkReaderInner<R>> for CompressionScheme {
             GeneralChunkReaderInner::RLE(_) => CompressionScheme::RLE,
             GeneralChunkReaderInner::Gorilla(_) => CompressionScheme::Gorilla,
             GeneralChunkReaderInner::BUFF(_) => CompressionScheme::BUFF,
+            GeneralChunkReaderInner::Chimp(_) => CompressionScheme::Chimp,
+            GeneralChunkReaderInner::Chimp128(_) => CompressionScheme::Chimp128,
         }
     }
 }
@@ -194,6 +206,10 @@ pub enum GeneralDecompressIterator<'a, R: Read> {
     Gorilla(gorilla::GorillaIterator<'a, R>),
     #[quick_impl(impl From)]
     BUFF(buff::BUFFIterator<'a>),
+    #[quick_impl(impl From)]
+    Chimp(chimp::ChimpDecompressIterator<'a, R>),
+    #[quick_impl(impl From)]
+    Chimp128(chimp_n::Chimp128DecompressIterator<'a, R>),
 }
 
 impl<'a, R: Read> Iterator for GeneralDecompressIterator<'a, R> {
@@ -205,6 +221,19 @@ impl<'a, R: Read> Iterator for GeneralDecompressIterator<'a, R> {
             GeneralDecompressIterator::RLE(c) => c.next(),
             GeneralDecompressIterator::Gorilla(c) => c.next(),
             GeneralDecompressIterator::BUFF(c) => c.next(),
+            GeneralDecompressIterator::Chimp(c) => c.next(),
+            GeneralDecompressIterator::Chimp128(c) => c.next(),
+        }
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        match self {
+            GeneralDecompressIterator::Uncompressed(c) => c.size_hint(),
+            GeneralDecompressIterator::RLE(c) => c.size_hint(),
+            GeneralDecompressIterator::Gorilla(c) => c.size_hint(),
+            GeneralDecompressIterator::BUFF(c) => c.size_hint(),
+            GeneralDecompressIterator::Chimp(c) => c.size_hint(),
+            GeneralDecompressIterator::Chimp128(c) => c.size_hint(),
         }
     }
 }
@@ -301,7 +330,15 @@ macro_rules! impl_generic_reader {
     };
 }
 
-impl_generic_reader!(GeneralChunkReaderInner, Uncompressed, RLE, Gorilla, BUFF);
+impl_generic_reader!(
+    GeneralChunkReaderInner,
+    Uncompressed,
+    RLE,
+    Gorilla,
+    BUFF,
+    Chimp,
+    Chimp128
+);
 
 #[cfg(test)]
 mod tests {
@@ -438,6 +475,12 @@ mod tests {
             "decompress_iter should return the same length of result as decompress"
         );
 
+        for (i, (a, b)) in iter_result.iter().zip(decompress_result.iter()).enumerate() {
+            assert_eq!(
+                a, b,
+                "[{i} th]decompress_iter should return the same result as decompress"
+            );
+        }
         assert_eq!(
             iter_result, decompress_result,
             "decompress_iter should return the same result as decompress"
@@ -463,5 +506,10 @@ mod tests {
     fn test_buff() {
         let scale = 100;
         test_all_with_precision(CompressorConfig::buff().scale(scale).build().into(), scale);
+    }
+
+    #[test]
+    fn test_chimp() {
+        test_all(CompressorConfig::chimp().build());
     }
 }
