@@ -179,7 +179,11 @@ pub(crate) mod modified_tsz {
 
                 self.state.total_bits_buffered += 1;
 
-                let leading_zeroes = xor.leading_zeros();
+                let mut leading_zeroes = xor.leading_zeros();
+                // we cannot encode leading_zeroes more than 32 bits in 5 bit.
+                if leading_zeroes >= 32 {
+                    leading_zeroes = 31;
+                }
                 let trailing_zeroes = xor.trailing_zeros();
 
                 if leading_zeroes >= self.state.leading_zeroes

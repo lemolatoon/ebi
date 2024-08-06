@@ -246,6 +246,88 @@ fn test_round_trip_with_scale(
     }
 }
 
+fn round_trip_assert(
+    values: &[f64],
+    compressor_config: CompressorConfig,
+    chunk_option: ChunkOption,
+) {
+    // encode
+    let encoded = {
+        let encoder_input = EncoderInput::from_f64_slice(values);
+
+        let encoder_output = EncoderOutput::from_vec(Vec::new());
+
+        let mut encoder = Encoder::new(
+            encoder_input,
+            encoder_output,
+            chunk_option,
+            compressor_config,
+        );
+
+        encoder.encode().unwrap();
+
+        encoder.into_output().into_vec()
+    };
+    println!("decode!!");
+    // decode
+    let decoded_filter_materialize = {
+        let input_cursor = Cursor::new(&encoded[..]);
+        let decoder_input = DecoderInput::from_reader(input_cursor);
+
+        let mut decoder_output = DecoderOutput::from_vec(Vec::new());
+
+        let mut decoder = Decoder::new(decoder_input).unwrap();
+
+        decoder
+            .filter_materialize(
+                &mut decoder_output,
+                Predicate::Range(Range::new(
+                    RangeValue::Inclusive(f64::MIN),
+                    RangeValue::Inclusive(f64::MAX),
+                )),
+                None,
+                None,
+            )
+            .unwrap();
+
+        decoder_output.into_writer().into_inner()
+    };
+
+    let decoded_materialize = {
+        let input_cursor = Cursor::new(&encoded[..]);
+        let decoder_input = DecoderInput::from_reader(input_cursor);
+
+        let mut decoder_output = DecoderOutput::from_vec(Vec::new());
+
+        let mut decoder = Decoder::new(decoder_input).unwrap();
+
+        let bm0 = decoder.filter(Predicate::Ne(0.5), None, None).unwrap();
+        let bm1 = decoder.filter(Predicate::Eq(0.5), None, None).unwrap();
+        decoder
+            .materialize(&mut decoder_output, Some(&(bm0 | bm1)), None)
+            .unwrap();
+
+        decoder_output.into_writer().into_inner()
+    };
+
+    for decoded in [decoded_filter_materialize, decoded_materialize] {
+        let decoded_floats: Vec<f64> = decoded
+            .chunks_exact(8)
+            .map(|bytes| f64::from_le_bytes(bytes.try_into().unwrap()))
+            .collect();
+        assert_eq!(
+                values.len(),
+                decoded_floats.len(),
+                "The length of the decoded values is not equal to the length of the original values. {} != {}", values.len(), decoded_floats.len()
+            );
+
+        assert_eq!(
+            values, decoded_floats,
+            "The decoded values are not equal to the original values"
+        );
+    }
+}
+
 fn test_round_trip(compressor_config: CompressorConfig, chunk_option: ChunkOption) {
     for n in [1003, 10003, 100004, 100005] {
         #[cfg(miri)] // miri is too slow
@@ -254,81 +336,46 @@ fn test_round_trip(compressor_config: CompressorConfig, chunk_option: ChunkOptio
         }
 
         let random_values = generate_and_write_random_f64(n);
-        // encode
-        let encoded = {
-            let encoder_input = EncoderInput::from_f64_slice(&random_values);
 
-            let encoder_output = EncoderOutput::from_vec(Vec::new());
-
-            let mut encoder = Encoder::new(
-                encoder_input,
-                encoder_output,
-                chunk_option,
-                compressor_config.clone(),
-            );
-
-            encoder.encode().unwrap();
-
-            encoder.into_output().into_vec()
-        };
-        // decode
-        let decoded_filter_materialize = {
-            let input_cursor = Cursor::new(&encoded[..]);
-            let decoder_input = DecoderInput::from_reader(input_cursor);
-
-            let mut decoder_output = DecoderOutput::from_vec(Vec::new());
-
-            let mut decoder = Decoder::new(decoder_input).unwrap();
-
-            decoder
-                .filter_materialize(
-                    &mut decoder_output,
-                    Predicate::Range(Range::new(
-                        RangeValue::Inclusive(f64::MIN),
-                        RangeValue::Inclusive(f64::MAX),
-                    )),
-                    None,
-                    None,
-                )
-                .unwrap();
-
-            decoder_output.into_writer().into_inner()
-        };
-
-        let decoded_materialize = {
-            let input_cursor = Cursor::new(&encoded[..]);
-            let decoder_input = DecoderInput::from_reader(input_cursor);
-
-            let mut decoder_output = DecoderOutput::from_vec(Vec::new());
-
-            let mut decoder = Decoder::new(decoder_input).unwrap();
-
-            let bm0 = decoder.filter(Predicate::Ne(0.5), None, None).unwrap();
-            let bm1 = decoder.filter(Predicate::Eq(0.5), None, None).unwrap();
-            decoder
-                .materialize(&mut decoder_output, Some(&(bm0 | bm1)), None)
-                .unwrap();
-
-            decoder_output.into_writer().into_inner()
-        };
-
-        for decoded in [decoded_filter_materialize, decoded_materialize] {
-            let random_values_bytes = random_values
-                .iter()
-                .flat_map(|x| x.to_ne_bytes())
-                .collect::<Vec<u8>>();
-            assert_eq!(
-                random_values_bytes.len(),
-                decoded.len(),
-                "The length of the decoded values is not equal to the length of the original values. {} != {}", random_values_bytes.len(), decoded.len()
-            );
-
-            assert_eq!(
-                random_values_bytes, decoded,
-                "The decoded values are not equal to the original values"
-            );
-        }
+        round_trip_assert(&random_values, compressor_config.clone(), chunk_option);
     }
+
+    const XOR_VALUES: [f64; 66] = const {
+        let mut values = [0.0f64; 66];
+        values[0] = 3.3;
+        values[1] = 3.3;
+        let mut i = 1;
+        while i < 64 {
+            let last = values[i];
+            let last_bits = unsafe { std::mem::transmute::<f64, u64>(last) };
+            let next = (last_bits) ^ (1 << (i - 1));
+            let next = unsafe { std::mem::transmute::<u64, f64>(next) };
+            // `f64::is_nan` is const unstable
+            #[allow(clippy::eq_op)]
+            let is_nan = next != next;
+            let is_infinite = (next == f64::INFINITY) | (next == f64::NEG_INFINITY);
+            if is_nan || is_infinite {
+                values[i] = last * -2.0;
+            } else {
+                values[i + 1] = next;
+                i += 1;
+            }
+        }
+
+        values
+    };
+    round_trip_assert(&XOR_VALUES, compressor_config.clone(), chunk_option);
+
+    let xor_values2 = {
+        let mut xor_values2 = [2.3f64, 3.3f64, 0.0f64];
+        xor_values2[2] = xor_values2[1];
+        for i in 0..2 {
+            xor_values2[2] = f64::from_bits(xor_values2[2].to_bits() ^ (1 << i));
+        }
+
+        xor_values2
+    };
+    round_trip_assert(&xor_values2, compressor_config, chunk_option);
 }
 
 #[test]

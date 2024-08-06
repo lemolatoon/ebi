@@ -215,7 +215,6 @@ impl<const N_PREVIOUS_VALUES: usize, R: BitRead> ChimpNDecoder<N_PREVIOUS_VALUES
                 if significant_bits == 0 {
                     significant_bits = 64;
                 }
-                dbg!(significant_bits, self.stored_leading_zeros);
                 self.stored_trailing_zeros =
                     64 - significant_bits as u32 - self.stored_leading_zeros;
                 let value = self.bit_reader.read_bits(

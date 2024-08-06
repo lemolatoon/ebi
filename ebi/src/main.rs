@@ -16,7 +16,6 @@ use ebi::{
         encoder::{Encoder, EncoderInput, EncoderOutput},
     },
     compressor::CompressorConfig,
-    decoder::query::Predicate,
     encoder::ChunkOption,
 };
 use rand::Rng;
@@ -56,9 +55,10 @@ fn main() {
     // let compressor = GenericCompressor::Uncompressed(UncompressedCompressor::new(100));
     // let compressor_config = CompressorConfig::rle().build();
     // let compressor_config = CompressorConfig::gorilla().build();
-    let compressor_config = CompressorConfig::buff().scale(scale).build();
-    // let chunk_option = ChunkOption::RecordCount(RECORD_COUNT * 3000 + 3);
-    let chunk_option = ChunkOption::ByteSizeBestEffort(1024 * 8);
+    // let compressor_config = CompressorConfig::buff().scale(scale).build();
+    let compressor_config = CompressorConfig::gorilla().build();
+    let chunk_option = ChunkOption::RecordCount(1890);
+    // let chunk_option = ChunkOption::ByteSizeBestEffort(1024 * 8);
     dbg!(chunk_option);
 
     // let binding = vec![0.4, 100000000.5, 0.5, 0.6, 0.7, 0.8, 0.9, 0.9, 1.0];
@@ -82,51 +82,32 @@ fn main() {
     let chunk_footers = reader.footer().chunk_footers();
     println!("{:X?}", &chunk_footers[0..chunk_footers.len().min(10)]);
 
-    let mut output = DecoderOutput::from_vec(Vec::with_capacity(RECORD_COUNT * 3000 + 3));
-    let mut output2 = DecoderOutput::from_vec(Vec::with_capacity(RECORD_COUNT * 3000 + 3));
-
-    let bitmask = decoder.filter(Predicate::Eq(21.68), None, None).unwrap();
-    println!("{:?}", bitmask);
-
+    let mut output = DecoderOutput::from_vec(Vec::new());
     decoder.materialize(&mut output, None, None).unwrap();
-    decoder
-        .filter_materialize(&mut output2, Predicate::Eq(0.9), None, None)
-        .unwrap();
-
-    let output = output.into_writer().into_inner();
-
-    println!("{:?}", output.len());
 
     let mut input_bytes = Vec::new();
     File::open("uncompressed.bin")
         .unwrap()
         .read_to_end(&mut input_bytes)
         .unwrap();
-
-    assert_eq!(output.len(), input_bytes.len(), "Length mismatch");
-
-    let output_f64: Vec<f64> = output
+    let input_floats: Vec<f64> = input_bytes
         .chunks_exact(8)
-        .map(|chunk| {
-            let fp = f64::from_ne_bytes(chunk.try_into().unwrap());
+        .map(|b| {
+            let fp = f64::from_le_bytes(b.try_into().unwrap());
             (fp * scale as f64).round() / scale as f64
         })
         .collect();
 
-    let input_f64: Vec<f64> = input_bytes
+    let output_bytes = output.into_writer().into_inner();
+    let output_floats: Vec<f64> = output_bytes
         .chunks_exact(8)
-        .map(|chunk| {
-            let fp = f64::from_ne_bytes(chunk.try_into().unwrap());
+        .map(|b| {
+            let fp = f64::from_le_bytes(b.try_into().unwrap());
             (fp * scale as f64).round() / scale as f64
         })
         .collect();
-    // let input_f64 = binding;
 
-    assert_eq!(
-        &output_f64[..10],
-        &input_f64[..10],
-        "Decompressed Floats mismatch"
-    );
+    // assert_eq!(input_floats.len(), output_floats.len());
 
-    assert_eq!(&output_f64, &input_f64, "Decompressed Floats mismatch");
+    assert_eq!(input_floats, output_floats);
 }
