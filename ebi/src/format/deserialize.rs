@@ -193,6 +193,7 @@ impl TryFromLeBytes for CompressionScheme {
         const GORILLA: u8 = CompressionScheme::Gorilla as u8;
         const BUFF: u8 = CompressionScheme::BUFF as u8;
         const CHIMP: u8 = CompressionScheme::Chimp as u8;
+        const CHIMP128: u8 = CompressionScheme::Chimp128 as u8;
 
         match bytes[0] {
             UNCOMPRESSED => Ok(Self::Uncompressed),
@@ -200,6 +201,7 @@ impl TryFromLeBytes for CompressionScheme {
             GORILLA => Ok(Self::Gorilla),
             BUFF => Ok(Self::BUFF),
             CHIMP => Ok(Self::Chimp),
+            CHIMP128 => Ok(Self::Chimp128),
             _ => Err(ConversionError::CompressionScheme),
         }
     }

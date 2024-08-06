@@ -1,5 +1,6 @@
 pub mod buff;
 pub mod chimp;
+pub mod chimp_n;
 pub mod gorilla;
 pub mod run_length;
 pub mod uncompressed;
@@ -117,6 +118,7 @@ pub enum GeneralChunkReaderInner<R: Read> {
     Gorilla(gorilla::GorillaReader<R>),
     BUFF(buff::BUFFReader<R>),
     Chimp(chimp::ChimpReader<R>),
+    Chimp128(chimp_n::Chimp128Reader<R>),
 }
 
 impl<R: Read> GeneralChunkReaderInner<R> {
@@ -141,7 +143,9 @@ impl<R: Read> GeneralChunkReaderInner<R> {
             CompressionScheme::Chimp => {
                 GeneralChunkReaderInner::Chimp(chimp::ChimpReader::new(handle, reader))
             }
-            CompressionScheme::Chimp128 => todo!(),
+            CompressionScheme::Chimp128 => {
+                GeneralChunkReaderInner::Chimp128(chimp_n::Chimp128Reader::new(handle, reader))
+            }
         })
     }
 }
@@ -154,6 +158,7 @@ impl<R: Read> From<&GeneralChunkReaderInner<R>> for CompressionScheme {
             GeneralChunkReaderInner::Gorilla(_) => CompressionScheme::Gorilla,
             GeneralChunkReaderInner::BUFF(_) => CompressionScheme::BUFF,
             GeneralChunkReaderInner::Chimp(_) => CompressionScheme::Chimp,
+            GeneralChunkReaderInner::Chimp128(_) => CompressionScheme::Chimp128,
         }
     }
 }
@@ -203,6 +208,8 @@ pub enum GeneralDecompressIterator<'a, R: Read> {
     BUFF(buff::BUFFIterator<'a>),
     #[quick_impl(impl From)]
     Chimp(chimp::ChimpDecompressIterator<'a, R>),
+    #[quick_impl(impl From)]
+    Chimp128(chimp_n::Chimp128DecompressIterator<'a, R>),
 }
 
 impl<'a, R: Read> Iterator for GeneralDecompressIterator<'a, R> {
@@ -215,6 +222,18 @@ impl<'a, R: Read> Iterator for GeneralDecompressIterator<'a, R> {
             GeneralDecompressIterator::Gorilla(c) => c.next(),
             GeneralDecompressIterator::BUFF(c) => c.next(),
             GeneralDecompressIterator::Chimp(c) => c.next(),
+            GeneralDecompressIterator::Chimp128(c) => c.next(),
+        }
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        match self {
+            GeneralDecompressIterator::Uncompressed(c) => c.size_hint(),
+            GeneralDecompressIterator::RLE(c) => c.size_hint(),
+            GeneralDecompressIterator::Gorilla(c) => c.size_hint(),
+            GeneralDecompressIterator::BUFF(c) => c.size_hint(),
+            GeneralDecompressIterator::Chimp(c) => c.size_hint(),
+            GeneralDecompressIterator::Chimp128(c) => c.size_hint(),
         }
     }
 }
@@ -317,7 +336,8 @@ impl_generic_reader!(
     RLE,
     Gorilla,
     BUFF,
-    Chimp
+    Chimp,
+    Chimp128
 );
 
 #[cfg(test)]
