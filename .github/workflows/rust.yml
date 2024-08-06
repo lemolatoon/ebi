@@ -12,7 +12,28 @@ env:
   RUSTFLAGS: "-Dwarnings"
 
 jobs:
-  build:
+  build-lint-fmt-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            target/
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+      - name: Build
+        run: cargo build --verbose
+      - name: Run lint
+        run: cargo clippy --all-targets --all-features
+      - name: Run fmt check
+        run: cargo fmt -- --check
+
+  miri-test:
     runs-on: ubuntu-latest
 
     steps:
@@ -36,15 +57,54 @@ jobs:
       - name: Install nextest
         uses: taiki-e/install-action@nextest
 
-      - name: Build
-        run: cargo build --verbose
-      - name: Run tests
-        run: cargo test --verbose
-
       - name: Run Miri test
         run: cargo +nightly miri nextest run --verbose
+  
+  upload-test-artifacts:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            target/
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
 
-      - name: Run lint
-        run: cargo clippy --all-targets --all-features
-      - name: Run fmt check
-        run: cargo fmt -- --check
+      - name: Install nextest
+        uses: taiki-e/install-action@nextest
+        
+      - name: Archive tests
+        run: cargo nextest archive --archive-file nextest-archive.tar.zst
+      - name: Upload archive to workflow
+        uses: actions/upload-artifact@v4
+        with:
+          name: nextest-archive
+          path: nextest-archive.tar.zst
+
+  run-tests-partitioned:
+    name: Run tests with partitioning
+    runs-on: ubuntu-latest
+    needs: upload-test-artifacts
+    strategy:
+      matrix:
+        partition: [1, 2, 3]
+    steps:
+      - uses: actions/checkout@v4
+      # Create ~/.cargo/bin as required by the install action.
+      - run: mkdir -p ~/.cargo/bin
+      - name: Install nextest
+        uses: taiki-e/install-action@nextest
+      - name: Download archive
+        uses: actions/download-artifact@v4
+        with:
+          name: nextest-archive
+      - name: Run tests
+        run: |
+          ~/.cargo/bin/cargo-nextest nextest run --archive-file nextest-archive.tar.zst \
+            --partition count:${{ matrix.partition }}/3
+
