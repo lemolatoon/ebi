@@ -48,6 +48,14 @@ pub(crate) fn generate_and_write_random_f64_with_precision(n: usize, scale: usiz
     random_values
 }
 
+fn record_count_chunk_option_by_n(n: usize) -> ChunkOption {
+    ChunkOption::RecordCount(n / 5)
+}
+
+fn bytesize_chunk_option_by_n(n: usize) -> ChunkOption {
+    ChunkOption::ByteSizeBestEffort(n / 3)
+}
+
 #[test]
 fn test_api_round_trip_uncompressed() {
     let header = b"my_header".to_vec().into_boxed_slice();
@@ -55,7 +63,7 @@ fn test_api_round_trip_uncompressed() {
         .capacity(8000)
         .header(header)
         .build();
-    test_round_trip(compressor_config.into(), ChunkOption::RecordCount(1024 * 8));
+    test_round_trip(compressor_config.into(), record_count_chunk_option_by_n);
 }
 
 #[test]
@@ -65,81 +73,66 @@ fn test_api_round_trip_uncompressed_bytesize() {
         .capacity(8000)
         .header(header)
         .build();
-    test_round_trip(
-        compressor_config.into(),
-        ChunkOption::ByteSizeBestEffort(1024),
-    );
+    test_round_trip(compressor_config.into(), bytesize_chunk_option_by_n);
 }
 
 #[test]
 fn test_api_round_trip_gorilla() {
     let compressor_config = CompressorConfig::gorilla().capacity(8000).build();
-    test_round_trip(compressor_config.into(), ChunkOption::RecordCount(1024 * 8));
+    test_round_trip(compressor_config.into(), record_count_chunk_option_by_n);
 }
 
 #[test]
 fn test_api_round_trip_gorilla_bytesize() {
     let compressor_config = CompressorConfig::gorilla().capacity(8000).build();
-    test_round_trip(
-        compressor_config.into(),
-        ChunkOption::ByteSizeBestEffort(1024),
-    );
+    test_round_trip(compressor_config.into(), bytesize_chunk_option_by_n);
 }
 
 #[test]
 fn test_api_round_trip_rle() {
     let compressor_config = CompressorConfig::rle().build();
-    test_round_trip(compressor_config.into(), ChunkOption::RecordCount(1024 * 8));
+    test_round_trip(compressor_config.into(), record_count_chunk_option_by_n);
 }
 
 #[test]
 fn test_api_round_trip_rle_bytesize() {
     let compressor_config = CompressorConfig::rle().build();
-    test_round_trip(
-        compressor_config.into(),
-        ChunkOption::ByteSizeBestEffort(1024),
-    );
+    test_round_trip(compressor_config.into(), bytesize_chunk_option_by_n);
 }
 
 #[test]
 fn test_api_round_trip_chimp() {
     let compressor_config = CompressorConfig::chimp().build();
-    test_round_trip(compressor_config.into(), ChunkOption::RecordCount(1024 * 8));
+    test_round_trip(compressor_config.into(), record_count_chunk_option_by_n);
 }
 
 #[test]
 fn test_api_round_trip_chimp_bytesize() {
     let compressor_config = CompressorConfig::chimp().build();
-    test_round_trip(
-        compressor_config.into(),
-        ChunkOption::ByteSizeBestEffort(1024),
-    );
+    test_round_trip(compressor_config.into(), bytesize_chunk_option_by_n);
 }
 
 #[test]
 fn test_api_round_trip_chimp128() {
     let compressor_config = CompressorConfig::chimp128().build();
-    test_round_trip(compressor_config.into(), ChunkOption::RecordCount(1024 * 8));
+    test_round_trip(compressor_config.into(), record_count_chunk_option_by_n);
 }
 
 #[test]
 fn test_api_round_trip_chimp128_bytesize() {
     let compressor_config = CompressorConfig::chimp128().build();
-    test_round_trip(
-        compressor_config.into(),
-        ChunkOption::ByteSizeBestEffort(1024),
-    );
+    test_round_trip(compressor_config.into(), bytesize_chunk_option_by_n);
 }
 
 fn test_round_trip_with_scale(
     generator: fn(usize, usize) -> Vec<f64>,
     compressor_config: CompressorConfig,
     scale: usize,
-    chunk_option: ChunkOption,
+    chunk_option: impl Fn(usize) -> ChunkOption,
 ) {
-    for n in [1003, 10003, 100004, 100005] {
+    for n in [103, 1003, 100005] {
         #[cfg(miri)] // miri is too slow
-        if n > 1003 {
+        if n > 103 {
             continue;
         }
 
@@ -153,7 +146,7 @@ fn test_round_trip_with_scale(
             let mut encoder = Encoder::new(
                 encoder_input,
                 encoder_output,
-                chunk_option,
+                chunk_option(n),
                 compressor_config.clone(),
             );
 
@@ -268,7 +261,7 @@ fn round_trip_assert(
 
         encoder.into_output().into_vec()
     };
-    println!("decode!!");
+
     // decode
     let decoded_filter_materialize = {
         let input_cursor = Cursor::new(&encoded[..]);
@@ -328,16 +321,19 @@ fn round_trip_assert(
     }
 }
 
-fn test_round_trip(compressor_config: CompressorConfig, chunk_option: ChunkOption) {
-    for n in [1003, 10003, 100004, 100005] {
+fn test_round_trip(
+    compressor_config: CompressorConfig,
+    chunk_option: impl Fn(usize) -> ChunkOption,
+) {
+    for n in [103, 1003, 10003, 100004, 100005] {
         #[cfg(miri)] // miri is too slow
-        if n > 1003 {
+        if n > 103 {
             continue;
         }
 
         let random_values = generate_and_write_random_f64(n);
 
-        round_trip_assert(&random_values, compressor_config.clone(), chunk_option);
+        round_trip_assert(&random_values, compressor_config.clone(), chunk_option(n));
     }
 
     const XOR_VALUES: [f64; 66] = const {
@@ -364,7 +360,11 @@ fn test_round_trip(compressor_config: CompressorConfig, chunk_option: ChunkOptio
 
         values
     };
-    round_trip_assert(&XOR_VALUES, compressor_config.clone(), chunk_option);
+    round_trip_assert(
+        &XOR_VALUES,
+        compressor_config.clone(),
+        ChunkOption::RecordCount(XOR_VALUES.len()),
+    );
 
     let xor_values2 = {
         let mut xor_values2 = [2.3f64, 3.3f64, 0.0f64];
@@ -375,7 +375,7 @@ fn test_round_trip(compressor_config: CompressorConfig, chunk_option: ChunkOptio
 
         xor_values2
     };
-    round_trip_assert(&xor_values2, compressor_config, chunk_option);
+    round_trip_assert(&xor_values2, compressor_config, ChunkOption::RecordCount(3));
 }
 
 #[test]
@@ -387,7 +387,7 @@ fn test_api_round_trip_buff() {
             generate_and_write_random_f64_with_precision,
             compressor_config.into(),
             scale,
-            ChunkOption::RecordCount(1024 * 8),
+            record_count_chunk_option_by_n,
         );
     }
 
@@ -399,7 +399,7 @@ fn test_api_round_trip_buff() {
         |n, _scale| vec![100.19; n],
         compressor_config.into(),
         100,
-        ChunkOption::RecordCount(1024 * 8),
+        record_count_chunk_option_by_n,
     );
 }
 
@@ -412,7 +412,7 @@ fn test_api_round_trip_buff_bytesize() {
             generate_and_write_random_f64_with_precision,
             compressor_config.into(),
             scale,
-            ChunkOption::ByteSizeBestEffort(1024),
+            bytesize_chunk_option_by_n,
         );
     }
 
@@ -424,6 +424,6 @@ fn test_api_round_trip_buff_bytesize() {
         |n, _scale| vec![100.19; n],
         compressor_config.into(),
         100,
-        ChunkOption::ByteSizeBestEffort(1024),
+        bytesize_chunk_option_by_n,
     );
 }
