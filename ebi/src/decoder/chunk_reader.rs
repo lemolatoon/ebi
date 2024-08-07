@@ -147,6 +147,7 @@ impl<R: Read> GeneralChunkReaderInner<R> {
             CompressionScheme::Chimp128 => {
                 GeneralChunkReaderInner::Chimp128(chimp_n::Chimp128Reader::new(handle, reader))
             }
+            CompressionScheme::ElfOnChimp => todo!(),
         })
     }
 }

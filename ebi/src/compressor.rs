@@ -56,7 +56,7 @@ pub trait RewindableCompressor: AppendableCompressor {
     fn rewind(&mut self, n: usize) -> bool;
 }
 
-#[derive(Debug, Clone, PartialEq, PartialOrd)]
+#[derive(QuickImpl, Debug, Clone, PartialEq, PartialOrd)]
 pub enum GenericCompressor {
     Uncompressed(UncompressedCompressor),
     RLE(RunLengthCompressor),
@@ -64,6 +64,7 @@ pub enum GenericCompressor {
     BUFF(BUFFCompressor),
     Chimp(ChimpCompressor),
     Chimp128(Chimp128Compressor),
+    ElfOnChimp(elf::chimp::ElfCompressor),
 }
 
 macro_rules! impl_generic_compressor {
@@ -117,6 +118,7 @@ impl GenericCompressor {
             GenericCompressor::BUFF(_) => format::CompressionScheme::BUFF,
             GenericCompressor::Chimp(_) => format::CompressionScheme::Chimp,
             GenericCompressor::Chimp128(_) => format::CompressionScheme::Chimp128,
+            GenericCompressor::ElfOnChimp(_) => todo!(),
         }
     }
 }
@@ -128,7 +130,8 @@ impl_generic_compressor!(
     Gorilla,
     BUFF,
     Chimp,
-    Chimp128
+    Chimp128,
+    ElfOnChimp
 );
 
 #[derive(QuickImpl, Debug, Clone)]
@@ -145,6 +148,8 @@ pub enum CompressorConfig {
     Chimp(ChimpCompressorConfig),
     #[quick_impl(impl From)]
     Chimp128(Chimp128CompressorConfig),
+    #[quick_impl(impl From)]
+    ElfOnChimp(elf::chimp::ElfCompressorConfig),
 }
 
 impl CompressorConfig {
@@ -170,6 +175,7 @@ impl CompressorConfig {
             CompressorConfig::Chimp128(c) => {
                 GenericCompressor::Chimp128(Chimp128Compressor::with_capacity(c.capacity.0))
             }
+            CompressorConfig::ElfOnChimp(c) => GenericCompressor::ElfOnChimp(c.into()),
         }
     }
 
@@ -187,6 +193,7 @@ impl From<&CompressorConfig> for CompressionScheme {
             CompressorConfig::BUFF(_) => Self::BUFF,
             CompressorConfig::Chimp(_) => Self::Chimp,
             CompressorConfig::Chimp128(_) => Self::Chimp128,
+            CompressorConfig::ElfOnChimp(_) => Self::ElfOnChimp,
         }
     }
 }
@@ -214,6 +221,10 @@ impl CompressorConfig {
 
     pub fn chimp128() -> chimp_n::Chimp128CompressorConfigBuilder {
         chimp_n::Chimp128CompressorConfigBuilder::default()
+    }
+
+    pub fn elf_on_chimp() -> elf::chimp::ElfCompressorConfigBuilder {
+        elf::chimp::ElfCompressorConfigBuilder::default()
     }
 }
 
@@ -426,6 +437,20 @@ mod tests {
     #[test]
     fn test_chimp128() {
         let config: CompressorConfig = CompressorConfig::chimp128().build().into();
+        let mut compressor = config.build();
+
+        test_total_bytes_in(&mut compressor);
+        test_total_bytes_buffered(&mut compressor);
+
+        test_reset(&mut compressor);
+
+        test_total_bytes_in(&mut compressor);
+        test_total_bytes_buffered(&mut compressor);
+    }
+
+    #[test]
+    fn test_elf_on_chimp() {
+        let config: CompressorConfig = CompressorConfig::elf_on_chimp().build().into();
         let mut compressor = config.build();
 
         test_total_bytes_in(&mut compressor);
