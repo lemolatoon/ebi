@@ -1,6 +1,7 @@
 pub mod buff;
 pub mod chimp;
 pub mod chimp_n;
+pub mod general_xor;
 pub mod gorilla;
 pub mod run_length;
 pub mod uncompressed;
