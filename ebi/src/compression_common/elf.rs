@@ -1,3 +1,4 @@
+// ceil(index * log_2(10))
 const F: [u32; 21] = [
     0, 4, 7, 10, 14, 17, 20, 24, 27, 30, 34, 37, 40, 44, 47, 50, 54, 57, 60, 64, 67,
 ];
@@ -72,6 +73,9 @@ fn get_significant_count(v: f64, sp: i32, last_beta_star: i32) -> i32 {
     while (temp_i64 as f64) != temp {
         i += 1;
         temp = v * get_10i_p(i as u32);
+        if temp.is_infinite() {
+            return 17;
+        }
         temp_i64 = temp as i64;
     }
 

@@ -1147,6 +1147,12 @@ fn test_chimp128_filter() {
 }
 
 #[test]
+fn test_elf_on_chimp_filter() {
+    let config = CompressorConfig::elf_on_chimp().build();
+    helper::test_query_filter(config, None, None, None, "ElfOnChimp");
+}
+
+#[test]
 fn test_buff_filter() {
     let scale = 100;
     let fractional_part_bits_length = 8;
@@ -1199,6 +1205,12 @@ fn test_chimp128_materialize() {
 }
 
 #[test]
+fn test_elf_on_chimp_materialize() {
+    let config = CompressorConfig::elf_on_chimp().build();
+    helper::test_query_materialize(config, None, "ElfOnChimp");
+}
+
+#[test]
 fn test_buff_materialize() {
     let scale = 10;
     let config = CompressorConfig::buff().scale(scale).build();
@@ -1233,6 +1245,12 @@ fn test_chimp_filter_materialize() {
 fn test_chimp128_filter_materialize() {
     let config = CompressorConfig::chimp128().build();
     helper::test_query_filter_materialize(config, None, None, None, "Chimp128");
+}
+
+#[test]
+fn test_elf_on_chimp_filter_materialize() {
+    let config = CompressorConfig::elf_on_chimp().build();
+    helper::test_query_filter_materialize(config, None, None, None, "ElfOnChimp");
 }
 
 #[test]

@@ -92,13 +92,24 @@ impl<T: XorEncoder> ElfEncoderWrapper<T> {
         } else {
             // C1: v is a normal or subnormal
             let (alpha, beta_star) = elf::get_alpha_and_beta_star(v, self.last_beta_star);
-            let e = (v_bits >> 52) & 0x7ff;
-            let g_alpha = elf::get_f_alpha(alpha) + e as u32 - 1023;
-            let erase_bits = 52 - g_alpha;
-            let mask = u64::MAX << erase_bits;
-            let delta = (!mask) & v_bits;
+            let mut mask = u64::MAX;
+            let mut delta = 0;
+            let mut erase_bits = 0;
 
-            if delta != 0 && erase_bits > 4 {
+            if beta_star < 16 {
+                let e = (v_bits >> 52) & 0x7ff;
+                let g_alpha = elf::get_f_alpha(alpha) + e as u32 - 1023;
+                erase_bits = 52 - g_alpha as i32;
+                if erase_bits > 4 {
+                    mask = u64::MAX << erase_bits;
+                    delta = (!mask) & v_bits;
+                } else {
+                    mask = u64::MAX;
+                    delta = 0;
+                }
+            }
+
+            if beta_star < 16 && erase_bits > 4 && delta != 0 {
                 // C2
                 if beta_star == self.last_beta_star {
                     // case 0

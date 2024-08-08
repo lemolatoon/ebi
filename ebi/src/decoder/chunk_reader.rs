@@ -1,6 +1,7 @@
 pub mod buff;
 pub mod chimp;
 pub mod chimp_n;
+pub mod elf;
 pub mod general_xor;
 pub mod gorilla;
 pub mod run_length;
@@ -120,6 +121,7 @@ pub enum GeneralChunkReaderInner<R: Read> {
     BUFF(buff::BUFFReader<R>),
     Chimp(chimp::ChimpReader<R>),
     Chimp128(chimp_n::Chimp128Reader<R>),
+    ElfOnChimp(elf::chimp::ElfReader<R>),
 }
 
 impl<R: Read> GeneralChunkReaderInner<R> {
@@ -147,7 +149,9 @@ impl<R: Read> GeneralChunkReaderInner<R> {
             CompressionScheme::Chimp128 => {
                 GeneralChunkReaderInner::Chimp128(chimp_n::Chimp128Reader::new(handle, reader))
             }
-            CompressionScheme::ElfOnChimp => todo!(),
+            CompressionScheme::ElfOnChimp => {
+                GeneralChunkReaderInner::ElfOnChimp(elf::chimp::ElfReader::new(handle, reader))
+            }
         })
     }
 }
@@ -161,6 +165,7 @@ impl<R: Read> From<&GeneralChunkReaderInner<R>> for CompressionScheme {
             GeneralChunkReaderInner::BUFF(_) => CompressionScheme::BUFF,
             GeneralChunkReaderInner::Chimp(_) => CompressionScheme::Chimp,
             GeneralChunkReaderInner::Chimp128(_) => CompressionScheme::Chimp128,
+            GeneralChunkReaderInner::ElfOnChimp(_) => CompressionScheme::ElfOnChimp,
         }
     }
 }
@@ -212,6 +217,8 @@ pub enum GeneralDecompressIterator<'a, R: Read> {
     Chimp(chimp::ChimpDecompressIterator<'a, R>),
     #[quick_impl(impl From)]
     Chimp128(chimp_n::Chimp128DecompressIterator<'a, R>),
+    #[quick_impl(impl From)]
+    ElfOnChimp(elf::chimp::ElfDecompressIterator<'a, R>),
 }
 
 impl<'a, R: Read> Iterator for GeneralDecompressIterator<'a, R> {
@@ -225,6 +232,7 @@ impl<'a, R: Read> Iterator for GeneralDecompressIterator<'a, R> {
             GeneralDecompressIterator::BUFF(c) => c.next(),
             GeneralDecompressIterator::Chimp(c) => c.next(),
             GeneralDecompressIterator::Chimp128(c) => c.next(),
+            GeneralDecompressIterator::ElfOnChimp(c) => c.next(),
         }
     }
 
@@ -236,6 +244,7 @@ impl<'a, R: Read> Iterator for GeneralDecompressIterator<'a, R> {
             GeneralDecompressIterator::BUFF(c) => c.size_hint(),
             GeneralDecompressIterator::Chimp(c) => c.size_hint(),
             GeneralDecompressIterator::Chimp128(c) => c.size_hint(),
+            GeneralDecompressIterator::ElfOnChimp(c) => c.size_hint(),
         }
     }
 }
@@ -339,7 +348,8 @@ impl_generic_reader!(
     Gorilla,
     BUFF,
     Chimp,
-    Chimp128
+    Chimp128,
+    ElfOnChimp
 );
 
 #[cfg(test)]
@@ -513,5 +523,10 @@ mod tests {
     #[test]
     fn test_chimp() {
         test_all(CompressorConfig::chimp().build());
+    }
+
+    #[test]
+    fn test_elf_on_chimp() {
+        test_all(CompressorConfig::elf_on_chimp().build());
     }
 }

@@ -113,6 +113,18 @@ fn test_api_round_trip_chimp_bytesize() {
 }
 
 #[test]
+fn test_api_round_trip_elf_on_chimp() {
+    let compressor_config = CompressorConfig::elf_on_chimp().build();
+    test_round_trip(compressor_config.into(), record_count_chunk_option_by_n);
+}
+
+#[test]
+fn test_api_round_trip_elf_on_chimp_bytesize() {
+    let compressor_config = CompressorConfig::elf_on_chimp().build();
+    test_round_trip(compressor_config.into(), bytesize_chunk_option_by_n);
+}
+
+#[test]
 fn test_api_round_trip_chimp128() {
     let compressor_config = CompressorConfig::chimp128().build();
     test_round_trip(compressor_config.into(), record_count_chunk_option_by_n);
