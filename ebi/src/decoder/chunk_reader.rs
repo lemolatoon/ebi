@@ -480,12 +480,12 @@ mod tests {
         );
     }
 
-    macro_rules! test_reader {
+    macro_rules! declare_test_reader {
         ($method:ident) => {
             #[cfg(test)]
             mod $method {
                 #[test]
-                fn test_all() {
+                fn test_reader_consistency() {
                     let config = super::CompressorConfig::$method().build();
                     super::test_all(config);
                 }
@@ -493,13 +493,13 @@ mod tests {
         };
     }
 
-    test_reader!(uncompressed);
-    test_reader!(rle);
-    test_reader!(gorilla);
-    test_reader!(chimp);
-    test_reader!(chimp128);
-    test_reader!(elf_on_chimp);
-    test_reader!(elf);
+    declare_test_reader!(uncompressed);
+    declare_test_reader!(rle);
+    declare_test_reader!(gorilla);
+    declare_test_reader!(chimp);
+    declare_test_reader!(chimp128);
+    declare_test_reader!(elf_on_chimp);
+    declare_test_reader!(elf);
 
     #[test]
     fn test_buff() {

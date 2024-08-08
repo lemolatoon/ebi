@@ -377,14 +377,14 @@ mod tests {
         );
     }
 
-    macro_rules! test_compressor {
+    macro_rules! declare_test_compressor {
         ($method:ident) => {
-            test_compressor!($method, super::CompressorConfig::$method().build());
+            declare_test_compressor!($method, super::CompressorConfig::$method().build());
         };
         ($method:ident, $custom_config:expr) => {
             mod $method {
                 #[test]
-                fn test_all() {
+                fn test_compressor_consistency() {
                     let config: super::CompressorConfig = $custom_config.into();
                     let mut compressor = config.build();
 
@@ -400,12 +400,12 @@ mod tests {
         };
     }
 
-    test_compressor!(uncompressed);
-    test_compressor!(rle);
-    test_compressor!(gorilla);
-    test_compressor!(chimp);
-    test_compressor!(chimp128);
-    test_compressor!(elf_on_chimp);
-    test_compressor!(elf);
-    test_compressor!(buff, super::CompressorConfig::buff().scale(100).build());
+    declare_test_compressor!(uncompressed);
+    declare_test_compressor!(rle);
+    declare_test_compressor!(gorilla);
+    declare_test_compressor!(chimp);
+    declare_test_compressor!(chimp128);
+    declare_test_compressor!(elf_on_chimp);
+    declare_test_compressor!(elf);
+    declare_test_compressor!(buff, super::CompressorConfig::buff().scale(100).build());
 }
