@@ -118,6 +118,8 @@
 //!     // zone_map: ZoneMap
 //! }
 //! ```
+
+use num_enum::TryFromPrimitive;
 pub mod deserialize;
 pub mod native;
 pub mod serialize;
@@ -165,9 +167,9 @@ pub enum ChunkOptionKind {
     ByteSize,
 }
 
+#[derive(TryFromPrimitive, Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 #[repr(u8)]
 #[non_exhaustive]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum CompressionScheme {
     Uncompressed = 0,
     RLE = 1,

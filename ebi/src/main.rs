@@ -50,14 +50,15 @@ fn generate_and_write_random_f64(path: impl AsRef<Path>, n: usize, scale: usize)
 
 fn main() {
     const RECORD_COUNT: usize = 1024 * 16;
-    let scale = 100;
-    generate_and_write_random_f64("uncompressed.bin", RECORD_COUNT * 30 + 3, scale).unwrap();
+    let _scale = 100;
+    // generate_and_write_random_f64("uncompressed.bin", RECORD_COUNT * 30 + 3, scale).unwrap();
     // let compressor = GenericCompressor::Uncompressed(UncompressedCompressor::new(100));
     // let compressor_config = CompressorConfig::rle().build();
     // let compressor_config = CompressorConfig::gorilla().build();
     // let compressor_config = CompressorConfig::buff().scale(scale).build();
     // let compressor_config = CompressorConfig::chimp128().build();
-    let compressor_config = CompressorConfig::elf_on_chimp().build();
+    // let compressor_config = CompressorConfig::elf_on_chimp().build();
+    let compressor_config = CompressorConfig::elf().build();
     // let compressor_config = CompressorConfig::chimp().build();
     let chunk_option = ChunkOption::RecordCount(RECORD_COUNT);
     // let chunk_option = ChunkOption::ByteSizeBestEffort(1024 * 8);
@@ -93,8 +94,8 @@ fn main() {
     // let binding = vec![0.4, 100000000.5, 0.5, 0.6, 0.7, 0.8, 0.9, 0.9, 1.0];
     println!("binding: {:?}", &binding);
     let mut encoder = Encoder::new(
-        // EncoderInput::from_file_with_capacity("uncompressed.bin", 1024 * 16).unwrap(),
-        EncoderInput::from_f64_slice(binding),
+        EncoderInput::from_file_with_capacity("uncompressed.bin", 1024 * 16).unwrap(),
+        // EncoderInput::from_f64_slice(binding),
         EncoderOutput::from_file("compressed.bin").unwrap(),
         chunk_option,
         compressor_config,
@@ -121,14 +122,14 @@ fn main() {
         .unwrap()
         .read_to_end(&mut input_bytes)
         .unwrap();
-    let _input_floats: Vec<f64> = input_bytes
+    let input_floats: Vec<f64> = input_bytes
         .chunks_exact(8)
         .map(|b| {
             f64::from_le_bytes(b.try_into().unwrap())
             // (fp * scale as f64).round() / scale as f64
         })
         .collect();
-    let input_floats = binding;
+    // let input_floats = binding;
 
     let output_bytes = output.into_writer().into_inner();
     let output_floats: Vec<f64> = output_bytes
@@ -139,7 +140,7 @@ fn main() {
         })
         .collect();
 
-    // assert_eq!(input_floats.len(), output_floats.len());
+    assert_eq!(input_floats.len(), output_floats.len());
 
     assert_eq!(&input_floats[..], &output_floats[..]);
 }

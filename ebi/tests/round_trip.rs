@@ -136,6 +136,18 @@ fn test_api_round_trip_chimp128_bytesize() {
     test_round_trip(compressor_config.into(), bytesize_chunk_option_by_n);
 }
 
+#[test]
+fn test_api_round_trip_elf() {
+    let compressor_config = CompressorConfig::elf().build();
+    test_round_trip(compressor_config.into(), record_count_chunk_option_by_n);
+}
+
+#[test]
+fn test_api_round_trip_elf_bytesize() {
+    let compressor_config = CompressorConfig::elf().build();
+    test_round_trip(compressor_config.into(), bytesize_chunk_option_by_n);
+}
+
 fn test_round_trip_with_scale(
     generator: fn(usize, usize) -> Vec<f64>,
     compressor_config: CompressorConfig,
