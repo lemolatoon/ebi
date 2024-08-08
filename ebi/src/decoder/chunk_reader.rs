@@ -1,12 +1,15 @@
 pub mod buff;
 pub mod chimp;
 pub mod chimp_n;
+pub mod elf;
+pub mod general_xor;
 pub mod gorilla;
 pub mod run_length;
 pub mod uncompressed;
 
 use std::io::{self, Read, Write};
 
+use iter_enum::Iterator;
 use quick_impl::QuickImpl;
 use roaring::RoaringBitmap;
 
@@ -119,6 +122,8 @@ pub enum GeneralChunkReaderInner<R: Read> {
     BUFF(buff::BUFFReader<R>),
     Chimp(chimp::ChimpReader<R>),
     Chimp128(chimp_n::Chimp128Reader<R>),
+    ElfOnChimp(elf::on_chimp::ElfReader<R>),
+    Elf(elf::ElfReader<R>),
 }
 
 impl<R: Read> GeneralChunkReaderInner<R> {
@@ -146,6 +151,12 @@ impl<R: Read> GeneralChunkReaderInner<R> {
             CompressionScheme::Chimp128 => {
                 GeneralChunkReaderInner::Chimp128(chimp_n::Chimp128Reader::new(handle, reader))
             }
+            CompressionScheme::ElfOnChimp => {
+                GeneralChunkReaderInner::ElfOnChimp(elf::on_chimp::ElfReader::new(handle, reader))
+            }
+            CompressionScheme::Elf => {
+                GeneralChunkReaderInner::Elf(elf::ElfReader::new(handle, reader))
+            }
         })
     }
 }
@@ -159,6 +170,8 @@ impl<R: Read> From<&GeneralChunkReaderInner<R>> for CompressionScheme {
             GeneralChunkReaderInner::BUFF(_) => CompressionScheme::BUFF,
             GeneralChunkReaderInner::Chimp(_) => CompressionScheme::Chimp,
             GeneralChunkReaderInner::Chimp128(_) => CompressionScheme::Chimp128,
+            GeneralChunkReaderInner::ElfOnChimp(_) => CompressionScheme::ElfOnChimp,
+            GeneralChunkReaderInner::Elf(_) => CompressionScheme::Elf,
         }
     }
 }
@@ -196,46 +209,24 @@ pub trait Reader {
     fn read_header(&mut self) -> &Self::NativeHeader;
 }
 
-#[derive(QuickImpl)]
+#[derive(QuickImpl, Iterator)]
 pub enum GeneralDecompressIterator<'a, R: Read> {
     #[quick_impl(impl From)]
-    Uncompressed(uncompressed::UncompressedIterator<'a, R>),
-    #[quick_impl(impl From)]
-    RLE(run_length::RunLengthIterator<'a, R>),
+    BUFF(buff::BUFFIterator<'a>),
     #[quick_impl(impl From)]
     Gorilla(gorilla::GorillaIterator<'a, R>),
     #[quick_impl(impl From)]
-    BUFF(buff::BUFFIterator<'a>),
+    RLE(run_length::RunLengthIterator<'a, R>),
+    #[quick_impl(impl From)]
+    Uncompressed(uncompressed::UncompressedIterator<'a, R>),
     #[quick_impl(impl From)]
     Chimp(chimp::ChimpDecompressIterator<'a, R>),
     #[quick_impl(impl From)]
     Chimp128(chimp_n::Chimp128DecompressIterator<'a, R>),
-}
-
-impl<'a, R: Read> Iterator for GeneralDecompressIterator<'a, R> {
-    type Item = io::Result<f64>;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        match self {
-            GeneralDecompressIterator::Uncompressed(c) => c.next(),
-            GeneralDecompressIterator::RLE(c) => c.next(),
-            GeneralDecompressIterator::Gorilla(c) => c.next(),
-            GeneralDecompressIterator::BUFF(c) => c.next(),
-            GeneralDecompressIterator::Chimp(c) => c.next(),
-            GeneralDecompressIterator::Chimp128(c) => c.next(),
-        }
-    }
-
-    fn size_hint(&self) -> (usize, Option<usize>) {
-        match self {
-            GeneralDecompressIterator::Uncompressed(c) => c.size_hint(),
-            GeneralDecompressIterator::RLE(c) => c.size_hint(),
-            GeneralDecompressIterator::Gorilla(c) => c.size_hint(),
-            GeneralDecompressIterator::BUFF(c) => c.size_hint(),
-            GeneralDecompressIterator::Chimp(c) => c.size_hint(),
-            GeneralDecompressIterator::Chimp128(c) => c.size_hint(),
-        }
-    }
+    #[quick_impl(impl From)]
+    ElfOnChimp(elf::on_chimp::ElfDecompressIterator<'a, R>),
+    #[quick_impl(impl From)]
+    Elf(elf::ElfDecompressIterator<'a, R>),
 }
 
 macro_rules! impl_generic_reader {
@@ -337,7 +328,9 @@ impl_generic_reader!(
     Gorilla,
     BUFF,
     Chimp,
-    Chimp128
+    Chimp128,
+    ElfOnChimp,
+    Elf
 );
 
 #[cfg(test)]
@@ -511,5 +504,15 @@ mod tests {
     #[test]
     fn test_chimp() {
         test_all(CompressorConfig::chimp().build());
+    }
+
+    #[test]
+    fn test_elf_on_chimp() {
+        test_all(CompressorConfig::elf_on_chimp().build());
+    }
+
+    #[test]
+    fn test_elf() {
+        test_all(CompressorConfig::elf().build());
     }
 }

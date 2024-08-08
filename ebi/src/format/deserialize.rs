@@ -3,6 +3,7 @@ use std::{
     mem::size_of,
 };
 
+use num_enum::TryFromPrimitive;
 use thiserror::Error;
 
 use crate::decoder;
@@ -188,22 +189,8 @@ impl TryFromLeBytes for FieldType {
 impl TryFromLeBytes for CompressionScheme {
     type Error = ConversionError;
     fn try_from_le_bytes(bytes: &[u8]) -> Result<Self, Self::Error> {
-        const UNCOMPRESSED: u8 = CompressionScheme::Uncompressed as u8;
-        const RLE: u8 = CompressionScheme::RLE as u8;
-        const GORILLA: u8 = CompressionScheme::Gorilla as u8;
-        const BUFF: u8 = CompressionScheme::BUFF as u8;
-        const CHIMP: u8 = CompressionScheme::Chimp as u8;
-        const CHIMP128: u8 = CompressionScheme::Chimp128 as u8;
-
-        match bytes[0] {
-            UNCOMPRESSED => Ok(Self::Uncompressed),
-            RLE => Ok(Self::RLE),
-            GORILLA => Ok(Self::Gorilla),
-            BUFF => Ok(Self::BUFF),
-            CHIMP => Ok(Self::Chimp),
-            CHIMP128 => Ok(Self::Chimp128),
-            _ => Err(ConversionError::CompressionScheme),
-        }
+        CompressionScheme::try_from_primitive(bytes[0])
+            .map_err(|_| ConversionError::CompressionScheme)
     }
 }
 
