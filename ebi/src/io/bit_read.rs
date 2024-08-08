@@ -291,9 +291,8 @@ impl<R: Read> BitRead for BitReader<R> {
 
 #[cfg(test)]
 mod tests {
-    use tsz::stream::Write as _;
 
-    use crate::io::buffered_bit_writer::BufferedWriterExt;
+    use crate::io::bit_write::{BitWrite as _, BufferedBitWriter};
 
     use super::*;
 
@@ -465,7 +464,7 @@ mod tests {
     #[allow(clippy::bool_assert_comparison)]
     #[allow(clippy::unusual_byte_groupings)]
     fn read_many_bits2() {
-        let mut writer = BufferedWriterExt::new();
+        let mut writer = BufferedBitWriter::new();
         writer.write_bits(0b0101_010, 63);
         writer.write_bits(0b1_0111, 5);
         writer.write_bits(0b111_1010, 7);

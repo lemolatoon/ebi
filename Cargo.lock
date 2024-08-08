@@ -299,7 +299,6 @@ dependencies = [
  "rand_distr",
  "roaring",
  "thiserror",
- "tsz",
 ]
 
 [[package]]
@@ -760,15 +759,6 @@ dependencies = [
  "indexmap",
  "toml_datetime",
  "winnow",
-]
-
-[[package]]
-name = "tsz"
-version = "0.1.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "789624517ed689bfd295209450db6c3b15dadcd576ca30eace4619fa7cc82d37"
-dependencies = [
- "serde",
 ]
 
 [[package]]
