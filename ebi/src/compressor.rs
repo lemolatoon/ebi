@@ -325,7 +325,7 @@ mod tests {
 
     use crate::compressor::Compressor;
 
-    use super::{gorilla::GorillaCompressor, CompressorConfig, GenericCompressor};
+    use super::{CompressorConfig, GenericCompressor};
 
     fn test_total_bytes_in(compressor: &mut GenericCompressor) {
         let floats: Vec<f64> = (0..10).map(|x| (x / 2) as f64).collect();
@@ -377,113 +377,35 @@ mod tests {
         );
     }
 
-    #[test]
-    fn test_uncompressed() {
-        let mut compressor =
-            GenericCompressor::Uncompressed(super::uncompressed::UncompressedCompressor::new(10));
+    macro_rules! test_compressor {
+        ($method:ident) => {
+            test_compressor!($method, super::CompressorConfig::$method().build());
+        };
+        ($method:ident, $custom_config:expr) => {
+            mod $method {
+                #[test]
+                fn test_all() {
+                    let config: super::CompressorConfig = $custom_config.into();
+                    let mut compressor = config.build();
 
-        test_total_bytes_in(&mut compressor);
-        test_total_bytes_buffered(&mut compressor);
+                    super::test_total_bytes_in(&mut compressor);
+                    super::test_total_bytes_buffered(&mut compressor);
 
-        test_reset(&mut compressor);
+                    super::test_reset(&mut compressor);
 
-        test_total_bytes_in(&mut compressor);
-        test_total_bytes_buffered(&mut compressor);
+                    super::test_total_bytes_in(&mut compressor);
+                    super::test_total_bytes_buffered(&mut compressor);
+                }
+            }
+        };
     }
 
-    #[test]
-    fn test_rle() {
-        let mut compressor = GenericCompressor::RLE(super::run_length::RunLengthCompressor::new());
-
-        test_total_bytes_in(&mut compressor);
-        test_total_bytes_buffered(&mut compressor);
-
-        test_reset(&mut compressor);
-
-        test_total_bytes_in(&mut compressor);
-        test_total_bytes_buffered(&mut compressor);
-    }
-
-    #[test]
-    fn test_gorilla() {
-        let mut compressor = GenericCompressor::Gorilla(GorillaCompressor::new());
-
-        test_total_bytes_in(&mut compressor);
-        test_total_bytes_buffered(&mut compressor);
-
-        test_reset(&mut compressor);
-
-        test_total_bytes_in(&mut compressor);
-        test_total_bytes_buffered(&mut compressor);
-    }
-
-    #[test]
-    fn test_buff() {
-        let config: CompressorConfig = CompressorConfig::buff().build().into();
-        let mut compressor = config.build();
-
-        test_total_bytes_in(&mut compressor);
-        test_total_bytes_buffered(&mut compressor);
-
-        test_reset(&mut compressor);
-
-        test_total_bytes_in(&mut compressor);
-        test_total_bytes_buffered(&mut compressor);
-    }
-
-    #[test]
-    fn test_chimp() {
-        let config: CompressorConfig = CompressorConfig::chimp().build().into();
-        let mut compressor = config.build();
-
-        test_total_bytes_in(&mut compressor);
-        test_total_bytes_buffered(&mut compressor);
-
-        test_reset(&mut compressor);
-
-        test_total_bytes_in(&mut compressor);
-        test_total_bytes_buffered(&mut compressor);
-    }
-
-    #[test]
-    fn test_chimp128() {
-        let config: CompressorConfig = CompressorConfig::chimp128().build().into();
-        let mut compressor = config.build();
-
-        test_total_bytes_in(&mut compressor);
-        test_total_bytes_buffered(&mut compressor);
-
-        test_reset(&mut compressor);
-
-        test_total_bytes_in(&mut compressor);
-        test_total_bytes_buffered(&mut compressor);
-    }
-
-    #[test]
-    fn test_elf_on_chimp() {
-        let config: CompressorConfig = CompressorConfig::elf_on_chimp().build().into();
-        let mut compressor = config.build();
-
-        test_total_bytes_in(&mut compressor);
-        test_total_bytes_buffered(&mut compressor);
-
-        test_reset(&mut compressor);
-
-        test_total_bytes_in(&mut compressor);
-        test_total_bytes_buffered(&mut compressor);
-    }
-
-    #[test]
-    fn test_elf() {
-        let config: CompressorConfig = CompressorConfig::elf().build().into();
-        let mut compressor = config.build();
-
-        test_total_bytes_in(&mut compressor);
-        test_total_bytes_buffered(&mut compressor);
-
-        test_reset(&mut compressor);
-
-        test_total_bytes_in(&mut compressor);
-        test_total_bytes_buffered(&mut compressor);
-    }
+    test_compressor!(uncompressed);
+    test_compressor!(rle);
+    test_compressor!(gorilla);
+    test_compressor!(chimp);
+    test_compressor!(chimp128);
+    test_compressor!(elf_on_chimp);
+    test_compressor!(elf);
+    test_compressor!(buff, super::CompressorConfig::buff().scale(100).build());
 }

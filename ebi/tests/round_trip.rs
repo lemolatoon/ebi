@@ -56,97 +56,45 @@ fn bytesize_chunk_option_by_n(n: usize) -> ChunkOption {
     ChunkOption::ByteSizeBestEffort(n / 3)
 }
 
-#[test]
-fn test_api_round_trip_uncompressed() {
+macro_rules! declare_test_api_round_trip {
+    ($compressor_method:ident) => {
+        declare_test_api_round_trip!($compressor_method, {
+            super::CompressorConfig::$compressor_method().build()
+        });
+    };
+    ($compressor_method:ident, $config:expr) => {
+        mod $compressor_method {
+            #[test]
+            fn test_api_round_trip() {
+                let compressor_config = $config;
+                super::test_round_trip(
+                    compressor_config.into(),
+                    super::record_count_chunk_option_by_n,
+                );
+            }
+
+            #[test]
+            fn test_api_round_trip_bytesize() {
+                let compressor_config = $config;
+                super::test_round_trip(compressor_config.into(), super::bytesize_chunk_option_by_n);
+            }
+        }
+    };
+}
+
+declare_test_api_round_trip!(uncompressed, {
     let header = b"my_header".to_vec().into_boxed_slice();
-    let compressor_config = CompressorConfig::uncompressed()
+    super::CompressorConfig::uncompressed()
         .capacity(8000)
         .header(header)
-        .build();
-    test_round_trip(compressor_config.into(), record_count_chunk_option_by_n);
-}
-
-#[test]
-fn test_api_round_trip_uncompressed_bytesize() {
-    let header = b"my_header".to_vec().into_boxed_slice();
-    let compressor_config = CompressorConfig::uncompressed()
-        .capacity(8000)
-        .header(header)
-        .build();
-    test_round_trip(compressor_config.into(), bytesize_chunk_option_by_n);
-}
-
-#[test]
-fn test_api_round_trip_gorilla() {
-    let compressor_config = CompressorConfig::gorilla().capacity(8000).build();
-    test_round_trip(compressor_config.into(), record_count_chunk_option_by_n);
-}
-
-#[test]
-fn test_api_round_trip_gorilla_bytesize() {
-    let compressor_config = CompressorConfig::gorilla().capacity(8000).build();
-    test_round_trip(compressor_config.into(), bytesize_chunk_option_by_n);
-}
-
-#[test]
-fn test_api_round_trip_rle() {
-    let compressor_config = CompressorConfig::rle().build();
-    test_round_trip(compressor_config.into(), record_count_chunk_option_by_n);
-}
-
-#[test]
-fn test_api_round_trip_rle_bytesize() {
-    let compressor_config = CompressorConfig::rle().build();
-    test_round_trip(compressor_config.into(), bytesize_chunk_option_by_n);
-}
-
-#[test]
-fn test_api_round_trip_chimp() {
-    let compressor_config = CompressorConfig::chimp().build();
-    test_round_trip(compressor_config.into(), record_count_chunk_option_by_n);
-}
-
-#[test]
-fn test_api_round_trip_chimp_bytesize() {
-    let compressor_config = CompressorConfig::chimp().build();
-    test_round_trip(compressor_config.into(), bytesize_chunk_option_by_n);
-}
-
-#[test]
-fn test_api_round_trip_elf_on_chimp() {
-    let compressor_config = CompressorConfig::elf_on_chimp().build();
-    test_round_trip(compressor_config.into(), record_count_chunk_option_by_n);
-}
-
-#[test]
-fn test_api_round_trip_elf_on_chimp_bytesize() {
-    let compressor_config = CompressorConfig::elf_on_chimp().build();
-    test_round_trip(compressor_config.into(), bytesize_chunk_option_by_n);
-}
-
-#[test]
-fn test_api_round_trip_chimp128() {
-    let compressor_config = CompressorConfig::chimp128().build();
-    test_round_trip(compressor_config.into(), record_count_chunk_option_by_n);
-}
-
-#[test]
-fn test_api_round_trip_chimp128_bytesize() {
-    let compressor_config = CompressorConfig::chimp128().build();
-    test_round_trip(compressor_config.into(), bytesize_chunk_option_by_n);
-}
-
-#[test]
-fn test_api_round_trip_elf() {
-    let compressor_config = CompressorConfig::elf().build();
-    test_round_trip(compressor_config.into(), record_count_chunk_option_by_n);
-}
-
-#[test]
-fn test_api_round_trip_elf_bytesize() {
-    let compressor_config = CompressorConfig::elf().build();
-    test_round_trip(compressor_config.into(), bytesize_chunk_option_by_n);
-}
+        .build()
+});
+declare_test_api_round_trip!(gorilla);
+declare_test_api_round_trip!(rle);
+declare_test_api_round_trip!(chimp);
+declare_test_api_round_trip!(elf_on_chimp);
+declare_test_api_round_trip!(chimp128);
+declare_test_api_round_trip!(elf);
 
 fn test_round_trip_with_scale(
     generator: fn(usize, usize) -> Vec<f64>,

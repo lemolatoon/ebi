@@ -1116,47 +1116,43 @@ mod helper {
     }
 }
 
-#[test]
-fn test_uncompressed_filter() {
-    let config = CompressorConfig::uncompressed().build();
-    helper::test_query_filter(config, None, None, None, "Uncompressed");
+macro_rules! declare_query_tests {
+    ($method:ident) => {
+        mod $method {
+            #[test]
+            fn test_filter() {
+                let config = super::CompressorConfig::$method().build();
+                super::helper::test_query_filter(config, None, None, None, stringify!($method));
+            }
+
+            #[test]
+            fn test_materialize() {
+                let config = super::CompressorConfig::$method().build();
+                super::helper::test_query_materialize(config, None, stringify!($method));
+            }
+
+            #[test]
+            fn test_filter_materialize() {
+                let config = super::CompressorConfig::$method().build();
+                super::helper::test_query_filter_materialize(
+                    config,
+                    None,
+                    None,
+                    None,
+                    stringify!($method),
+                );
+            }
+        }
+    };
 }
 
-#[test]
-fn test_rle_filter() {
-    let config = CompressorConfig::rle().build();
-    helper::test_query_filter(config, None, None, None, "RLE");
-}
-
-#[test]
-fn test_gorilla_filter() {
-    let config = CompressorConfig::gorilla().build();
-    helper::test_query_filter(config, None, None, None, "Gorilla");
-}
-
-#[test]
-fn test_chimp_filter() {
-    let config = CompressorConfig::chimp().build();
-    helper::test_query_filter(config, None, None, None, "Chimp");
-}
-
-#[test]
-fn test_chimp128_filter() {
-    let config = CompressorConfig::chimp128().build();
-    helper::test_query_filter(config, None, None, None, "Chimp128");
-}
-
-#[test]
-fn test_elf_on_chimp_filter() {
-    let config = CompressorConfig::elf_on_chimp().build();
-    helper::test_query_filter(config, None, None, None, "ElfOnChimp");
-}
-
-#[test]
-fn test_elf_filter() {
-    let config = CompressorConfig::elf().build();
-    helper::test_query_filter(config, None, None, None, "Elf");
-}
+declare_query_tests!(uncompressed);
+declare_query_tests!(rle);
+declare_query_tests!(gorilla);
+declare_query_tests!(chimp);
+declare_query_tests!(chimp128);
+declare_query_tests!(elf_on_chimp);
+declare_query_tests!(elf);
 
 #[test]
 fn test_buff_filter() {
@@ -1181,94 +1177,10 @@ fn test_buff_filter() {
 }
 
 #[test]
-fn test_uncompressed_materialize() {
-    let config = CompressorConfig::uncompressed().build();
-    helper::test_query_materialize(config, None, "Uncompressed");
-}
-
-#[test]
-fn test_rle_materialize() {
-    let config = CompressorConfig::rle().build();
-    helper::test_query_materialize(config, None, "RLE");
-}
-
-#[test]
-fn test_gorilla_materialize() {
-    let config = CompressorConfig::gorilla().build();
-    helper::test_query_materialize(config, None, "Gorilla");
-}
-
-#[test]
-fn test_chimp_materialize() {
-    let config = CompressorConfig::chimp().build();
-    helper::test_query_materialize(config, None, "Chimp");
-}
-
-#[test]
-fn test_chimp128_materialize() {
-    let config = CompressorConfig::chimp128().build();
-    helper::test_query_materialize(config, None, "Chimp128");
-}
-
-#[test]
-fn test_elf_on_chimp_materialize() {
-    let config = CompressorConfig::elf_on_chimp().build();
-    helper::test_query_materialize(config, None, "ElfOnChimp");
-}
-
-#[test]
-fn test_elf_materialize() {
-    let config = CompressorConfig::elf().build();
-    helper::test_query_materialize(config, None, "elf");
-}
-
-#[test]
 fn test_buff_materialize() {
     let scale = 10;
     let config = CompressorConfig::buff().scale(scale).build();
     helper::test_query_materialize(config, Some(scale), "BUFF");
-}
-
-#[test]
-fn test_uncompressed_filter_materialize() {
-    let config = CompressorConfig::uncompressed().build();
-    helper::test_query_filter_materialize(config, None, None, None, "Uncompressed");
-}
-
-#[test]
-fn test_rle_filter_materialize() {
-    let config = CompressorConfig::rle().build();
-    helper::test_query_filter_materialize(config, None, None, None, "RLE");
-}
-
-#[test]
-fn test_gorilla_filter_materialize() {
-    let config = CompressorConfig::gorilla().build();
-    helper::test_query_filter_materialize(config, None, None, None, "Gorilla");
-}
-
-#[test]
-fn test_chimp_filter_materialize() {
-    let config = CompressorConfig::chimp().build();
-    helper::test_query_filter_materialize(config, None, None, None, "Chimp");
-}
-
-#[test]
-fn test_chimp128_filter_materialize() {
-    let config = CompressorConfig::chimp128().build();
-    helper::test_query_filter_materialize(config, None, None, None, "Chimp128");
-}
-
-#[test]
-fn test_elf_on_chimp_filter_materialize() {
-    let config = CompressorConfig::elf_on_chimp().build();
-    helper::test_query_filter_materialize(config, None, None, None, "ElfOnChimp");
-}
-
-#[test]
-fn test_elf_filter_materialize() {
-    let config = CompressorConfig::elf().build();
-    helper::test_query_filter_materialize(config, None, None, None, "Elf");
 }
 
 #[test]

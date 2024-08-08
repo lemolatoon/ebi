@@ -480,39 +480,30 @@ mod tests {
         );
     }
 
-    #[test]
-    fn test_gorilla() {
-        test_all(CompressorConfig::gorilla().build());
+    macro_rules! test_reader {
+        ($method:ident) => {
+            #[cfg(test)]
+            mod $method {
+                #[test]
+                fn test_all() {
+                    let config = super::CompressorConfig::$method().build();
+                    super::test_all(config);
+                }
+            }
+        };
     }
 
-    #[test]
-    fn test_rle() {
-        test_all(CompressorConfig::rle().build());
-    }
-
-    #[test]
-    fn test_uncompressed() {
-        test_all(CompressorConfig::uncompressed().build());
-    }
+    test_reader!(uncompressed);
+    test_reader!(rle);
+    test_reader!(gorilla);
+    test_reader!(chimp);
+    test_reader!(chimp128);
+    test_reader!(elf_on_chimp);
+    test_reader!(elf);
 
     #[test]
     fn test_buff() {
         let scale = 100;
         test_all_with_precision(CompressorConfig::buff().scale(scale).build().into(), scale);
-    }
-
-    #[test]
-    fn test_chimp() {
-        test_all(CompressorConfig::chimp().build());
-    }
-
-    #[test]
-    fn test_elf_on_chimp() {
-        test_all(CompressorConfig::elf_on_chimp().build());
-    }
-
-    #[test]
-    fn test_elf() {
-        test_all(CompressorConfig::elf().build());
     }
 }
