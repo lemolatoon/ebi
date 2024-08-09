@@ -49,22 +49,25 @@ fn generate_and_write_random_f64(path: impl AsRef<Path>, n: usize, scale: usize)
 }
 
 fn main() {
-    const RECORD_COUNT: usize = 1024 * 16;
-    let _scale = 100;
-    // generate_and_write_random_f64("uncompressed.bin", RECORD_COUNT * 30 + 3, scale).unwrap();
+    const RECORD_COUNT: usize = 3;
+    let scale = 100;
+    generate_and_write_random_f64("uncompressed.bin", RECORD_COUNT * 3 + 3, scale).unwrap();
     // let compressor = GenericCompressor::Uncompressed(UncompressedCompressor::new(100));
     // let compressor_config = CompressorConfig::rle().build();
     // let compressor_config = CompressorConfig::gorilla().build();
     // let compressor_config = CompressorConfig::buff().scale(scale).build();
     // let compressor_config = CompressorConfig::chimp128().build();
     // let compressor_config = CompressorConfig::elf_on_chimp().build();
-    let compressor_config = CompressorConfig::elf().build();
+    // let compressor_config = CompressorConfig::elf().build();
     // let compressor_config = CompressorConfig::chimp().build();
-    let chunk_option = ChunkOption::RecordCount(RECORD_COUNT);
+    let compressor_config = CompressorConfig::delta_sprintz()
+        .scale(scale as u32)
+        .build();
+    let chunk_option = ChunkOption::RecordCount(RECORD_COUNT * 10 + 3);
     // let chunk_option = ChunkOption::ByteSizeBestEffort(1024 * 8);
     dbg!(chunk_option);
 
-    const XOR_VALUES: [f64; 66] = const {
+    const _XOR_VALUES: [f64; 66] = const {
         let mut values = [0.0f64; 66];
         values[0] = 3.3;
         values[1] = 3.3;
@@ -88,14 +91,15 @@ fn main() {
 
         values
     };
-    let binding = &XOR_VALUES;
+    // let binding = &XOR_VALUES;
     // let binding = &[3.0, 40000000000000000003.0, 5.0];
     // let binding = &[24903104499507892000.0];
     // let binding = vec![0.4, 100000000.5, 0.5, 0.6, 0.7, 0.8, 0.9, 0.9, 1.0];
-    println!("binding: {:?}", &binding);
+    let binding = &[(i64::MAX / (2 * scale) as i64) as f64];
+    println!("binding: {}", binding[0]);
     let mut encoder = Encoder::new(
-        EncoderInput::from_file_with_capacity("uncompressed.bin", 1024 * 16).unwrap(),
-        // EncoderInput::from_f64_slice(binding),
+        // EncoderInput::from_file_with_capacity("uncompressed.bin", 1024 * 16).unwrap(),
+        EncoderInput::from_f64_slice(binding),
         EncoderOutput::from_file("compressed.bin").unwrap(),
         chunk_option,
         compressor_config,
@@ -122,21 +126,21 @@ fn main() {
         .unwrap()
         .read_to_end(&mut input_bytes)
         .unwrap();
-    let input_floats: Vec<f64> = input_bytes
+    let _input_floats: Vec<f64> = input_bytes
         .chunks_exact(8)
         .map(|b| {
-            f64::from_le_bytes(b.try_into().unwrap())
-            // (fp * scale as f64).round() / scale as f64
+            let fp = f64::from_le_bytes(b.try_into().unwrap());
+            (fp * scale as f64).round() / scale as f64
         })
         .collect();
-    // let input_floats = binding;
+    let input_floats = binding;
 
     let output_bytes = output.into_writer().into_inner();
     let output_floats: Vec<f64> = output_bytes
         .chunks_exact(8)
         .map(|b| {
-            f64::from_le_bytes(b.try_into().unwrap())
-            // (fp * scale as f64).round() / scale as f64
+            let fp = f64::from_le_bytes(b.try_into().unwrap());
+            (fp * scale as f64).round() / scale as f64
         })
         .collect();
 

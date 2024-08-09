@@ -5,6 +5,7 @@ pub mod elf;
 pub mod general_xor;
 pub mod gorilla;
 pub mod run_length;
+pub mod sprintz;
 pub mod uncompressed;
 
 use std::io::{self, Read, Write};
@@ -124,6 +125,7 @@ pub enum GeneralChunkReaderInner<R: Read> {
     Chimp128(chimp_n::Chimp128Reader<R>),
     ElfOnChimp(elf::on_chimp::ElfReader<R>),
     Elf(elf::ElfReader<R>),
+    DeltaSprintz(sprintz::DeltaSprintzReader<R>),
 }
 
 impl<R: Read> GeneralChunkReaderInner<R> {
@@ -157,7 +159,9 @@ impl<R: Read> GeneralChunkReaderInner<R> {
             CompressionScheme::Elf => {
                 GeneralChunkReaderInner::Elf(elf::ElfReader::new(handle, reader))
             }
-            CompressionScheme::Sprintz => todo!(),
+            CompressionScheme::DeltaSprintz => GeneralChunkReaderInner::DeltaSprintz(
+                sprintz::DeltaSprintzReader::new(handle, reader),
+            ),
         })
     }
 }
@@ -173,6 +177,7 @@ impl<R: Read> From<&GeneralChunkReaderInner<R>> for CompressionScheme {
             GeneralChunkReaderInner::Chimp128(_) => CompressionScheme::Chimp128,
             GeneralChunkReaderInner::ElfOnChimp(_) => CompressionScheme::ElfOnChimp,
             GeneralChunkReaderInner::Elf(_) => CompressionScheme::Elf,
+            GeneralChunkReaderInner::DeltaSprintz(_) => CompressionScheme::DeltaSprintz,
         }
     }
 }
@@ -228,6 +233,8 @@ pub enum GeneralDecompressIterator<'a, R: Read> {
     ElfOnChimp(elf::on_chimp::ElfDecompressIterator<'a, R>),
     #[quick_impl(impl From)]
     Elf(elf::ElfDecompressIterator<'a, R>),
+    #[quick_impl(impl From)]
+    DeltaSprintz(sprintz::DeltaSprintzDecompressIterator<'a, R>),
 }
 
 macro_rules! impl_generic_reader {
@@ -331,7 +338,8 @@ impl_generic_reader!(
     Chimp,
     Chimp128,
     ElfOnChimp,
-    Elf
+    Elf,
+    DeltaSprintz
 );
 
 #[cfg(test)]
@@ -501,6 +509,7 @@ mod tests {
     declare_test_reader!(chimp128);
     declare_test_reader!(elf_on_chimp);
     declare_test_reader!(elf);
+    declare_test_reader!(delta_sprintz);
 
     #[test]
     fn test_buff() {

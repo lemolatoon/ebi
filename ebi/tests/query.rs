@@ -1118,22 +1118,25 @@ mod helper {
 
 macro_rules! declare_query_tests {
     ($method:ident) => {
+        declare_query_tests!($method, super::CompressorConfig::$method().build());
+    };
+    ($method:ident, $config:expr) => {
         mod $method {
             #[test]
             fn test_filter() {
-                let config = super::CompressorConfig::$method().build();
+                let config = $config;
                 super::helper::test_query_filter(config, None, None, None, stringify!($method));
             }
 
             #[test]
             fn test_materialize() {
-                let config = super::CompressorConfig::$method().build();
+                let config = $config;
                 super::helper::test_query_materialize(config, None, stringify!($method));
             }
 
             #[test]
             fn test_filter_materialize() {
-                let config = super::CompressorConfig::$method().build();
+                let config = $config;
                 super::helper::test_query_filter_materialize(
                     config,
                     None,
@@ -1153,6 +1156,45 @@ declare_query_tests!(chimp);
 declare_query_tests!(chimp128);
 declare_query_tests!(elf_on_chimp);
 declare_query_tests!(elf);
+
+#[test]
+fn test_delta_sprintz_filter() {
+    let scale = 10;
+    let config = CompressorConfig::delta_sprintz().scale(scale).build();
+    let upper_bound = (i64::MAX / scale as i64) as f64;
+    let lower_bound = (i64::MIN / scale as i64) as f64;
+    helper::test_query_filter(
+        config,
+        Some(lower_bound),
+        Some(upper_bound),
+        Some(scale as usize),
+        "delta_sprintz",
+    );
+}
+
+#[test]
+fn test_delta_sprintz_materialize() {
+    let scale = 10;
+    let config = CompressorConfig::delta_sprintz().scale(scale).build();
+    helper::test_query_materialize(config, Some(scale as usize), "delta_sprintz");
+}
+
+#[test]
+fn test_delta_sprintz_filter_materialize() {
+    let scale = 10;
+
+    let config = CompressorConfig::delta_sprintz().scale(scale).build();
+
+    let upper_bound = (i64::MAX / scale as i64) as f64;
+    let lower_bound = (i64::MIN / scale as i64) as f64;
+    helper::test_query_filter_materialize(
+        config,
+        Some(scale as usize),
+        Some(lower_bound),
+        Some(upper_bound),
+        "delta_sprintz",
+    );
+}
 
 #[test]
 fn test_buff_filter() {

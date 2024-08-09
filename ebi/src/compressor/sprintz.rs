@@ -15,7 +15,7 @@ pub struct DeltaSprintzCompressorImpl<W: BitWrite> {
     w: W,
     /// Used for temporarily store delta_zigzag_encoded quantized floats
     buffer: Vec<u64>,
-    scale: usize,
+    scale: u32,
     total_bytes_in: usize,
 }
 
@@ -24,7 +24,7 @@ pub struct DeltaSprintzCompressorImpl<W: BitWrite> {
 pub struct DeltaSprintzCompressorConfig {
     #[builder(setter(into), default)]
     capacity: Capacity,
-    scale: usize,
+    scale: u32,
 }
 
 impl DeltaSprintzCompressorConfigBuilder {
@@ -43,7 +43,7 @@ impl From<&DeltaSprintzCompressorConfig> for DeltaSprintzCompressorImpl<BitWrite
 }
 
 impl<W: BitWrite> DeltaSprintzCompressorImpl<W> {
-    pub fn new(bit_writer: W, scale: usize) -> Self {
+    pub fn new(bit_writer: W, scale: u32) -> Self {
         Self {
             w: bit_writer,
             buffer: Vec::new(),
@@ -95,7 +95,7 @@ mod delta_impl {
     /// Caller must ensure buffer is empty.
     pub fn delta_sprintz_compress_impl<W: BitWrite>(
         input: &[f64],
-        scale: usize,
+        scale: u32,
         buffer: &mut Vec<u64>,
         mut w: W,
     ) {
@@ -103,14 +103,18 @@ mod delta_impl {
         let quantized = input
             .iter()
             .copied()
-            .map(|fp| (fp * scale as f64).ceil() as i64);
+            .map(|fp| (fp * scale as f64).round() as i64);
         let (initial_number, number_of_bits_needed) = zigzag_delta_num_bits(quantized, buffer);
 
         // write header
         let initial_number_bits = unsafe { mem::transmute::<i64, u64>(initial_number) };
         w.write_bits(initial_number_bits, 64);
+        w.write_bits(scale as u64, 32);
         w.write_byte(number_of_bits_needed);
 
+        if number_of_bits_needed == 0 {
+            return;
+        }
         for v in buffer.iter().copied() {
             w.write_bits(v, number_of_bits_needed as u32);
         }
@@ -164,10 +168,13 @@ mod delta_impl {
 /// use ebi::compressor::sprintz::zigzag;
 /// assert_eq!(zigzag(0), 0);
 /// assert_eq!(zigzag(-1), 1);
+/// assert_eq!(zigzag(2), 4);
 /// assert_eq!(zigzag(-100000), 199999);
+///
+/// assert_eq!(zigzag(i64::MAX as i64 / 2), i64::MAX as u64 - 1);
 /// ```
 #[inline]
-pub fn zigzag(origin: i64) -> u64 {
-    let zzu = (origin << 1) ^ (origin >> 31);
+pub const fn zigzag(origin: i64) -> u64 {
+    let zzu = (origin << 1) ^ (origin >> 63);
     unsafe { mem::transmute::<i64, u64>(zzu) }
 }

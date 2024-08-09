@@ -67,7 +67,7 @@ pub enum GenericCompressor {
     Chimp128(Chimp128Compressor),
     ElfOnChimp(elf::on_chimp::ElfCompressor),
     Elf(elf::ElfCompressor),
-    Sprintz(sprintz::DeltaSprintzCompressor),
+    DeltaSprintz(sprintz::DeltaSprintzCompressor),
 }
 
 macro_rules! impl_generic_compressor {
@@ -131,7 +131,7 @@ impl_generic_compressor!(
     Chimp128,
     ElfOnChimp,
     Elf,
-    Sprintz
+    DeltaSprintz
 );
 
 #[derive(QuickImpl, Debug, Clone)]
@@ -153,7 +153,7 @@ pub enum CompressorConfig {
     #[quick_impl(impl From)]
     Elf(elf::ElfCompressorConfig),
     #[quick_impl(impl From)]
-    Sprintz(sprintz::DeltaSprintzCompressorConfig),
+    DeltaSprintz(sprintz::DeltaSprintzCompressorConfig),
 }
 
 impl CompressorConfig {
@@ -181,7 +181,7 @@ impl CompressorConfig {
             }
             CompressorConfig::ElfOnChimp(c) => GenericCompressor::ElfOnChimp(c.into()),
             CompressorConfig::Elf(c) => GenericCompressor::Elf(c.into()),
-            CompressorConfig::Sprintz(c) => GenericCompressor::Sprintz((&c).into()),
+            CompressorConfig::DeltaSprintz(c) => GenericCompressor::DeltaSprintz((&c).into()),
         }
     }
 
@@ -201,7 +201,7 @@ impl From<&CompressorConfig> for CompressionScheme {
             CompressorConfig::Chimp128(_) => Self::Chimp128,
             CompressorConfig::ElfOnChimp(_) => Self::ElfOnChimp,
             CompressorConfig::Elf(_) => Self::Elf,
-            CompressorConfig::Sprintz(_) => Self::Sprintz,
+            CompressorConfig::DeltaSprintz(_) => Self::DeltaSprintz,
         }
     }
 }
@@ -239,7 +239,7 @@ impl CompressorConfig {
         elf::ElfCompressorConfigBuilder::default()
     }
 
-    pub fn sprintz() -> sprintz::DeltaSprintzCompressorConfigBuilder {
+    pub fn delta_sprintz() -> sprintz::DeltaSprintzCompressorConfigBuilder {
         sprintz::DeltaSprintzCompressorConfigBuilder::default()
     }
 }
@@ -412,6 +412,6 @@ mod tests {
     declare_test_compressor!(chimp128);
     declare_test_compressor!(elf_on_chimp);
     declare_test_compressor!(elf);
-    declare_test_compressor!(sprintz);
+    declare_test_compressor!(delta_sprintz);
     declare_test_compressor!(buff, super::CompressorConfig::buff().scale(100).build());
 }
