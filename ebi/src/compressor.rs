@@ -17,6 +17,7 @@ pub mod elf;
 pub mod general_xor;
 pub mod gorilla;
 pub mod run_length;
+pub mod sprintz;
 pub mod uncompressed;
 
 const MAX_BUFFERS: usize = 5;
@@ -66,6 +67,7 @@ pub enum GenericCompressor {
     Chimp128(Chimp128Compressor),
     ElfOnChimp(elf::on_chimp::ElfCompressor),
     Elf(elf::ElfCompressor),
+    Sprintz(sprintz::DeltaSprintzCompressor),
 }
 
 macro_rules! impl_generic_compressor {
@@ -107,22 +109,16 @@ macro_rules! impl_generic_compressor {
                 }
             }
         }
-    };
-}
 
-impl GenericCompressor {
-    pub fn compression_scheme(&self) -> format::CompressionScheme {
-        match self {
-            GenericCompressor::Uncompressed(_) => format::CompressionScheme::Uncompressed,
-            GenericCompressor::RLE(_) => format::CompressionScheme::RLE,
-            GenericCompressor::Gorilla(_) => format::CompressionScheme::Gorilla,
-            GenericCompressor::BUFF(_) => format::CompressionScheme::BUFF,
-            GenericCompressor::Chimp(_) => format::CompressionScheme::Chimp,
-            GenericCompressor::Chimp128(_) => format::CompressionScheme::Chimp128,
-            GenericCompressor::ElfOnChimp(_) => format::CompressionScheme::ElfOnChimp,
-            GenericCompressor::Elf(_) => format::CompressionScheme::Elf,
+        impl $enum_name {
+            pub fn compression_scheme(&self) -> format::CompressionScheme {
+                match self {
+                    $( $enum_name::$variant(_c) => format::CompressionScheme::$variant, )*
+                }
+            }
         }
-    }
+
+    };
 }
 
 impl_generic_compressor!(
@@ -134,7 +130,8 @@ impl_generic_compressor!(
     Chimp,
     Chimp128,
     ElfOnChimp,
-    Elf
+    Elf,
+    Sprintz
 );
 
 #[derive(QuickImpl, Debug, Clone)]
@@ -155,6 +152,8 @@ pub enum CompressorConfig {
     ElfOnChimp(elf::on_chimp::ElfCompressorConfig),
     #[quick_impl(impl From)]
     Elf(elf::ElfCompressorConfig),
+    #[quick_impl(impl From)]
+    Sprintz(sprintz::DeltaSprintzCompressorConfig),
 }
 
 impl CompressorConfig {
@@ -182,6 +181,7 @@ impl CompressorConfig {
             }
             CompressorConfig::ElfOnChimp(c) => GenericCompressor::ElfOnChimp(c.into()),
             CompressorConfig::Elf(c) => GenericCompressor::Elf(c.into()),
+            CompressorConfig::Sprintz(c) => GenericCompressor::Sprintz((&c).into()),
         }
     }
 
@@ -201,6 +201,7 @@ impl From<&CompressorConfig> for CompressionScheme {
             CompressorConfig::Chimp128(_) => Self::Chimp128,
             CompressorConfig::ElfOnChimp(_) => Self::ElfOnChimp,
             CompressorConfig::Elf(_) => Self::Elf,
+            CompressorConfig::Sprintz(_) => Self::Sprintz,
         }
     }
 }
@@ -236,6 +237,10 @@ impl CompressorConfig {
 
     pub fn elf() -> elf::ElfCompressorConfigBuilder {
         elf::ElfCompressorConfigBuilder::default()
+    }
+
+    pub fn sprintz() -> sprintz::DeltaSprintzCompressorConfigBuilder {
+        sprintz::DeltaSprintzCompressorConfigBuilder::default()
     }
 }
 
@@ -407,5 +412,6 @@ mod tests {
     declare_test_compressor!(chimp128);
     declare_test_compressor!(elf_on_chimp);
     declare_test_compressor!(elf);
+    declare_test_compressor!(sprintz);
     declare_test_compressor!(buff, super::CompressorConfig::buff().scale(100).build());
 }

@@ -157,6 +157,7 @@ impl<R: Read> GeneralChunkReaderInner<R> {
             CompressionScheme::Elf => {
                 GeneralChunkReaderInner::Elf(elf::ElfReader::new(handle, reader))
             }
+            CompressionScheme::Sprintz => todo!(),
         })
     }
 }
