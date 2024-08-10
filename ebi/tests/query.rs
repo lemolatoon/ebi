@@ -170,6 +170,8 @@ mod helper {
             "[{test_name}]: Filter materialize result length mismatch"
         );
 
+        println!("materialized: {:?}", materialized);
+        println!("expected: {:?}", expected);
         assert_eq!(
             materialized, expected,
             "[{test_name}]: Filter materialize result mismatch"

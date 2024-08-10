@@ -1,7 +1,13 @@
 use std::io::{self, Read};
 
+use roaring::RoaringBitmap;
+
 use crate::{
-    decoder::{query::QueryExecutor, FileMetadataLike, GeneralChunkHandle},
+    decoder::{
+        self,
+        query::{default_filter, Predicate, QueryExecutor},
+        FileMetadataLike, GeneralChunkHandle,
+    },
     io::bit_read::{self, BitRead},
 };
 
@@ -60,7 +66,63 @@ impl<R: Read> Reader for DeltaSprintzReader<R> {
     }
 }
 
-impl<R: Read> QueryExecutor for DeltaSprintzReader<R> {}
+impl<R: Read> QueryExecutor for DeltaSprintzReader<R> {
+    fn filter(
+        &mut self,
+        predicate: Predicate,
+        bitmask: Option<&RoaringBitmap>,
+        logical_offset: usize,
+    ) -> decoder::Result<RoaringBitmap> {
+        if self.decompressed.is_some() {
+            return default_filter(self, predicate, bitmask, logical_offset);
+        }
+
+        let initial_value_bits = self.bit_reader.read_bits(64)?;
+        let initial_value = unsafe { std::mem::transmute::<u64, i64>(initial_value_bits) };
+        let scale = self.bit_reader.read_bits(32)? as u32;
+        let number_of_bits_needed = self.bit_reader.read_byte()?;
+
+        let predicate_encoded = predicate.map(|v| (v * scale as f64).round() as i64);
+        let all = || {
+            let mut all = roaring::RoaringBitmap::new();
+            all.insert_range(
+                logical_offset as u32..(self.number_of_records as u32 + logical_offset as u32),
+            );
+            if let Some(bitmask) = bitmask {
+                all &= bitmask;
+            }
+            all
+        };
+
+        if self.number_of_records == 0 {
+            if predicate_encoded.eval(0) {
+                return Ok(all());
+            } else {
+                return Ok(RoaringBitmap::new());
+            }
+        }
+
+        let mut bm = RoaringBitmap::new();
+        let mut previous_value_quantized = initial_value;
+        for i in 0..self.number_of_records {
+            let zigzag_delta = self.bit_reader.read_bits(number_of_bits_needed)?;
+            let delta = unzigzag(zigzag_delta);
+            let quantized = previous_value_quantized + delta;
+            previous_value_quantized = quantized;
+
+            if predicate_encoded.eval(quantized) {
+                let record_offset = logical_offset as u32 + i as u32;
+                bm.insert(record_offset);
+            }
+        }
+
+        if let Some(bitmask) = bitmask {
+            bm &= bitmask;
+        }
+
+        Ok(bm)
+    }
+}
 
 pub struct DeltaSprintzDecompressIteratorImpl<R: BitRead> {
     bit_reader: R,

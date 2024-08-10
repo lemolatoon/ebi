@@ -6,6 +6,67 @@ use crate::decoder;
 
 use super::chunk_reader::Reader;
 
+#[inline]
+pub fn default_materialize<T: Reader + ?Sized, W: Write>(
+    reader: &mut T,
+    output: &mut W,
+    bitmask: Option<&RoaringBitmap>,
+    logical_offset: usize,
+) -> decoder::Result<()> {
+    for (i, v) in reader.decompress()?.iter().enumerate() {
+        let record_offset = logical_offset + i;
+        if bitmask.is_some_and(|bm| !bm.contains(record_offset as u32)) {
+            continue;
+        }
+        output.write_all(&v.to_ne_bytes())?;
+    }
+
+    Ok(())
+}
+
+#[inline]
+pub fn default_filter<T: Reader + ?Sized>(
+    reader: &mut T,
+    predicate: Predicate,
+    bitmask: Option<&RoaringBitmap>,
+    logical_offset: usize,
+) -> decoder::Result<RoaringBitmap> {
+    let mut result = RoaringBitmap::new();
+    for (i, v) in reader.decompress()?.iter().enumerate() {
+        let record_offset = logical_offset + i;
+
+        if bitmask.is_some_and(|bm| !bm.contains(record_offset as u32)) {
+            continue;
+        }
+
+        if predicate.eval(*v) {
+            result.insert(record_offset as u32);
+        }
+    }
+
+    Ok(result)
+}
+
+#[inline]
+pub fn default_filter_materialize<T: Reader + ?Sized, W: Write>(
+    filter_fn: impl Fn(
+        &mut T,
+        Predicate,
+        Option<&RoaringBitmap>,
+        usize,
+    ) -> decoder::Result<RoaringBitmap>,
+    materialize_fn: impl Fn(&mut T, &mut W, Option<&RoaringBitmap>, usize) -> decoder::Result<()>,
+    reader: &mut T,
+    output: &mut W,
+    predicate: Predicate,
+    bitmask: Option<&RoaringBitmap>,
+    logical_offset: usize,
+) -> decoder::Result<()> {
+    let filter_result = filter_fn(reader, predicate, bitmask, logical_offset)?;
+
+    materialize_fn(reader, output, Some(&filter_result), logical_offset)
+}
+
 /// A trait for query execution.
 /// This trait provides default implementations based of [`Reader`] trait.
 /// The each implementation of this trait can be specialized for each compression scheme.
@@ -22,15 +83,7 @@ pub trait QueryExecutor: Reader {
         bitmask: Option<&RoaringBitmap>,
         logical_offset: usize,
     ) -> decoder::Result<()> {
-        for (i, v) in self.decompress()?.iter().enumerate() {
-            let record_offset = logical_offset + i;
-            if bitmask.is_some_and(|bm| !bm.contains(record_offset as u32)) {
-                continue;
-            }
-            output.write_all(&v.to_ne_bytes())?;
-        }
-
-        Ok(())
+        default_materialize(self, output, bitmask, logical_offset)
     }
 
     /// Filter the values by the predicate and return the result as a bitmask.
@@ -47,20 +100,7 @@ pub trait QueryExecutor: Reader {
         bitmask: Option<&RoaringBitmap>,
         logical_offset: usize,
     ) -> decoder::Result<RoaringBitmap> {
-        let mut result = RoaringBitmap::new();
-        for (i, v) in self.decompress()?.iter().enumerate() {
-            let record_offset = logical_offset + i;
-
-            if bitmask.is_some_and(|bm| !bm.contains(record_offset as u32)) {
-                continue;
-            }
-
-            if predicate.eval(*v) {
-                result.insert(record_offset as u32);
-            }
-        }
-
-        Ok(result)
+        default_filter(self, predicate, bitmask, logical_offset)
     }
 
     /// Filter the values by the predicate and write the results as IEEE754 double array to the output.
@@ -76,35 +116,58 @@ pub trait QueryExecutor: Reader {
         bitmask: Option<&RoaringBitmap>,
         logical_offset: usize,
     ) -> decoder::Result<()> {
-        let filter_result = self.filter(predicate, bitmask, logical_offset)?;
-
-        self.materialize(output, Some(&filter_result), logical_offset)
+        default_filter_materialize(
+            Self::filter,
+            Self::materialize,
+            self,
+            output,
+            predicate,
+            bitmask,
+            logical_offset,
+        )
     }
 }
 
+pub trait PredicateNumber: Copy + PartialEq + PartialOrd {}
+impl<T: Copy + PartialEq + PartialOrd> PredicateNumber for T {}
+
 #[derive(Debug, Clone, Copy, PartialEq, PartialOrd)]
-pub enum RangeValue {
-    Inclusive(f64),
-    Exclusive(f64),
+pub enum RangeValueImpl<T: PredicateNumber> {
+    Inclusive(T),
+    Exclusive(T),
     None,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, PartialOrd)]
-pub struct Range {
-    pub start: RangeValue,
-    pub end: RangeValue,
+impl<T: PredicateNumber> RangeValueImpl<T> {
+    pub fn map<U: PredicateNumber>(self, f: impl Fn(T) -> U) -> RangeValueImpl<U> {
+        match self {
+            RangeValueImpl::Inclusive(v) => RangeValueImpl::Inclusive(f(v)),
+            RangeValueImpl::Exclusive(v) => RangeValueImpl::Exclusive(f(v)),
+            RangeValueImpl::None => RangeValueImpl::None,
+        }
+    }
 }
 
-impl Range {
-    pub fn new(start: RangeValue, end: RangeValue) -> Self {
+pub type RangeValue = RangeValueImpl<f64>;
+
+#[derive(Debug, Clone, Copy, PartialEq, PartialOrd)]
+pub struct RangeImpl<T: PredicateNumber> {
+    pub start: RangeValueImpl<T>,
+    pub end: RangeValueImpl<T>,
+}
+
+pub type Range = RangeImpl<f64>;
+
+impl<T: PredicateNumber> RangeImpl<T> {
+    pub fn new(start: RangeValueImpl<T>, end: RangeValueImpl<T>) -> Self {
         Self { start, end }
     }
 
-    pub fn start(&self) -> RangeValue {
+    pub fn start(&self) -> RangeValueImpl<T> {
         self.start
     }
 
-    pub fn end(&self) -> RangeValue {
+    pub fn end(&self) -> RangeValueImpl<T> {
         self.end
     }
 
@@ -112,35 +175,52 @@ impl Range {
         std::mem::swap(&mut self.start, &mut self.end);
     }
 
-    pub fn eval(&self, value: f64) -> bool {
+    pub fn eval(&self, value: T) -> bool {
         let start_eval = match self.start {
-            RangeValue::Inclusive(v) => value >= v,
-            RangeValue::Exclusive(v) => value > v,
-            RangeValue::None => true,
+            RangeValueImpl::Inclusive(v) => value >= v,
+            RangeValueImpl::Exclusive(v) => value > v,
+            RangeValueImpl::None => true,
         };
         let end_eval = match self.end {
-            RangeValue::Inclusive(v) => value <= v,
-            RangeValue::Exclusive(v) => value < v,
-            RangeValue::None => true,
+            RangeValueImpl::Inclusive(v) => value <= v,
+            RangeValueImpl::Exclusive(v) => value < v,
+            RangeValueImpl::None => true,
         };
 
         start_eval && end_eval
     }
+
+    pub fn map<U: PredicateNumber>(self, f: impl Fn(T) -> U) -> RangeImpl<U> {
+        RangeImpl {
+            start: self.start.map(&f),
+            end: self.end.map(f),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, PartialOrd)]
-pub enum Predicate {
-    Eq(f64),
-    Ne(f64),
-    Range(Range),
+pub enum PredicateImpl<T: PredicateNumber> {
+    Eq(T),
+    Ne(T),
+    Range(RangeImpl<T>),
 }
 
-impl Predicate {
-    pub fn eval(&self, value: f64) -> bool {
+pub type Predicate = PredicateImpl<f64>;
+
+impl<T: PredicateNumber> PredicateImpl<T> {
+    pub fn eval(&self, value: T) -> bool {
         match self {
-            Predicate::Eq(v) => value == *v,
-            Predicate::Ne(v) => value != *v,
-            Predicate::Range(r) => r.eval(value),
+            PredicateImpl::Eq(v) => value == *v,
+            PredicateImpl::Ne(v) => value != *v,
+            PredicateImpl::Range(r) => r.eval(value),
+        }
+    }
+
+    pub fn map<U: PredicateNumber>(self, f: impl Fn(T) -> U) -> PredicateImpl<U> {
+        match self {
+            PredicateImpl::Eq(v) => PredicateImpl::Eq(f(v)),
+            PredicateImpl::Ne(v) => PredicateImpl::Ne(f(v)),
+            PredicateImpl::Range(r) => PredicateImpl::Range(r.map(f)),
         }
     }
 }
