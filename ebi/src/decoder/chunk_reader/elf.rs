@@ -2,24 +2,27 @@ use super::{
     chimp::ChimpDecoder,
     general_xor::{GeneralXorDecompressIterator, GeneralXorReader, XorDecoder},
 };
-use crate::{compression_common, io::bit_read::BitRead};
-use std::{io, mem};
+use crate::{
+    compression_common,
+    decoder::{self, error::DecoderError},
+    io::bit_read::BitRead2,
+};
+use std::mem;
 
-type ElfOnTReader<R, T> = GeneralXorReader<R, ElfDecoderWrapper<T>>;
-type ElfOnTDecompressIterator<'a, R, T> = GeneralXorDecompressIterator<'a, R, ElfDecoderWrapper<T>>;
+type ElfOnTReader<T> = GeneralXorReader<ElfDecoderWrapper<T>>;
+type ElfOnTDecompressIterator<'a, T> = GeneralXorDecompressIterator<'a, ElfDecoderWrapper<T>>;
 
 macro_rules! declare_elf_on_t_compressor {
     ($mod_name:ident, $decoder_ty:ty) => {
         pub mod $mod_name {
-            pub type ElfReader<R> = super::ElfOnTReader<R, $decoder_ty>;
-            pub type ElfDecompressIterator<'a, R> =
-                super::ElfOnTDecompressIterator<'a, R, $decoder_ty>;
+            pub type ElfReader = super::ElfOnTReader<$decoder_ty>;
+            pub type ElfDecompressIterator<'a> = super::ElfOnTDecompressIterator<'a, $decoder_ty>;
         }
     };
 }
 
-pub type ElfReader<R> = ElfOnTReader<R, ElfXorDecoder>;
-pub type ElfDecompressIterator<'a, R> = ElfOnTDecompressIterator<'a, R, ElfXorDecoder>;
+pub type ElfReader = ElfOnTReader<ElfXorDecoder>;
+pub type ElfDecompressIterator<'a> = ElfOnTDecompressIterator<'a, ElfXorDecoder>;
 
 declare_elf_on_t_compressor!(on_chimp, super::ChimpDecoder);
 
@@ -37,25 +40,29 @@ impl<T: XorDecoder> ElfDecoderWrapper<T> {
         }
     }
 
-    fn next_value<R: BitRead>(&mut self, r: &mut R) -> io::Result<Option<f64>> {
+    fn next_value<R: BitRead2>(&mut self, r: &mut R) -> decoder::Result<Option<f64>> {
         let v;
 
-        if !r.read_bit()?
+        if !r.read_bit().ok_or(DecoderError::UnexpectedEndOfChunk)?
         /* 0 */
         {
             v = self.recover_v_by_beta_star(r)?; // case 0
-        } else if !r.read_bit()?
+        } else if !r.read_bit().ok_or(DecoderError::UnexpectedEndOfChunk)?
         /* 0 */
         {
             v = self.xor_decompress(r)?; // case 10
         } else {
-            self.last_beta_star = unsafe { mem::transmute::<u32, i32>(r.read_bits(4)? as u32) }; // case 11
+            self.last_beta_star = unsafe {
+                mem::transmute::<u32, i32>(
+                    r.read_bits(4).ok_or(DecoderError::UnexpectedEndOfChunk)? as u32,
+                )
+            }; // case 11
             v = self.recover_v_by_beta_star(r)?;
         }
         Ok(v)
     }
 
-    fn recover_v_by_beta_star<R: BitRead>(&mut self, r: &mut R) -> io::Result<Option<f64>> {
+    fn recover_v_by_beta_star<R: BitRead2>(&mut self, r: &mut R) -> decoder::Result<Option<f64>> {
         let Some(v_prime) = self.xor_decompress(r)? else {
             return Ok(None);
         };
@@ -73,7 +80,7 @@ impl<T: XorDecoder> ElfDecoderWrapper<T> {
         Ok(Some(v))
     }
 
-    fn xor_decompress<R: BitRead>(&mut self, r: &mut R) -> io::Result<Option<f64>> {
+    fn xor_decompress<R: BitRead2>(&mut self, r: &mut R) -> decoder::Result<Option<f64>> {
         self.xor_decoder.decompress_float(r)
     }
 }
@@ -85,7 +92,7 @@ impl<T: XorDecoder> Default for ElfDecoderWrapper<T> {
 }
 
 impl<T: XorDecoder> XorDecoder for ElfDecoderWrapper<T> {
-    fn decompress_float<R: BitRead>(&mut self, mut r: R) -> io::Result<Option<f64>> {
+    fn decompress_float<R: BitRead2>(&mut self, mut r: R) -> decoder::Result<Option<f64>> {
         self.next_value(&mut r)
     }
 
@@ -118,11 +125,16 @@ impl ElfXorDecoder {
         }
     }
 
-    pub fn read_first<R: BitRead>(&mut self, r: &mut R) -> io::Result<Option<f64>> {
+    pub fn read_first<R: BitRead2>(&mut self, r: &mut R) -> decoder::Result<Option<f64>> {
         self.first = false;
-        let trailing_zeros = r.read_bits(7)? as u32;
+        let trailing_zeros = r.read_bits(7).ok_or(DecoderError::UnexpectedEndOfChunk)? as u32;
         if trailing_zeros < 64 {
-            self.stored_val = (r.read_bits(63 - trailing_zeros as u8)? << 1 | 1) << trailing_zeros;
+            self.stored_val = (r
+                .read_bits(63 - trailing_zeros as u8)
+                .ok_or(DecoderError::UnexpectedEndOfChunk)?
+                << 1
+                | 1)
+                << trailing_zeros;
         } else {
             self.stored_val = 0;
         }
@@ -134,12 +146,16 @@ impl ElfXorDecoder {
         Ok(Some(f64::from_bits(self.stored_val)))
     }
 
-    pub fn decompress_float_inner<R: BitRead>(&mut self, r: &mut R) -> io::Result<Option<f64>> {
-        let flag = r.read_bits(2)? as u32;
+    pub fn decompress_float_inner<R: BitRead2>(
+        &mut self,
+        r: &mut R,
+    ) -> decoder::Result<Option<f64>> {
+        let flag = r.read_bits(2).ok_or(DecoderError::UnexpectedEndOfChunk)? as u32;
         match flag {
             3 => {
                 // case 11
-                let lead_and_center = r.read_bits(9)? as u32;
+                let lead_and_center =
+                    r.read_bits(9).ok_or(DecoderError::UnexpectedEndOfChunk)? as u32;
                 self.stored_leading_zeros =
                     Self::LEADING_REPRESENTATION[(lead_and_center >> 6) as usize] as u32;
                 let mut center_bits = lead_and_center & 0x3f;
@@ -147,8 +163,12 @@ impl ElfXorDecoder {
                     center_bits = 64;
                 }
                 self.stored_trailing_zeros = 64 - self.stored_leading_zeros - center_bits;
-                let mut value =
-                    (r.read_bits((center_bits - 1) as u8)? << 1 | 1) << self.stored_trailing_zeros;
+                let mut value = (r
+                    .read_bits((center_bits - 1) as u8)
+                    .ok_or(DecoderError::UnexpectedEndOfChunk)?
+                    << 1
+                    | 1)
+                    << self.stored_trailing_zeros;
                 value ^= self.stored_val;
                 if value == Self::END_SIGN {
                     self.end_of_stream = true;
@@ -159,7 +179,8 @@ impl ElfXorDecoder {
             }
             2 => {
                 // case 10
-                let lead_and_center = r.read_bits(7)? as u32;
+                let lead_and_center =
+                    r.read_bits(7).ok_or(DecoderError::UnexpectedEndOfChunk)? as u32;
                 self.stored_leading_zeros =
                     Self::LEADING_REPRESENTATION[(lead_and_center >> 4) as usize] as u32;
                 let mut center_bits = lead_and_center & 0xf;
@@ -170,7 +191,11 @@ impl ElfXorDecoder {
                 let mut value = if center_bits == 1 {
                     1 << self.stored_trailing_zeros
                 } else {
-                    (r.read_bits((center_bits - 1) as u8)? << 1 | 1) << self.stored_trailing_zeros
+                    (r.read_bits((center_bits - 1) as u8)
+                        .ok_or(DecoderError::UnexpectedEndOfChunk)?
+                        << 1
+                        | 1)
+                        << self.stored_trailing_zeros
                 };
                 value ^= self.stored_val;
                 if value == Self::END_SIGN {
@@ -186,7 +211,10 @@ impl ElfXorDecoder {
             _ => {
                 // case 00
                 let center_bits = 64 - self.stored_leading_zeros - self.stored_trailing_zeros;
-                let mut value = r.read_bits(center_bits as u8)? << self.stored_trailing_zeros;
+                let mut value = r
+                    .read_bits(center_bits as u8)
+                    .ok_or(DecoderError::UnexpectedEndOfChunk)?
+                    << self.stored_trailing_zeros;
                 value ^= self.stored_val;
                 if value == Self::END_SIGN {
                     self.end_of_stream = true;
@@ -208,7 +236,7 @@ impl Default for ElfXorDecoder {
 }
 
 impl XorDecoder for ElfXorDecoder {
-    fn decompress_float<R: BitRead>(&mut self, mut r: R) -> io::Result<Option<f64>> {
+    fn decompress_float<R: BitRead2>(&mut self, mut r: R) -> decoder::Result<Option<f64>> {
         if self.end_of_stream {
             return Ok(None);
         }

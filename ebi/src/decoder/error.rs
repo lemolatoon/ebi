@@ -11,8 +11,8 @@ pub enum DecoderError {
     /// This error occurs when the conversion from byte slice to struct fails.
     #[error("Conversion error: {0}")]
     ConversionError(#[from] format::deserialize::ConversionError),
-    #[error("Buffer too small")]
-    BufferTooSmall,
+    #[error("Unexpected end of chunk reached while parsing")]
+    UnexpectedEndOfChunk,
     #[error("Preconditions not met")]
     PreconditionsNotMet,
 }

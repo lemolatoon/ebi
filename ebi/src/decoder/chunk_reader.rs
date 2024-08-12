@@ -8,11 +8,13 @@ pub mod run_length;
 pub mod sprintz;
 pub mod uncompressed;
 
-use std::io::{self, Read, Write};
+use std::io::{Read, Write};
 
 use iter_enum::Iterator;
 use quick_impl::QuickImpl;
 use roaring::RoaringBitmap;
+
+use crate::decoder;
 
 use crate::format::native::{NativeChunkFooter, NativeFileFooter, NativeFileHeader};
 use crate::format::CompressionScheme;
@@ -21,13 +23,13 @@ use super::query::{Predicate, QueryExecutor};
 use super::GeneralChunkHandle;
 use super::{FileMetadataLike, Result};
 
-#[derive(Debug, Clone, PartialEq, PartialOrd)]
-pub struct GeneralChunkReader<'handle, R: Read, T: FileMetadataLike> {
+#[derive(Debug, Clone, PartialEq)]
+pub struct GeneralChunkReader<'handle, T: FileMetadataLike> {
     handle: &'handle GeneralChunkHandle<T>,
-    reader: GeneralChunkReaderInner<R>,
+    reader: GeneralChunkReaderInner,
 }
 
-impl<'handle, R: Read, T: FileMetadataLike> GeneralChunkReader<'handle, R, T> {
+impl<'handle, T: FileMetadataLike> GeneralChunkReader<'handle, T> {
     /// Create a new GeneralChunkReader.
     /// Caller must guarantee that the input chunk is valid.
     /// # chunk format
@@ -37,7 +39,7 @@ impl<'handle, R: Read, T: FileMetadataLike> GeneralChunkReader<'handle, R, T> {
     /// The chunk begins with the header including the method specific header.
     /// The header is followed by the data.
     /// The data is 64bit aligned, so there may be padding between the header and the data.
-    pub fn new(handle: &'handle GeneralChunkHandle<T>, reader: R) -> Result<Self> {
+    pub fn new<R: Read>(handle: &'handle GeneralChunkHandle<T>, reader: R) -> Result<Self> {
         let compression_scheme = handle.header().config().compression_scheme();
 
         let reader_inner = GeneralChunkReaderInner::new(handle, reader, *compression_scheme)?;
@@ -60,11 +62,11 @@ impl<'handle, R: Read, T: FileMetadataLike> GeneralChunkReader<'handle, R, T> {
         self.handle.chunk_footer()
     }
 
-    pub fn inner(&self) -> &GeneralChunkReaderInner<R> {
+    pub fn inner(&self) -> &GeneralChunkReaderInner {
         &self.reader
     }
 
-    pub fn inner_mut(&mut self) -> &mut GeneralChunkReaderInner<R> {
+    pub fn inner_mut(&mut self) -> &mut GeneralChunkReaderInner {
         &mut self.reader
     }
 
@@ -115,25 +117,25 @@ impl<'handle, R: Read, T: FileMetadataLike> GeneralChunkReader<'handle, R, T> {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, PartialOrd)]
-pub enum GeneralChunkReaderInner<R: Read> {
-    Uncompressed(uncompressed::UncompressedReader<R>),
-    RLE(run_length::RunLengthReader<R>),
-    Gorilla(gorilla::GorillaReader<R>),
-    BUFF(buff::BUFFReader<R>),
-    Chimp(chimp::ChimpReader<R>),
-    Chimp128(chimp_n::Chimp128Reader<R>),
-    ElfOnChimp(elf::on_chimp::ElfReader<R>),
-    Elf(elf::ElfReader<R>),
-    DeltaSprintz(sprintz::DeltaSprintzReader<R>),
+#[derive(Debug, Clone, PartialEq)]
+pub enum GeneralChunkReaderInner {
+    Uncompressed(uncompressed::UncompressedReader),
+    RLE(run_length::RunLengthReader),
+    Gorilla(gorilla::GorillaReader),
+    BUFF(buff::BUFFReader),
+    Chimp(chimp::ChimpReader),
+    Chimp128(chimp_n::Chimp128Reader),
+    ElfOnChimp(elf::on_chimp::ElfReader),
+    Elf(elf::ElfReader),
+    DeltaSprintz(sprintz::DeltaSprintzReader),
 }
 
-impl<R: Read> GeneralChunkReaderInner<R> {
-    pub fn new<T: FileMetadataLike>(
+impl GeneralChunkReaderInner {
+    pub fn new<T: FileMetadataLike, R: Read>(
         handle: &GeneralChunkHandle<T>,
         reader: R,
         compression_scheme: CompressionScheme,
-    ) -> io::Result<Self> {
+    ) -> decoder::Result<Self> {
         Ok(match compression_scheme {
             CompressionScheme::Uncompressed => GeneralChunkReaderInner::Uncompressed(
                 uncompressed::UncompressedReader::new(handle, reader)?,
@@ -148,26 +150,26 @@ impl<R: Read> GeneralChunkReaderInner<R> {
                 GeneralChunkReaderInner::BUFF(buff::BUFFReader::new(handle, reader))
             }
             CompressionScheme::Chimp => {
-                GeneralChunkReaderInner::Chimp(chimp::ChimpReader::new(handle, reader))
+                GeneralChunkReaderInner::Chimp(chimp::ChimpReader::new(handle, reader)?)
             }
             CompressionScheme::Chimp128 => {
                 GeneralChunkReaderInner::Chimp128(chimp_n::Chimp128Reader::new(handle, reader))
             }
             CompressionScheme::ElfOnChimp => {
-                GeneralChunkReaderInner::ElfOnChimp(elf::on_chimp::ElfReader::new(handle, reader))
+                GeneralChunkReaderInner::ElfOnChimp(elf::on_chimp::ElfReader::new(handle, reader)?)
             }
             CompressionScheme::Elf => {
-                GeneralChunkReaderInner::Elf(elf::ElfReader::new(handle, reader))
+                GeneralChunkReaderInner::Elf(elf::ElfReader::new(handle, reader)?)
             }
             CompressionScheme::DeltaSprintz => GeneralChunkReaderInner::DeltaSprintz(
-                sprintz::DeltaSprintzReader::new(handle, reader),
+                sprintz::DeltaSprintzReader::new(handle, reader)?,
             ),
         })
     }
 }
 
-impl<R: Read> From<&GeneralChunkReaderInner<R>> for CompressionScheme {
-    fn from(value: &GeneralChunkReaderInner<R>) -> Self {
+impl From<&GeneralChunkReaderInner> for CompressionScheme {
+    fn from(value: &GeneralChunkReaderInner) -> Self {
         match value {
             GeneralChunkReaderInner::Uncompressed(_) => CompressionScheme::Uncompressed,
             GeneralChunkReaderInner::RLE(_) => CompressionScheme::RLE,
@@ -184,7 +186,7 @@ impl<R: Read> From<&GeneralChunkReaderInner<R>> for CompressionScheme {
 
 pub trait Reader {
     type NativeHeader;
-    type DecompressIterator<'a>: Iterator<Item = io::Result<f64>>
+    type DecompressIterator<'a>: Iterator<Item = decoder::Result<f64>>
     where
         Self: 'a;
 
@@ -192,12 +194,14 @@ pub trait Reader {
     fn decompress_iter(&mut self) -> Self::DecompressIterator<'_>;
 
     /// Decompress the whole chunk and return the slice of the decompressed values.
-    fn decompress(&mut self) -> io::Result<&[f64]> {
+    fn decompress(&mut self) -> decoder::Result<&[f64]> {
         if self.decompress_result().is_some() {
             return Ok(self.decompress_result().unwrap());
         }
 
-        let data = self.decompress_iter().collect::<io::Result<Vec<f64>>>()?;
+        let data = self
+            .decompress_iter()
+            .collect::<decoder::Result<Vec<f64>>>()?;
         let result = self.set_decompress_result(data);
 
         Ok(result)
@@ -216,39 +220,39 @@ pub trait Reader {
 }
 
 #[derive(QuickImpl, Iterator)]
-pub enum GeneralDecompressIterator<'a, R: Read> {
+pub enum GeneralDecompressIterator<'a> {
     #[quick_impl(impl From)]
     BUFF(buff::BUFFIterator<'a>),
     #[quick_impl(impl From)]
-    Gorilla(gorilla::GorillaIterator<'a, R>),
+    Gorilla(gorilla::GorillaIterator<'a>),
     #[quick_impl(impl From)]
-    RLE(run_length::RunLengthIterator<'a, R>),
+    RLE(run_length::RunLengthIterator<'a>),
     #[quick_impl(impl From)]
-    Uncompressed(uncompressed::UncompressedIterator<'a, R>),
+    Uncompressed(uncompressed::UncompressedIterator<'a>),
     #[quick_impl(impl From)]
-    Chimp(chimp::ChimpDecompressIterator<'a, R>),
+    Chimp(chimp::ChimpDecompressIterator<'a>),
     #[quick_impl(impl From)]
-    Chimp128(chimp_n::Chimp128DecompressIterator<'a, R>),
+    Chimp128(chimp_n::Chimp128DecompressIterator<'a>),
     #[quick_impl(impl From)]
-    ElfOnChimp(elf::on_chimp::ElfDecompressIterator<'a, R>),
+    ElfOnChimp(elf::on_chimp::ElfDecompressIterator<'a>),
     #[quick_impl(impl From)]
-    Elf(elf::ElfDecompressIterator<'a, R>),
+    Elf(elf::ElfDecompressIterator<'a>),
     #[quick_impl(impl From)]
-    DeltaSprintz(sprintz::DeltaSprintzDecompressIterator<'a, R>),
+    DeltaSprintz(sprintz::DeltaSprintzDecompressIterator<'a>),
 }
 
 macro_rules! impl_generic_reader {
     ($enum_name:ident, $($variant:ident),*) => {
-        impl<R: Read> $enum_name<R> {
+        impl $enum_name {
             /// Decompress the whole chunk and return the slice of the decompressed values.
-            pub fn decompress(&mut self) -> io::Result<&[f64]> {
+            pub fn decompress(&mut self) -> decoder::Result<&[f64]> {
                 match self {
                     $( $enum_name::$variant(c) => c.decompress(), )*
                 }
             }
 
             /// Returns `impl Iterator<Item = io::Result<f64>>`, which decompresses the chunk iteratively.
-            pub fn decompress_iter(&mut self) -> GeneralDecompressIterator<'_, R> {
+            pub fn decompress_iter(&mut self) -> GeneralDecompressIterator<'_> {
                 match self {
                     $( $enum_name::$variant(c) => c.decompress_iter().into(), )*
                 }
@@ -344,8 +348,8 @@ impl_generic_reader!(
 
 #[cfg(test)]
 mod tests {
-    use io::Seek;
     use rand::Rng;
+    use std::io::{self, Seek};
 
     use crate::{
         api::{
@@ -443,7 +447,7 @@ mod tests {
         test_decompress_iter(&mut decoder);
     }
 
-    fn test_compressed_result<R: Read>(reader: &mut GeneralChunkReaderInner<R>) {
+    fn test_compressed_result(reader: &mut GeneralChunkReaderInner) {
         let result = vec![1.0, 2.0, 3.0, 4.0, 5.0];
         let data = reader.set_decompress_result(result);
 
@@ -465,7 +469,7 @@ mod tests {
         let iter_result = reader
             .inner_mut()
             .decompress_iter()
-            .collect::<io::Result<Vec<f64>>>()
+            .collect::<decoder::Result<Vec<f64>>>()
             .unwrap();
 
         let mut reader = decoder.chunk_reader(ChunkId::new(0)).unwrap();

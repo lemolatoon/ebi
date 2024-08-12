@@ -4,7 +4,7 @@ use std::{
 };
 
 use crate::{
-    decoder::{query::QueryExecutor, FileMetadataLike, GeneralChunkHandle},
+    decoder::{self, query::QueryExecutor, FileMetadataLike, GeneralChunkHandle},
     format::{
         deserialize::FromLeBytesExt,
         uncompressed::{NativeUncompressedHeader, UncompressedHeader0},
@@ -14,29 +14,39 @@ use crate::{
 
 use super::Reader;
 
+pub type UncompressedReader = UncompressedReaderImpl<io::Cursor<Vec<u8>>>;
+pub type UncompressedIterator<'a> = UncompressedIteratorImpl<'a, io::Cursor<Vec<u8>>>;
+
 #[derive(Debug, Clone, PartialEq, PartialOrd)]
-pub struct UncompressedReader<R: Read> {
+pub struct UncompressedReaderImpl<R: Read> {
     header: NativeUncompressedHeader,
     number_of_records: usize,
     values: Option<Vec<f64>>,
     reader: R,
 }
 
-impl<R: Read> UncompressedReader<R> {
+impl UncompressedReader {
     /// Create a new UncompressedReader.
     /// Caller must guarantee that the input chunk is valid for Uncompressed Chunk.
-    pub fn new<T: FileMetadataLike>(
+    pub fn new<T: FileMetadataLike, R: Read>(
         handle: &GeneralChunkHandle<T>,
         mut reader: R,
-    ) -> io::Result<Self> {
+    ) -> io::Result<UncompressedReaderImpl<io::Cursor<Vec<u8>>>> {
         let header_head = UncompressedHeader0::from_le_bytes_by_reader(&mut reader)?;
-        let header1_size = header_head.header_size as usize - size_of::<UncompressedHeader0>();
+        let header_size = header_head.header_size as usize;
+        let header1_size = header_size - size_of::<UncompressedHeader0>();
         let mut header = vec![0u8; header1_size].into_boxed_slice();
         reader.read_exact(&mut header)?;
+
         let header = NativeUncompressedHeader::new(header_head, header);
         let number_of_records = handle.number_of_records() as usize;
 
-        Ok(Self {
+        let chunk_size = handle.chunk_size() as usize - header_size;
+        let mut chunk_in_memory = vec![0; chunk_size];
+        reader.read_exact(&mut chunk_in_memory)?;
+        let reader = io::Cursor::new(chunk_in_memory);
+
+        Ok(UncompressedReaderImpl {
             header,
             number_of_records,
             reader,
@@ -45,11 +55,11 @@ impl<R: Read> UncompressedReader<R> {
     }
 }
 
-impl<R: Read> Reader for UncompressedReader<R> {
+impl<R: Read> Reader for UncompressedReaderImpl<R> {
     type NativeHeader = NativeUncompressedHeader;
-    type DecompressIterator<'a> = UncompressedIterator<'a, R> where Self: 'a;
+    type DecompressIterator<'a> = UncompressedIteratorImpl<'a, R> where Self: 'a;
 
-    fn decompress(&mut self) -> io::Result<&[f64]> {
+    fn decompress(&mut self) -> decoder::Result<&[f64]> {
         if self.values.is_some() {
             return Ok(self.values.as_ref().unwrap());
         }
@@ -73,7 +83,7 @@ impl<R: Read> Reader for UncompressedReader<R> {
     }
 
     fn decompress_iter(&mut self) -> Self::DecompressIterator<'_> {
-        UncompressedIterator::new(self)
+        UncompressedIteratorImpl::new(self)
     }
 
     fn set_decompress_result(&mut self, data: Vec<f64>) -> &[f64] {
@@ -87,19 +97,19 @@ impl<R: Read> Reader for UncompressedReader<R> {
     }
 }
 
-pub struct UncompressedIterator<'a, R: Read> {
-    reader: &'a mut UncompressedReader<R>,
+pub struct UncompressedIteratorImpl<'a, R: Read> {
+    reader: &'a mut UncompressedReaderImpl<R>,
     count: usize,
 }
 
-impl<'a, R: Read> UncompressedIterator<'a, R> {
-    pub fn new(reader: &'a mut UncompressedReader<R>) -> Self {
-        UncompressedIterator { reader, count: 0 }
+impl<'a, R: Read> UncompressedIteratorImpl<'a, R> {
+    pub fn new(reader: &'a mut UncompressedReaderImpl<R>) -> Self {
+        UncompressedIteratorImpl { reader, count: 0 }
     }
 }
 
-impl<'a, R: Read> Iterator for UncompressedIterator<'a, R> {
-    type Item = io::Result<f64>;
+impl<'a, R: Read> Iterator for UncompressedIteratorImpl<'a, R> {
+    type Item = decoder::Result<f64>;
 
     fn next(&mut self) -> Option<Self::Item> {
         if self.count >= self.reader.number_of_records {
@@ -112,9 +122,9 @@ impl<'a, R: Read> Iterator for UncompressedIterator<'a, R> {
                 self.count += 1;
                 Some(Ok(f64::from_le_bytes(buf)))
             }
-            Err(e) => Some(Err(e)),
+            Err(e) => Some(Err(e.into())),
         }
     }
 }
 
-impl<R: Read> QueryExecutor for UncompressedReader<R> {}
+impl<R: Read> QueryExecutor for UncompressedReaderImpl<R> {}

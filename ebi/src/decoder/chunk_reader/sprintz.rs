@@ -1,46 +1,52 @@
-use std::io::{self, Read};
+use std::io::Read;
 
 use roaring::RoaringBitmap;
 
 use crate::{
     decoder::{
         self,
+        error::DecoderError,
         query::{default_filter, Predicate, QueryExecutor},
         FileMetadataLike, GeneralChunkHandle,
     },
-    io::bit_read::{self, BitRead},
+    io::bit_read::{self, BitRead2, BufferedBitReader},
 };
 
 use super::Reader;
 
-pub type BitReader<R> = bit_read::BitReader<R>;
+pub type BitReader = bit_read::BufferedBitReader<Vec<u8>>;
 
 #[derive(Debug, Clone, PartialEq, PartialOrd)]
-pub struct DeltaSprintzReader<R: Read> {
-    bit_reader: BitReader<R>,
+pub struct DeltaSprintzReader {
+    bit_reader: BitReader,
     number_of_records: u64,
     decompressed: Option<Vec<f64>>,
 }
 
-impl<R: Read> DeltaSprintzReader<R> {
-    pub fn new<F: FileMetadataLike>(handle: &GeneralChunkHandle<F>, r: R) -> Self {
+impl DeltaSprintzReader {
+    pub fn new<F: FileMetadataLike, R: Read>(
+        handle: &GeneralChunkHandle<F>,
+        mut r: R,
+    ) -> decoder::Result<Self> {
         let number_of_records = handle.number_of_records();
-        let bit_reader = BitReader::new(r);
-        Self {
+        let chunk_size = handle.chunk_size() as usize;
+        let mut chunk_in_memory = vec![0; chunk_size];
+        r.read_exact(&mut chunk_in_memory)?;
+        let bit_reader = BufferedBitReader::new(chunk_in_memory);
+        Ok(Self {
             bit_reader,
             number_of_records,
             decompressed: None,
-        }
+        })
     }
 }
 
-pub type DeltaSprintzDecompressIterator<'a, R> =
-    DeltaSprintzDecompressIteratorImpl<&'a mut BitReader<R>>;
+pub type DeltaSprintzDecompressIterator<'a> = DeltaSprintzDecompressIteratorImpl<&'a mut BitReader>;
 
-impl<R: Read> Reader for DeltaSprintzReader<R> {
+impl Reader for DeltaSprintzReader {
     type NativeHeader = ();
 
-    type DecompressIterator<'a> = DeltaSprintzDecompressIterator<'a, R>
+    type DecompressIterator<'a> = DeltaSprintzDecompressIterator<'a>
     where
         Self: 'a;
 
@@ -66,7 +72,7 @@ impl<R: Read> Reader for DeltaSprintzReader<R> {
     }
 }
 
-impl<R: Read> QueryExecutor for DeltaSprintzReader<R> {
+impl QueryExecutor for DeltaSprintzReader {
     fn filter(
         &mut self,
         predicate: Predicate,
@@ -77,10 +83,19 @@ impl<R: Read> QueryExecutor for DeltaSprintzReader<R> {
             return default_filter(self, predicate, bitmask, logical_offset);
         }
 
-        let initial_value_bits = self.bit_reader.read_bits(64)?;
+        let initial_value_bits = self
+            .bit_reader
+            .read_bits(64)
+            .ok_or(DecoderError::UnexpectedEndOfChunk)?;
         let initial_value = unsafe { std::mem::transmute::<u64, i64>(initial_value_bits) };
-        let scale = self.bit_reader.read_bits(32)? as u32;
-        let number_of_bits_needed = self.bit_reader.read_byte()?;
+        let scale = self
+            .bit_reader
+            .read_bits(32)
+            .ok_or(DecoderError::UnexpectedEndOfChunk)? as u32;
+        let number_of_bits_needed = self
+            .bit_reader
+            .read_byte()
+            .ok_or(DecoderError::UnexpectedEndOfChunk)?;
 
         let predicate_encoded = predicate.map(|v| (v * scale as f64).round() as i64);
         let all = || {
@@ -105,7 +120,10 @@ impl<R: Read> QueryExecutor for DeltaSprintzReader<R> {
         let mut bm = RoaringBitmap::new();
         let mut previous_value_quantized = initial_value;
         for i in 0..self.number_of_records {
-            let zigzag_delta = self.bit_reader.read_bits(number_of_bits_needed)?;
+            let zigzag_delta = self
+                .bit_reader
+                .read_bits(number_of_bits_needed)
+                .ok_or(DecoderError::UnexpectedEndOfChunk)?;
             let delta = unzigzag(zigzag_delta);
             let quantized = previous_value_quantized + delta;
             previous_value_quantized = quantized;
@@ -124,7 +142,7 @@ impl<R: Read> QueryExecutor for DeltaSprintzReader<R> {
     }
 }
 
-pub struct DeltaSprintzDecompressIteratorImpl<R: BitRead> {
+pub struct DeltaSprintzDecompressIteratorImpl<R: BitRead2> {
     bit_reader: R,
     previous_value_quantized: i64,
     scale: u32,
@@ -133,7 +151,7 @@ pub struct DeltaSprintzDecompressIteratorImpl<R: BitRead> {
     record_index: u64,
 }
 
-impl<R: BitRead> DeltaSprintzDecompressIteratorImpl<R> {
+impl<R: BitRead2> DeltaSprintzDecompressIteratorImpl<R> {
     pub fn new(mut bit_reader: R, number_of_records: u64) -> Self {
         // TODO: Avoid unwrap here
         let initial_value_bits = bit_reader.read_bits(64).unwrap();
@@ -151,8 +169,8 @@ impl<R: BitRead> DeltaSprintzDecompressIteratorImpl<R> {
     }
 }
 
-impl<R: BitRead> Iterator for DeltaSprintzDecompressIteratorImpl<R> {
-    type Item = io::Result<f64>;
+impl<R: BitRead2> Iterator for DeltaSprintzDecompressIteratorImpl<R> {
+    type Item = decoder::Result<f64>;
 
     #[inline]
     fn next(&mut self) -> Option<Self::Item> {
@@ -166,8 +184,8 @@ impl<R: BitRead> Iterator for DeltaSprintzDecompressIteratorImpl<R> {
             return Some(Ok(self.previous_value_quantized as f64 / self.scale as f64));
         }
         let delta = match self.bit_reader.read_bits(self.number_of_bits_needed) {
-            Ok(delta) => delta,
-            Err(err) => return Some(Err(err)),
+            Some(delta) => delta,
+            None => return Some(Err(DecoderError::UnexpectedEndOfChunk.into())),
         };
         let quantized = unzigzag(delta) + self.previous_value_quantized;
         self.previous_value_quantized = quantized;
