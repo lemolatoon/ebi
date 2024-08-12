@@ -1,4 +1,4 @@
-use crate::io::buffered_bit_writer::BufferedWriterExt;
+use crate::io::bit_write::BufferedBitWriter;
 
 use super::{AppendableCompressor, Compressor};
 
@@ -11,13 +11,13 @@ const DEFAULT_BUF_SIZE: usize = 1024 * 8;
 
 impl GorillaCompressor {
     pub fn new() -> Self {
-        let w = BufferedWriterExt::with_capacity(DEFAULT_BUF_SIZE);
+        let w = BufferedBitWriter::with_capacity(DEFAULT_BUF_SIZE);
         let encoder = modified_tsz::GorillaFloatEncoder::new(w);
         Self { encoder }
     }
 
     pub fn with_capacity(capacity: usize) -> Self {
-        let w = BufferedWriterExt::with_capacity(capacity);
+        let w = BufferedBitWriter::with_capacity(capacity);
         let encoder = modified_tsz::GorillaFloatEncoder::new(w);
         Self { encoder }
     }
@@ -98,9 +98,9 @@ pub(crate) mod modified_tsz {
     // encoding assumes the value is greater than 12 bits, we can store the value 0 to signal the end
     // of the stream
 
-    use tsz::{stream::Write, Bit};
+    use crate::io::bit_write::BitWrite as _;
 
-    use crate::io::buffered_bit_writer::BufferedWriterExt;
+    use super::BufferedBitWriter;
 
     /// END_MARKER is a special bit sequence used to indicate the end of the stream
     pub const END_MARKER: u64 = 0b1111_0000_0000_0000_0000_0000_0000_0000_0000;
@@ -144,13 +144,13 @@ pub(crate) mod modified_tsz {
     pub struct GorillaFloatEncoder {
         state: GorillaFloatEncoderState,
 
-        w: BufferedWriterExt,
+        w: BufferedBitWriter,
     }
 
     impl GorillaFloatEncoder {
         /// new creates a new StdEncoder whose starting timestamp is `start` and writes its encoded
         /// bytes to `w`
-        pub fn new(w: BufferedWriterExt) -> Self {
+        pub fn new(w: BufferedBitWriter) -> Self {
             Self {
                 state: GorillaFloatEncoderState::new(),
                 w,
@@ -172,10 +172,10 @@ pub(crate) mod modified_tsz {
 
             if xor == 0 {
                 // if xor with previous value is zero just store single zero bit
-                self.w.write_bit(Bit::Zero);
+                self.w.write_bit(false);
                 self.state.total_bits_buffered += 1;
             } else {
-                self.w.write_bit(Bit::One);
+                self.w.write_bit(true);
 
                 self.state.total_bits_buffered += 1;
 
@@ -192,7 +192,7 @@ pub(crate) mod modified_tsz {
                     // if the number of leading and trailing zeroes in this xor are >= the leading and
                     // trailing zeroes in the previous xor then we only need to store a control bit and
                     // the significant digits of this xor
-                    self.w.write_bit(Bit::Zero);
+                    self.w.write_bit(false);
                     self.w.write_bits(
                         xor.wrapping_shr(self.state.trailing_zeroes),
                         64 - self.state.leading_zeroes - self.state.trailing_zeroes,
@@ -206,7 +206,7 @@ pub(crate) mod modified_tsz {
                     // use 6 bits to store the number of leading zeroes and 6 bits to store the number
                     // of significant digits before storing the significant digits themselves
 
-                    self.w.write_bit(Bit::One);
+                    self.w.write_bit(true);
                     self.w.write_bits(u64::from(leading_zeroes), 5); // not 6 bit, but 5 bit
 
                     // if significant_digits is 64 we cannot encode it using 6 bits, however since
@@ -274,13 +274,13 @@ pub(crate) mod modified_tsz {
     #[cfg(test)]
     mod tests {
 
-        use crate::io::buffered_bit_writer::BufferedWriterExt;
+        use super::BufferedBitWriter;
 
         use super::GorillaFloatEncoder;
 
         #[test]
         fn create_new_encoder() {
-            let w = BufferedWriterExt::new();
+            let w = BufferedBitWriter::new();
             let mut e = GorillaFloatEncoder::new(w);
 
             e.prepare();
@@ -298,7 +298,7 @@ pub(crate) mod modified_tsz {
 
         #[test]
         fn encode_datapoint() {
-            let w = BufferedWriterExt::new();
+            let w = BufferedBitWriter::new();
             let mut e = GorillaFloatEncoder::new(w);
 
             let d1: f64 = 1.24;
@@ -321,7 +321,7 @@ pub(crate) mod modified_tsz {
 
         #[test]
         fn encode_multiple_datapoints() {
-            let w = BufferedWriterExt::new();
+            let w = BufferedBitWriter::new();
             let mut e = GorillaFloatEncoder::new(w);
 
             let d1 = 12.0;

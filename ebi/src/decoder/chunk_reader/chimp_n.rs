@@ -1,47 +1,57 @@
-use std::io::{self, Read};
+use std::io::Read;
 
 use crate::{
-    decoder::{query::QueryExecutor, FileMetadataLike, GeneralChunkHandle},
-    io::bit_read::{self, BitRead},
+    decoder::{
+        self, error::DecoderError, query::QueryExecutor, FileMetadataLike, GeneralChunkHandle,
+    },
+    io::bit_read::{self, BitRead2, BufferedBitReader},
 };
 
 use super::Reader;
 
-type BitReader<R> = bit_read::BitReader<R>;
+type BitReader = bit_read::BufferedBitReader<Vec<u8>>;
 
-pub type Chimp128Reader<R> = ChimpNReader<128, R>;
-pub type Chimp128DecompressIterator<'a, R> = ChimpNDecompressIterator<'a, 128, R>;
+pub type Chimp128Reader = ChimpNReader<128>;
+pub type Chimp128DecompressIterator<'a> = ChimpNDecompressIterator<'a, 128>;
 
 #[derive(Debug, Clone, PartialEq, PartialOrd)]
-pub struct ChimpNReader<const N: usize, R: Read> {
-    bit_reader: BitReader<R>,
+pub struct ChimpNReader<const N: usize> {
+    bit_reader: BitReader,
     number_of_records: usize,
     decompressed_result: Option<Vec<f64>>,
 }
 
-impl<const N: usize, R: Read> ChimpNReader<N, R> {
-    pub fn new<T: FileMetadataLike>(handle: &GeneralChunkHandle<T>, reader: R) -> Self {
+impl<const N: usize> ChimpNReader<N> {
+    pub fn new<T: FileMetadataLike, R: Read>(
+        handle: &GeneralChunkHandle<T>,
+        mut reader: R,
+    ) -> Self {
         let number_of_records = handle.number_of_records() as usize;
+        let chunk_size = handle.chunk_size() as usize;
+        let mut chunk_in_memory = vec![0; chunk_size];
+        reader.read_exact(&mut chunk_in_memory).unwrap();
+        let bit_reader = BufferedBitReader::new(chunk_in_memory);
         ChimpNReader {
-            bit_reader: BitReader::new(reader),
+            bit_reader,
             number_of_records,
             decompressed_result: None,
         }
     }
 }
 
-pub type ChimpNDecompressIterator<'a, const N: usize, R> =
-    ChimpNDecompressIteratorImpl<N, &'a mut BitReader<R>>;
+pub type ChimpNDecompressIterator<'a, const N: usize> =
+    ChimpNDecompressIteratorImpl<N, &'a mut BitReader>;
 
-impl<const N: usize, R: Read> Reader for ChimpNReader<N, R> {
+impl<const N: usize> Reader for ChimpNReader<N> {
     type NativeHeader = ();
 
-    type DecompressIterator<'a> = ChimpNDecompressIterator<'a, N, R>
-    where
-        R: 'a;
+    type DecompressIterator<'a> = ChimpNDecompressIterator<'a, N>;
 
-    fn decompress_iter(&mut self) -> Self::DecompressIterator<'_> {
-        ChimpNDecompressIteratorImpl::new(&mut self.bit_reader, self.number_of_records)
+    fn decompress_iter(&mut self) -> decoder::Result<Self::DecompressIterator<'_>> {
+        Ok(ChimpNDecompressIteratorImpl::new(
+            &mut self.bit_reader,
+            self.number_of_records,
+        ))
     }
 
     fn set_decompress_result(&mut self, data: Vec<f64>) -> &[f64] {
@@ -62,15 +72,15 @@ impl<const N: usize, R: Read> Reader for ChimpNReader<N, R> {
     }
 }
 
-impl<const N: usize, R: Read> QueryExecutor for ChimpNReader<N, R> {}
+impl<const N: usize> QueryExecutor for ChimpNReader<N> {}
 
 #[derive(Debug, Clone, PartialEq, PartialOrd)]
-pub struct ChimpNDecompressIteratorImpl<const N: usize, R: BitRead> {
+pub struct ChimpNDecompressIteratorImpl<const N: usize, R: BitRead2> {
     decoder: ChimpNDecoder<N, R>,
     number_of_records: usize,
 }
 
-impl<const N: usize, R: BitRead> ChimpNDecompressIteratorImpl<N, R> {
+impl<const N: usize, R: BitRead2> ChimpNDecompressIteratorImpl<N, R> {
     pub fn new(bit_reader: R, number_of_records: usize) -> Self {
         ChimpNDecompressIteratorImpl {
             decoder: ChimpNDecoder::new(bit_reader),
@@ -79,14 +89,14 @@ impl<const N: usize, R: BitRead> ChimpNDecompressIteratorImpl<N, R> {
     }
 }
 
-impl<const N: usize, R: BitRead> ExactSizeIterator for ChimpNDecompressIteratorImpl<N, R> {
+impl<const N: usize, R: BitRead2> ExactSizeIterator for ChimpNDecompressIteratorImpl<N, R> {
     fn len(&self) -> usize {
         self.number_of_records
     }
 }
 
-impl<const N: usize, R: BitRead> Iterator for ChimpNDecompressIteratorImpl<N, R> {
-    type Item = io::Result<f64>;
+impl<const N: usize, R: BitRead2> Iterator for ChimpNDecompressIteratorImpl<N, R> {
+    type Item = decoder::Result<f64>;
 
     fn next(&mut self) -> Option<Self::Item> {
         match self.decoder.read_value() {
@@ -102,7 +112,7 @@ impl<const N: usize, R: BitRead> Iterator for ChimpNDecompressIteratorImpl<N, R>
 }
 
 #[derive(Debug, Clone, PartialEq, PartialOrd)]
-pub struct ChimpNDecoder<const N_PREVIOUS_VALUES: usize, R: BitRead> {
+pub struct ChimpNDecoder<const N_PREVIOUS_VALUES: usize, R: BitRead2> {
     bit_reader: R,
     stored_leading_zeros: u32,
     stored_trailing_zeros: u32,
@@ -113,7 +123,7 @@ pub struct ChimpNDecoder<const N_PREVIOUS_VALUES: usize, R: BitRead> {
     end_of_stream: bool,
 }
 
-impl<const N_PREVIOUS_VALUES: usize, R: BitRead> ChimpNDecoder<N_PREVIOUS_VALUES, R> {
+impl<const N_PREVIOUS_VALUES: usize, R: BitRead2> ChimpNDecoder<N_PREVIOUS_VALUES, R> {
     pub const LEADING_REPRESENTATION: [u8; 8] = [0, 8, 12, 16, 18, 20, 22, 24];
     pub const NAN_LONG: u64 = 0x7ff8000000000000;
     const PREVIOUS_VALUES_LOG2: u32 = (N_PREVIOUS_VALUES as u64).trailing_zeros();
@@ -132,7 +142,7 @@ impl<const N_PREVIOUS_VALUES: usize, R: BitRead> ChimpNDecoder<N_PREVIOUS_VALUES
         }
     }
 
-    pub fn read_value(&mut self) -> io::Result<Option<f64>> {
+    pub fn read_value(&mut self) -> decoder::Result<Option<f64>> {
         if self.end_of_stream {
             return Ok(None);
         }
@@ -146,7 +156,7 @@ impl<const N_PREVIOUS_VALUES: usize, R: BitRead> ChimpNDecoder<N_PREVIOUS_VALUES
         Ok(Some(f64::from_bits(self.stored_val)))
     }
 
-    pub fn get_values(&mut self) -> io::Result<Vec<f64>> {
+    pub fn get_values(&mut self) -> decoder::Result<Vec<f64>> {
         let mut values = Vec::new();
         while let Some(value) = self.read_value()? {
             values.push(value);
@@ -154,10 +164,13 @@ impl<const N_PREVIOUS_VALUES: usize, R: BitRead> ChimpNDecoder<N_PREVIOUS_VALUES
         Ok(values)
     }
 
-    fn next(&mut self) -> io::Result<()> {
+    fn next(&mut self) -> decoder::Result<()> {
         if self.first {
             self.first = false;
-            self.stored_val = self.bit_reader.read_bits(64)?;
+            self.stored_val = self
+                .bit_reader
+                .read_bits(64)
+                .ok_or(DecoderError::UnexpectedEndOfChunk)?;
             self.stored_values[self.current] = self.stored_val;
             if self.stored_val == Self::NAN_LONG {
                 self.end_of_stream = true;
@@ -170,15 +183,22 @@ impl<const N_PREVIOUS_VALUES: usize, R: BitRead> ChimpNDecoder<N_PREVIOUS_VALUES
         Ok(())
     }
 
-    fn next_value(&mut self) -> io::Result<()> {
-        let flag = self.bit_reader.read_bits(2)? as u8;
+    fn next_value(&mut self) -> decoder::Result<()> {
+        let flag = self
+            .bit_reader
+            .read_bits(2)
+            .ok_or(DecoderError::UnexpectedEndOfChunk)? as u8;
         match flag {
             3 => {
-                self.stored_leading_zeros =
-                    Self::LEADING_REPRESENTATION[self.bit_reader.read_bits(3)? as usize] as u32;
+                self.stored_leading_zeros = Self::LEADING_REPRESENTATION[self
+                    .bit_reader
+                    .read_bits(3)
+                    .ok_or(DecoderError::UnexpectedEndOfChunk)?
+                    as usize] as u32;
                 let value = self
                     .bit_reader
-                    .read_bits(64 - self.stored_leading_zeros as u8)?;
+                    .read_bits(64 - self.stored_leading_zeros as u8)
+                    .ok_or(DecoderError::UnexpectedEndOfChunk)?;
                 self.stored_val ^= value;
 
                 if self.stored_val == Self::NAN_LONG {
@@ -191,7 +211,8 @@ impl<const N_PREVIOUS_VALUES: usize, R: BitRead> ChimpNDecoder<N_PREVIOUS_VALUES
             2 => {
                 let value = self
                     .bit_reader
-                    .read_bits(64 - self.stored_leading_zeros as u8)?;
+                    .read_bits(64 - self.stored_leading_zeros as u8)
+                    .ok_or(DecoderError::UnexpectedEndOfChunk)?;
                 self.stored_val ^= value;
 
                 if self.stored_val == Self::NAN_LONG {
@@ -203,7 +224,10 @@ impl<const N_PREVIOUS_VALUES: usize, R: BitRead> ChimpNDecoder<N_PREVIOUS_VALUES
             }
             1 => {
                 let mut fill = Self::INITIAL_FILL;
-                let temp = self.bit_reader.read_bits(fill as u8)?;
+                let temp = self
+                    .bit_reader
+                    .read_bits(fill as u8)
+                    .ok_or(DecoderError::UnexpectedEndOfChunk)?;
                 fill -= Self::PREVIOUS_VALUES_LOG2;
                 let index = (temp >> fill) & ((1 << Self::PREVIOUS_VALUES_LOG2) - 1);
                 fill -= 3;
@@ -217,9 +241,10 @@ impl<const N_PREVIOUS_VALUES: usize, R: BitRead> ChimpNDecoder<N_PREVIOUS_VALUES
                 }
                 self.stored_trailing_zeros =
                     64 - significant_bits as u32 - self.stored_leading_zeros;
-                let value = self.bit_reader.read_bits(
-                    (64 - self.stored_leading_zeros - self.stored_trailing_zeros) as u8,
-                )?;
+                let value = self
+                    .bit_reader
+                    .read_bits((64 - self.stored_leading_zeros - self.stored_trailing_zeros) as u8)
+                    .ok_or(DecoderError::UnexpectedEndOfChunk)?;
                 self.stored_val ^= value << self.stored_trailing_zeros;
 
                 if self.stored_val == Self::NAN_LONG {
@@ -232,7 +257,8 @@ impl<const N_PREVIOUS_VALUES: usize, R: BitRead> ChimpNDecoder<N_PREVIOUS_VALUES
             _ => {
                 self.stored_val = self.stored_values[self
                     .bit_reader
-                    .read_bits(Self::PREVIOUS_VALUES_LOG2 as u8)?
+                    .read_bits(Self::PREVIOUS_VALUES_LOG2 as u8)
+                    .ok_or(DecoderError::UnexpectedEndOfChunk)?
                     as usize];
                 self.current = (self.current + 1) % N_PREVIOUS_VALUES;
                 self.stored_values[self.current] = self.stored_val;

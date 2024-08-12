@@ -1,23 +1,31 @@
-use std::io::{self, Read};
+use std::io::Read;
 
 use crate::{
-    decoder::{query::QueryExecutor, FileMetadataLike, GeneralChunkHandle},
-    io::bit_read::BitReader,
+    decoder::{self, query::QueryExecutor, FileMetadataLike, GeneralChunkHandle},
+    io::bit_read::BufferedBitReader,
 };
 
 use super::Reader;
 
+type BitReader = BufferedBitReader<Vec<u8>>;
+
 #[derive(Debug, Clone, PartialEq, PartialOrd)]
-pub struct GorillaReader<R: Read> {
-    decoder: modified_tsz::GorillaDecoder<BitReader<R>>,
+pub struct GorillaReader {
+    decoder: modified_tsz::GorillaDecoder<BitReader>,
     number_of_records: usize,
     decompressed: Option<Vec<f64>>,
 }
 
-impl<R: Read> GorillaReader<R> {
-    pub fn new<T: FileMetadataLike>(handle: &GeneralChunkHandle<T>, reader: R) -> Self {
+impl GorillaReader {
+    pub fn new<T: FileMetadataLike, R: Read>(
+        handle: &GeneralChunkHandle<T>,
+        mut reader: R,
+    ) -> Self {
         let number_of_records = handle.number_of_records() as usize;
-        let r = BitReader::new(reader);
+        let chunk_size = handle.chunk_size() as usize;
+        let mut chunk_in_memory = vec![0; chunk_size];
+        reader.read_exact(&mut chunk_in_memory).unwrap();
+        let r = BufferedBitReader::new(chunk_in_memory);
         let decoder = modified_tsz::GorillaDecoder::new(r, Some(number_of_records));
 
         Self {
@@ -28,13 +36,13 @@ impl<R: Read> GorillaReader<R> {
     }
 }
 
-pub type GorillaIterator<'a, R> = &'a mut modified_tsz::GorillaDecoder<BitReader<R>>;
+pub type GorillaIterator<'a> = &'a mut modified_tsz::GorillaDecoder<BitReader>;
 
-impl<R: Read> Reader for GorillaReader<R> {
+impl Reader for GorillaReader {
     type NativeHeader = ();
-    type DecompressIterator<'a> = GorillaIterator<'a, R> where Self: 'a;
+    type DecompressIterator<'a> = GorillaIterator<'a> where Self: 'a;
 
-    fn decompress(&mut self) -> io::Result<&[f64]> {
+    fn decompress(&mut self) -> decoder::Result<&[f64]> {
         if self.decompressed.is_some() {
             return Ok(self.decompressed.as_ref().unwrap());
         }
@@ -57,8 +65,8 @@ impl<R: Read> Reader for GorillaReader<R> {
         &()
     }
 
-    fn decompress_iter(&mut self) -> Self::DecompressIterator<'_> {
-        &mut self.decoder
+    fn decompress_iter(&mut self) -> decoder::Result<Self::DecompressIterator<'_>> {
+        Ok(&mut self.decoder)
     }
 
     fn set_decompress_result(&mut self, data: Vec<f64>) -> &[f64] {
@@ -72,7 +80,7 @@ impl<R: Read> Reader for GorillaReader<R> {
     }
 }
 
-impl<R: Read> QueryExecutor for GorillaReader<R> {}
+impl QueryExecutor for GorillaReader {}
 
 mod modified_tsz {
     //! This original implementation is from tsz crate. It is modified to just use the floating point values compression.
@@ -104,12 +112,15 @@ mod modified_tsz {
     // encoding assumes the value is greater than 12 bits, we can store the value 0 to signal the end
     // of the stream
 
-    use std::{fmt::Debug, io};
+    use std::fmt::Debug;
 
-    use crate::io::bit_read::BitRead;
+    use crate::{
+        decoder::{self, error::DecoderError},
+        io::bit_read::BitRead2,
+    };
 
     #[derive(Debug, Clone, PartialEq, PartialOrd)]
-    pub struct GorillaDecoder<T: BitRead> {
+    pub struct GorillaDecoder<T: BitRead2> {
         /// current float value as bits
         value_bits: u64,
 
@@ -130,7 +141,7 @@ mod modified_tsz {
 
     impl<T> GorillaDecoder<T>
     where
-        T: BitRead,
+        T: BitRead2,
     {
         /// new creates a new StdDecoder which will read bytes from r
         pub fn new(r: T, number_of_records: Option<usize>) -> Self {
@@ -146,15 +157,21 @@ mod modified_tsz {
             }
         }
 
-        fn read_first_value(&mut self) -> io::Result<u64> {
-            self.r.read_bits(64).map(|bits| {
-                self.value_bits = bits;
-                self.value_bits
-            })
+        fn read_first_value(&mut self) -> decoder::Result<u64> {
+            self.r
+                .read_bits(64)
+                .map(|bits| {
+                    self.value_bits = bits;
+                    self.value_bits
+                })
+                .ok_or(DecoderError::UnexpectedEndOfChunk.into())
         }
 
-        fn read_next_value(&mut self) -> io::Result<u64> {
-            let contol_bit = self.r.read_bit()?;
+        fn read_next_value(&mut self) -> decoder::Result<u64> {
+            let contol_bit = self
+                .r
+                .read_bit()
+                .ok_or(DecoderError::UnexpectedEndOfChunk)?;
 
             if !contol_bit
             /* 0 */
@@ -162,26 +179,40 @@ mod modified_tsz {
                 return Ok(self.value_bits);
             }
 
-            let zeroes_bit = self.r.read_bit()?;
+            let zeroes_bit = self
+                .r
+                .read_bit()
+                .ok_or(DecoderError::UnexpectedEndOfChunk)?;
 
             if zeroes_bit
             /* 1 */
             {
-                self.leading_zeroes = self.r.read_bits(5).map(|n| n as u8)?;
-                let significant_digits = self.r.read_bits(6).map(|n| (n + 1) as u8)?;
+                self.leading_zeroes = self
+                    .r
+                    .read_bits(5)
+                    .map(|n| n as u8)
+                    .ok_or(DecoderError::UnexpectedEndOfChunk)?;
+                let significant_digits = self
+                    .r
+                    .read_bits(6)
+                    .map(|n| (n + 1) as u8)
+                    .ok_or(DecoderError::UnexpectedEndOfChunk)?;
                 self.trailing_zeroes = 64 - self.leading_zeroes - significant_digits;
             }
 
             let size = 64 - self.leading_zeroes - self.trailing_zeroes;
-            self.r.read_bits(size).map(|bits| {
-                self.value_bits ^= bits << self.trailing_zeroes;
-                self.value_bits
-            })
+            self.r
+                .read_bits(size)
+                .map(|bits| {
+                    self.value_bits ^= bits << self.trailing_zeroes;
+                    self.value_bits
+                })
+                .ok_or(DecoderError::UnexpectedEndOfChunk.into())
         }
     }
 
-    impl<'a, T: BitRead> Iterator for &'a mut GorillaDecoder<T> {
-        type Item = io::Result<f64>;
+    impl<'a, T: BitRead2> Iterator for &'a mut GorillaDecoder<T> {
+        type Item = decoder::Result<f64>;
 
         fn next(&mut self) -> Option<Self::Item> {
             GorillaDecoder::next(self).transpose()
@@ -190,9 +221,9 @@ mod modified_tsz {
 
     impl<T> GorillaDecoder<T>
     where
-        T: BitRead,
+        T: BitRead2,
     {
-        pub fn next(&mut self) -> io::Result<Option<f64>> {
+        pub fn next(&mut self) -> decoder::Result<Option<f64>> {
             if self.done
                 || self.number_of_records.map_or(false, |number_of_records| {
                     self.number_of_records_read >= number_of_records
@@ -202,14 +233,10 @@ mod modified_tsz {
                 return Ok(None);
             }
 
-            if let Err(err) = self.r.peak_bits(1) {
-                if err.kind() == io::ErrorKind::UnexpectedEof {
-                    self.done = true;
-                    return Ok(None);
-                } else {
-                    return Err(err);
-                }
-            };
+            if self.r.peak_bits(1).is_none() {
+                self.done = true;
+                return Ok(None);
+            }
 
             let value_bits = if self.first {
                 self.first = false;
@@ -228,110 +255,7 @@ mod modified_tsz {
 
     #[cfg(test)]
     mod tests {
-        use std::io;
-
-        use crate::io::bit_read::{BitRead, BitReader};
-
-        #[derive(Debug, Clone, PartialEq, PartialOrd)]
-        pub struct BufferRefReader<'a> {
-            bytes: &'a [u8], // internal buffer of bytes
-            index: usize,    // index into bytes
-            pos: u32,        // position in the byte we are currenlty reading
-        }
-
-        impl<'a> BufferRefReader<'a> {
-            /// new creates a new `BufferedReader` from `bytes`
-            pub fn new(bytes: &'a [u8]) -> Self {
-                Self {
-                    bytes,
-                    index: 0,
-                    pos: 0,
-                }
-            }
-
-            fn get_byte(&mut self) -> io::Result<u8> {
-                self.bytes
-                    .get(self.index)
-                    .cloned()
-                    .ok_or(io::Error::new(io::ErrorKind::UnexpectedEof, "EOF"))
-            }
-        }
-
-        impl<'a> BitRead for BufferRefReader<'a> {
-            fn read_bit(&mut self) -> io::Result<bool> {
-                if self.pos == 8 {
-                    self.index += 1;
-                    self.pos = 0;
-                }
-
-                let byte = self.get_byte()?;
-
-                let bit = byte & 1u8.wrapping_shl(7 - self.pos) != 0;
-
-                self.pos += 1;
-
-                Ok(bit)
-            }
-
-            fn read_byte(&mut self) -> io::Result<u8> {
-                if self.pos == 0 {
-                    self.pos += 8;
-                    return self.get_byte();
-                }
-
-                if self.pos == 8 {
-                    self.index += 1;
-                    return self.get_byte();
-                }
-
-                let mut byte = 0;
-                let mut b = self.get_byte()?;
-
-                byte |= b.wrapping_shl(self.pos);
-
-                self.index += 1;
-                b = self.get_byte()?;
-
-                byte |= b.wrapping_shr(8 - self.pos);
-
-                Ok(byte)
-            }
-
-            fn read_bits(&mut self, mut num: u8) -> io::Result<u64> {
-                if num > 64 {
-                    num = 64;
-                }
-
-                let mut bits: u64 = 0;
-                while num >= 8 {
-                    let byte = self.read_byte().map(u64::from)?;
-                    bits = bits.wrapping_shl(8) | byte;
-                    num -= 8;
-                }
-
-                while num > 0 {
-                    self.read_bit()
-                        .map(|bit| bits = bits.wrapping_shl(1) | bit as u64)?;
-
-                    num -= 1;
-                }
-
-                Ok(bits)
-            }
-
-            fn peak_bits(&mut self, num: u8) -> io::Result<u64> {
-                // save the current index and pos so we can reset them after calling `read_bits`
-                let index = self.index;
-                let pos = self.pos;
-
-                let bits = self.read_bits(num)?;
-
-                self.index = index;
-                self.pos = pos;
-
-                Ok(bits)
-            }
-        }
+        use crate::io::bit_read::BufferedBitReader;
 
         #[test]
         fn gorilla() {
@@ -356,125 +280,12 @@ mod modified_tsz {
                 0, /* END_MARKER */
             ];
 
-            let b = BitReader::new(&encoded[..]);
+            let b = BufferedBitReader::new(&encoded[..]);
             let mut decoder = super::GorillaDecoder::new(b, Some(2));
 
             assert_eq!(decoder.next().unwrap(), Some(12.0));
             assert_eq!(decoder.next().unwrap(), Some(24.0));
             assert_eq!(decoder.next().unwrap(), None);
-        }
-
-        #[test]
-        #[allow(clippy::bool_assert_comparison)]
-        fn read_bit() {
-            let bytes = [0b01101100, 0b11101001];
-            let mut b = BufferRefReader::new(&bytes[..]);
-
-            assert_eq!(b.read_bit().unwrap(), false);
-            assert_eq!(b.read_bit().unwrap(), true);
-            assert_eq!(b.read_bit().unwrap(), true);
-            assert_eq!(b.read_bit().unwrap(), false);
-            assert_eq!(b.read_bit().unwrap(), true);
-            assert_eq!(b.read_bit().unwrap(), true);
-            assert_eq!(b.read_bit().unwrap(), false);
-            assert_eq!(b.read_bit().unwrap(), false);
-
-            assert_eq!(b.read_bit().unwrap(), true);
-            assert_eq!(b.read_bit().unwrap(), true);
-            assert_eq!(b.read_bit().unwrap(), true);
-            assert_eq!(b.read_bit().unwrap(), false);
-            assert_eq!(b.read_bit().unwrap(), true);
-            assert_eq!(b.read_bit().unwrap(), false);
-            assert_eq!(b.read_bit().unwrap(), false);
-            assert_eq!(b.read_bit().unwrap(), true);
-
-            assert_eq!(
-                b.read_bit().unwrap_err().kind(),
-                io::ErrorKind::UnexpectedEof
-            );
-        }
-
-        #[test]
-        #[allow(clippy::bool_assert_comparison)]
-        fn read_byte() {
-            let bytes = vec![100, 25, 0, 240, 240];
-            let mut b = BufferRefReader::new(&bytes);
-
-            assert_eq!(b.read_byte().unwrap(), 100);
-            assert_eq!(b.read_byte().unwrap(), 25);
-            assert_eq!(b.read_byte().unwrap(), 0);
-
-            // read some individual bits we can test `read_byte` when the position in the
-            // byte we are currently reading is non-zero
-            assert_eq!(b.read_bit().unwrap(), true);
-            assert_eq!(b.read_bit().unwrap(), true);
-            assert_eq!(b.read_bit().unwrap(), true);
-            assert_eq!(b.read_bit().unwrap(), true);
-
-            assert_eq!(b.read_byte().unwrap(), 15);
-
-            assert_eq!(
-                b.read_byte().unwrap_err().kind(),
-                io::ErrorKind::UnexpectedEof
-            );
-        }
-
-        #[test]
-        fn read_bits() {
-            let bytes = vec![0b01010111, 0b00011101, 0b11110101, 0b00010100];
-            let mut b = BufferRefReader::new(&bytes);
-
-            assert_eq!(b.read_bits(3).unwrap(), 0b010);
-            assert_eq!(b.read_bits(1).unwrap(), 0b1);
-            assert_eq!(b.read_bits(20).unwrap(), 0b01110001110111110101);
-            assert_eq!(b.read_bits(8).unwrap(), 0b00010100);
-            assert_eq!(
-                b.read_bits(4).unwrap_err().kind(),
-                io::ErrorKind::UnexpectedEof
-            );
-        }
-
-        #[test]
-        #[allow(clippy::bool_assert_comparison)]
-        fn read_mixed() {
-            let bytes = vec![0b01101101, 0b01101101];
-            let mut b = BufferRefReader::new(&bytes);
-
-            assert_eq!(b.read_bit().unwrap(), false);
-            assert_eq!(b.read_bits(3).unwrap(), 0b110);
-            assert_eq!(b.read_byte().unwrap(), 0b11010110);
-            assert_eq!(b.read_bits(2).unwrap(), 0b11);
-            assert_eq!(b.read_bit().unwrap(), false);
-            assert_eq!(b.read_bits(1).unwrap(), 0b1);
-            assert_eq!(
-                b.read_bit().unwrap_err().kind(),
-                io::ErrorKind::UnexpectedEof
-            );
-        }
-
-        #[test]
-        fn peak_bits() {
-            let bytes = vec![0b01010111, 0b00011101, 0b11110101, 0b00010100];
-            let mut b = BufferRefReader::new(&bytes);
-
-            assert_eq!(b.peak_bits(1).unwrap(), 0b0);
-            assert_eq!(b.peak_bits(4).unwrap(), 0b0101);
-            assert_eq!(b.peak_bits(8).unwrap(), 0b01010111);
-            assert_eq!(b.peak_bits(20).unwrap(), 0b01010111000111011111);
-
-            // read some individual bits we can test `peak_bits` when the position in the
-            // byte we are currently reading is non-zero
-            assert_eq!(b.read_bits(12).unwrap(), 0b010101110001);
-
-            assert_eq!(b.peak_bits(1).unwrap(), 0b1);
-            assert_eq!(b.peak_bits(4).unwrap(), 0b1101);
-            assert_eq!(b.peak_bits(8).unwrap(), 0b11011111);
-            assert_eq!(b.peak_bits(20).unwrap(), 0b11011111010100010100);
-
-            assert_eq!(
-                b.peak_bits(22).unwrap_err().kind(),
-                io::ErrorKind::UnexpectedEof
-            );
         }
     }
 }

@@ -4,27 +4,34 @@ use std::{
 };
 
 use crate::{
-    decoder::{query::QueryExecutor, FileMetadataLike, GeneralChunkHandle},
+    decoder::{self, query::QueryExecutor, FileMetadataLike, GeneralChunkHandle},
     format::{deserialize::FromLeBytesExt, run_length::RunLengthHeader},
 };
 
 use super::Reader;
 
+pub type RunLengthReader = RunLengthReaderImpl<io::Cursor<Vec<u8>>>;
+pub type RunLengthIterator<'a> = RunLengthIteratorImpl<'a, io::Cursor<Vec<u8>>>;
+
 #[derive(Debug, Clone, PartialEq, PartialOrd)]
-pub struct RunLengthReader<R: Read> {
+pub struct RunLengthReaderImpl<R: Read> {
     number_of_records: usize,
     header: RunLengthHeader,
     reader: R,
     decompressed: Option<Vec<f64>>,
 }
 
-impl<R: Read> RunLengthReader<R> {
+impl RunLengthReader {
     /// Create a new RunLengthReader.
-    pub fn new<T: FileMetadataLike>(
+    pub fn new<T: FileMetadataLike, R: Read>(
         handle: &GeneralChunkHandle<T>,
         mut reader: R,
     ) -> io::Result<Self> {
         let number_of_records = handle.number_of_records() as usize;
+        let chunk_size = handle.chunk_size() as usize;
+        let mut chunk_in_memory = vec![0; chunk_size];
+        reader.read_exact(&mut chunk_in_memory)?;
+        let mut reader = io::Cursor::new(chunk_in_memory);
 
         let header = RunLengthHeader::from_le_bytes_by_reader(&mut reader)?;
 
@@ -35,7 +42,9 @@ impl<R: Read> RunLengthReader<R> {
             decompressed: None,
         })
     }
+}
 
+impl<R: Read> RunLengthReaderImpl<R> {
     pub fn number_of_fields(&self) -> usize {
         self.header.number_of_fields() as usize
     }
@@ -45,11 +54,11 @@ impl<R: Read> RunLengthReader<R> {
     }
 }
 
-impl<R: Read> Reader for RunLengthReader<R> {
+impl<R: Read> Reader for RunLengthReaderImpl<R> {
     type NativeHeader = RunLengthHeader;
-    type DecompressIterator<'a> = RunLengthIterator<'a, R> where Self: 'a;
+    type DecompressIterator<'a> = RunLengthIteratorImpl<'a, R> where Self: 'a;
 
-    fn decompress(&mut self) -> io::Result<&[f64]> {
+    fn decompress(&mut self) -> decoder::Result<&[f64]> {
         if self.decompressed.is_some() {
             return Ok(self.decompressed.as_ref().unwrap());
         }
@@ -80,8 +89,8 @@ impl<R: Read> Reader for RunLengthReader<R> {
         &self.header
     }
 
-    fn decompress_iter(&mut self) -> Self::DecompressIterator<'_> {
-        RunLengthIterator::new(self)
+    fn decompress_iter(&mut self) -> decoder::Result<Self::DecompressIterator<'_>> {
+        Ok(RunLengthIteratorImpl::new(self))
     }
 
     fn set_decompress_result(&mut self, data: Vec<f64>) -> &[f64] {
@@ -95,15 +104,15 @@ impl<R: Read> Reader for RunLengthReader<R> {
     }
 }
 
-pub struct RunLengthIterator<'a, R: Read> {
-    reader: &'a mut RunLengthReader<R>,
+pub struct RunLengthIteratorImpl<'a, R: Read> {
+    reader: &'a mut RunLengthReaderImpl<R>,
     current_field: usize,
     current_run: u8,
     current_value: f64,
 }
 
-impl<'a, R: Read> RunLengthIterator<'a, R> {
-    pub fn new(reader: &'a mut RunLengthReader<R>) -> Self {
+impl<'a, R: Read> RunLengthIteratorImpl<'a, R> {
+    pub fn new(reader: &'a mut RunLengthReaderImpl<R>) -> Self {
         Self {
             reader,
             current_field: 0,
@@ -113,8 +122,8 @@ impl<'a, R: Read> RunLengthIterator<'a, R> {
     }
 }
 
-impl<R: Read> Iterator for RunLengthIterator<'_, R> {
-    type Item = io::Result<f64>;
+impl<R: Read> Iterator for RunLengthIteratorImpl<'_, R> {
+    type Item = decoder::Result<f64>;
 
     fn next(&mut self) -> Option<Self::Item> {
         if self.current_run == 0 {
@@ -128,7 +137,7 @@ impl<R: Read> Iterator for RunLengthIterator<'_, R> {
                     self.current_run = buf[0];
                     self.current_value = f64::from_le_bytes(buf[1..9].try_into().unwrap());
                 }
-                Err(e) => return Some(Err(e)),
+                Err(e) => return Some(Err(e.into())),
             }
         }
 
@@ -139,4 +148,4 @@ impl<R: Read> Iterator for RunLengthIterator<'_, R> {
 }
 
 // TODO: Implement specialized scan
-impl<R: Read> QueryExecutor for RunLengthReader<R> {}
+impl<R: Read> QueryExecutor for RunLengthReaderImpl<R> {}

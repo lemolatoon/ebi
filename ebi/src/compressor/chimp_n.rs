@@ -1,7 +1,6 @@
 use derive_builder::Builder;
-use tsz::{stream::Write, Bit};
 
-use crate::io::buffered_bit_writer::BufferedWriterExt;
+use crate::io::bit_write::{BitWrite as _, BufferedBitWriter};
 
 use super::{Capacity, Compressor};
 
@@ -96,7 +95,7 @@ impl<const N: usize> Default for ChimpNCompressor<N> {
 
 #[derive(Debug, Clone, PartialEq, PartialOrd)]
 pub struct ChimpNEncoder<const N_PREVIOUS_VALUES: usize> {
-    w: BufferedWriterExt,
+    w: BufferedBitWriter,
     stored_leading_zeros: u32,
     stored_values: Box<[u64]>,
     first: bool,
@@ -131,7 +130,7 @@ impl<const N_PREVIOUS_VALUES: usize> ChimpNEncoder<N_PREVIOUS_VALUES> {
 
     pub fn with_capacity(capacity: usize) -> Self {
         Self {
-            w: BufferedWriterExt::with_capacity(capacity),
+            w: BufferedBitWriter::with_capacity(capacity),
             stored_leading_zeros: u32::MAX,
             stored_values: vec![0; N_PREVIOUS_VALUES].into_boxed_slice(),
             first: true,
@@ -161,7 +160,7 @@ impl<const N_PREVIOUS_VALUES: usize> ChimpNEncoder<N_PREVIOUS_VALUES> {
 
     pub fn close(&mut self) {
         self.add_value(f64::NAN);
-        self.w.write_bit(Bit::Zero);
+        self.w.write_bit(false);
     }
 
     fn compress_value(&mut self, value: u64) {

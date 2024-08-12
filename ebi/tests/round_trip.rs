@@ -101,6 +101,7 @@ fn test_round_trip_with_scale(
     compressor_config: CompressorConfig,
     scale: usize,
     chunk_option: impl Fn(usize) -> ChunkOption,
+    round_output: bool,
 ) {
     for n in [103, 1003, 100005] {
         #[cfg(miri)] // miri is too slow
@@ -183,8 +184,12 @@ fn test_round_trip_with_scale(
             let random_floats_rounded = random_values
                 .iter()
                 .map(|&x| {
-                    let scale = scale as f64;
-                    (x * scale).round() / scale
+                    if round_output {
+                        let scale = scale as f64;
+                        (x * scale).round() / scale
+                    } else {
+                        x
+                    }
                 })
                 .collect::<Vec<f64>>();
 
@@ -192,8 +197,12 @@ fn test_round_trip_with_scale(
                 .chunks_exact(8)
                 .map(|x| {
                     let x = f64::from_ne_bytes(x.try_into().unwrap());
-                    let scale = scale as f64;
-                    (x * scale).round() / scale
+                    if round_output {
+                        let scale = scale as f64;
+                        (x * scale).round() / scale
+                    } else {
+                        x
+                    }
                 })
                 .collect::<Vec<f64>>();
 
@@ -349,6 +358,59 @@ fn test_round_trip(
     };
     round_trip_assert(&xor_values2, compressor_config, ChunkOption::RecordCount(3));
 }
+#[test]
+fn test_api_round_trip_delta_sprintz() {
+    for scale in [1, 10, 100, 1000] {
+        println!("scale: {}", scale);
+        let compressor_config = CompressorConfig::delta_sprintz().scale(scale).build();
+        test_round_trip_with_scale(
+            generate_and_write_random_f64_with_precision,
+            compressor_config.into(),
+            scale as usize,
+            record_count_chunk_option_by_n,
+            false,
+        );
+    }
+
+    let compressor_config = CompressorConfig::delta_sprintz().scale(100).build();
+
+    println!("single values");
+    // sigle value
+    test_round_trip_with_scale(
+        |n, _scale| vec![100.19; n],
+        compressor_config.into(),
+        100,
+        record_count_chunk_option_by_n,
+        false,
+    );
+}
+
+#[test]
+fn test_api_round_trip_delta_sprintz_bytesize() {
+    for scale in [1, 10, 100, 1000] {
+        println!("scale: {}", scale);
+        let compressor_config = CompressorConfig::delta_sprintz().scale(scale).build();
+        test_round_trip_with_scale(
+            generate_and_write_random_f64_with_precision,
+            compressor_config.into(),
+            scale as usize,
+            bytesize_chunk_option_by_n,
+            false,
+        );
+    }
+
+    let compressor_config = CompressorConfig::delta_sprintz().scale(100).build();
+
+    println!("single values");
+    // sigle value
+    test_round_trip_with_scale(
+        |n, _scale| vec![100.19; n],
+        compressor_config.into(),
+        100,
+        bytesize_chunk_option_by_n,
+        false,
+    );
+}
 
 #[test]
 fn test_api_round_trip_buff() {
@@ -360,6 +422,7 @@ fn test_api_round_trip_buff() {
             compressor_config.into(),
             scale,
             record_count_chunk_option_by_n,
+            true,
         );
     }
 
@@ -372,6 +435,7 @@ fn test_api_round_trip_buff() {
         compressor_config.into(),
         100,
         record_count_chunk_option_by_n,
+        true,
     );
 }
 
@@ -385,6 +449,7 @@ fn test_api_round_trip_buff_bytesize() {
             compressor_config.into(),
             scale,
             bytesize_chunk_option_by_n,
+            true,
         );
     }
 
@@ -397,5 +462,6 @@ fn test_api_round_trip_buff_bytesize() {
         compressor_config.into(),
         100,
         bytesize_chunk_option_by_n,
+        true,
     );
 }

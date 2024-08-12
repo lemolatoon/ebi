@@ -1,11 +1,12 @@
-use std::io::{self};
-
-use crate::io::bit_read::BitRead;
+use crate::{
+    decoder::{self, error::DecoderError},
+    io::bit_read::BitRead2,
+};
 
 use super::general_xor::{GeneralXorDecompressIterator, GeneralXorReader, XorDecoder};
 
-pub type ChimpReader<R> = GeneralXorReader<R, ChimpDecoder>;
-pub type ChimpDecompressIterator<'a, R> = GeneralXorDecompressIterator<'a, R, ChimpDecoder>;
+pub type ChimpReader = GeneralXorReader<ChimpDecoder>;
+pub type ChimpDecompressIterator<'a> = GeneralXorDecompressIterator<'a, ChimpDecoder>;
 
 #[derive(Debug, Clone, PartialEq, PartialOrd)]
 pub struct ChimpDecoder {
@@ -17,7 +18,7 @@ pub struct ChimpDecoder {
 }
 
 impl XorDecoder for ChimpDecoder {
-    fn decompress_float<R: BitRead>(&mut self, r: R) -> io::Result<Option<f64>> {
+    fn decompress_float<R: BitRead2>(&mut self, r: R) -> decoder::Result<Option<f64>> {
         self.read_value(r)
     }
 
@@ -46,7 +47,7 @@ impl ChimpDecoder {
         }
     }
 
-    pub fn get_values<R: BitRead>(&mut self, mut r: R) -> io::Result<Vec<f64>> {
+    pub fn get_values<R: BitRead2>(&mut self, mut r: R) -> decoder::Result<Vec<f64>> {
         let mut values = Vec::new();
         while let Some(value) = self.read_value(&mut r)? {
             values.push(value);
@@ -54,14 +55,14 @@ impl ChimpDecoder {
         Ok(values)
     }
 
-    pub fn read_value<R: BitRead>(&mut self, mut r: R) -> io::Result<Option<f64>> {
+    pub fn read_value<R: BitRead2>(&mut self, mut r: R) -> decoder::Result<Option<f64>> {
         if self.end_of_stream {
             return Ok(None);
         }
 
         if self.first {
             self.first = false;
-            self.stored_val = r.read_bits(64)?;
+            self.stored_val = r.read_bits(64).ok_or(DecoderError::UnexpectedEndOfChunk)?;
             if self.stored_val == Self::NAN_LONG {
                 self.end_of_stream = true;
                 return Ok(None);
@@ -77,32 +78,39 @@ impl ChimpDecoder {
         Ok(Some(f64::from_bits(self.stored_val)))
     }
 
-    fn next_value<R: BitRead>(&mut self, mut r: R) -> io::Result<()> {
-        let flag = r.read_bits(2)? as u8;
+    fn next_value<R: BitRead2>(&mut self, mut r: R) -> decoder::Result<()> {
+        let flag = r.read_bits(2).ok_or(DecoderError::UnexpectedEndOfChunk)? as u8;
         match flag {
             3 => {
-                self.stored_leading_zeros =
-                    Self::LEADING_REPRESENTATION[r.read_bits(3)? as usize] as u32;
+                self.stored_leading_zeros = Self::LEADING_REPRESENTATION
+                    [r.read_bits(3).ok_or(DecoderError::UnexpectedEndOfChunk)? as usize]
+                    as u32;
                 let significant_bits = 64 - self.stored_leading_zeros;
-                let value = r.read_bits(significant_bits as u8)?;
+                let value = r
+                    .read_bits(significant_bits as u8)
+                    .ok_or(DecoderError::UnexpectedEndOfChunk)?;
                 self.stored_val ^= value;
             }
             2 => {
                 let significant_bits = 64 - self.stored_leading_zeros;
-                let value = r.read_bits(significant_bits as u8)?;
+                let value = r
+                    .read_bits(significant_bits as u8)
+                    .ok_or(DecoderError::UnexpectedEndOfChunk)?;
                 self.stored_val ^= value;
             }
             1 => {
-                self.stored_leading_zeros =
-                    Self::LEADING_REPRESENTATION[r.read_bits(3)? as usize] as u32;
-                let mut significant_bits = r.read_bits(6)? as u32;
+                self.stored_leading_zeros = Self::LEADING_REPRESENTATION
+                    [r.read_bits(3).ok_or(DecoderError::UnexpectedEndOfChunk)? as usize]
+                    as u32;
+                let mut significant_bits =
+                    r.read_bits(6).ok_or(DecoderError::UnexpectedEndOfChunk)? as u32;
                 if significant_bits == 0 {
                     significant_bits = 64;
                 }
                 self.stored_trailing_zeros = 64 - significant_bits - self.stored_leading_zeros;
-                let value = r.read_bits(
-                    (64 - self.stored_leading_zeros - self.stored_trailing_zeros) as u8,
-                )?;
+                let value = r
+                    .read_bits((64 - self.stored_leading_zeros - self.stored_trailing_zeros) as u8)
+                    .ok_or(DecoderError::UnexpectedEndOfChunk)?;
                 self.stored_val ^= value << self.stored_trailing_zeros;
             }
             _ => {}

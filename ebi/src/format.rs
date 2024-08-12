@@ -179,6 +179,7 @@ pub enum CompressionScheme {
     Chimp128 = 5,
     ElfOnChimp = 6,
     Elf = 7,
+    DeltaSprintz = 8,
 }
 
 // =============== Chunk ===================

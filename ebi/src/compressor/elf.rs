@@ -1,8 +1,9 @@
 use std::mem;
 
-use tsz::{stream::Write as _, Bit};
-
-use crate::{compression_common::elf, io::buffered_bit_writer::BufferedWriterExt};
+use crate::{
+    compression_common::elf,
+    io::bit_write::{BitWrite, BufferedBitWriter},
+};
 
 use super::{
     chimp::ChimpEncoder,
@@ -12,7 +13,7 @@ use super::{
     },
 };
 
-type ElfOnTCompressor<T> = GeneralXorCompressor<ElfEncoderWrapper<T>>;
+type ElfOnTCompressor<T> = GeneralXorCompressor<BufferedBitWriter, ElfEncoderWrapper<T>>;
 type ElfOnTCompressorConfig<T> = GeneralXorCompressorConfig<ElfEncoderWrapper<T>>;
 type ElfOnTCompressorConfigBuilder<T> = GeneralXorCompressorConfigBuilder<ElfEncoderWrapper<T>>;
 
@@ -33,7 +34,7 @@ macro_rules! declare_elf_on_t_compressor {
 declare_elf_on_t_compressor!(on_chimp, super::ChimpEncoder);
 
 impl<T: XorEncoder> XorEncoder for ElfEncoderWrapper<T> {
-    fn compress_float(&mut self, w: &mut BufferedWriterExt, bits: u64) -> usize {
+    fn compress_float<W: BitWrite>(&mut self, w: W, bits: u64) -> usize {
         let preserved_size = self.size();
         self.add_value(w, f64::from_bits(bits));
 
@@ -46,7 +47,7 @@ impl<T: XorEncoder> XorEncoder for ElfEncoderWrapper<T> {
         self.xor_encoder.reset();
     }
 
-    fn close(&mut self, w: &mut BufferedWriterExt) {
+    fn close<W: BitWrite>(&mut self, mut w: W) {
         self.size += 2;
         // case 10
         w.write_bits(2, 2);
@@ -80,7 +81,7 @@ impl<T: XorEncoder> ElfEncoderWrapper<T> {
         }
     }
 
-    pub fn add_value(&mut self, w: &mut BufferedWriterExt, v: f64) {
+    pub fn add_value<W: BitWrite>(&mut self, mut w: W, v: f64) {
         let v_bits = v.to_bits();
 
         let v_prime_u64 = if v == 0.0 || v.is_infinite() {
@@ -118,7 +119,7 @@ impl<T: XorEncoder> ElfEncoderWrapper<T> {
                 if beta_star == self.last_beta_star {
                     // case 0
                     self.size += 1;
-                    w.write_bit(Bit::Zero);
+                    w.write_bit(false);
                 } else {
                     // case 11, 2 + 4 = 6
                     self.size += 6;
@@ -181,7 +182,7 @@ impl ElfXorEncoder {
     ///
     /// This method should called at the first float of the entire floats
     /// The 2nd and later, use [`ElfXorEncoder::compress_float_inner`] instead
-    fn write_first(&mut self, w: &mut BufferedWriterExt, bits: u64) -> usize {
+    fn write_first<W: BitWrite>(&mut self, mut w: W, bits: u64) -> usize {
         self.first = false;
         self.stored_val = bits;
         let trailing_zeros = bits.trailing_zeros();
@@ -200,7 +201,7 @@ impl ElfXorEncoder {
     /// Returns the increased size by bits
     ///
     /// For the first float, use [`ElfXorEncoder::write_first`] instead
-    fn compress_float_inner(&mut self, w: &mut BufferedWriterExt, bits: u64) -> usize {
+    fn compress_float_inner<W: BitWrite>(&mut self, mut w: W, bits: u64) -> usize {
         let mut this_size = 0;
         let xor = self.stored_val ^ bits;
 
@@ -280,9 +281,9 @@ impl ElfXorEncoder {
     /// ```
     /// use ebi::compressor::elf::ElfXorEncoder;
     /// use crate::ebi::compressor::general_xor::XorEncoder;
-    /// use ebi::io::buffered_bit_writer::BufferedWriterExt;
+    /// use ebi::io::bit_write::BufferedBitWriter;
     /// let mut encoder = ElfXorEncoder::new();
-    /// let mut w = BufferedWriterExt::new();
+    /// let mut w = BufferedBitWriter::new();
     ///
     /// // Simulate adding a value
     /// let simulated_size = encoder.simulate_compress_float(42.0f64.to_bits());
@@ -350,7 +351,7 @@ impl Default for ElfXorEncoder {
 }
 
 impl XorEncoder for ElfXorEncoder {
-    fn compress_float(&mut self, w: &mut BufferedWriterExt, bits: u64) -> usize {
+    fn compress_float<W: BitWrite>(&mut self, w: W, bits: u64) -> usize {
         if self.first {
             self.write_first(w, bits)
         } else {
@@ -358,9 +359,9 @@ impl XorEncoder for ElfXorEncoder {
         }
     }
 
-    fn close(&mut self, w: &mut BufferedWriterExt) {
-        self.compress_float(w, Self::END_SIGN);
-        w.write_bit(Bit::Zero);
+    fn close<W: BitWrite>(&mut self, mut w: W) {
+        self.compress_float(&mut w, Self::END_SIGN);
+        w.write_bit(false);
     }
 
     fn simulate_close(&self) -> usize {

@@ -1,12 +1,10 @@
-use tsz::{stream::Write as _, Bit};
-
-use crate::io::buffered_bit_writer::BufferedWriterExt;
+use crate::io::bit_write::{BitWrite, BufferedBitWriter};
 
 use super::general_xor::{
     GeneralXorCompressor, GeneralXorCompressorConfig, GeneralXorCompressorConfigBuilder, XorEncoder,
 };
 
-pub type ChimpCompressor = GeneralXorCompressor<ChimpEncoder>;
+pub type ChimpCompressor = GeneralXorCompressor<BufferedBitWriter, ChimpEncoder>;
 pub type ChimpCompressorConfig = GeneralXorCompressorConfig<ChimpEncoder>;
 pub type ChimpCompressorConfigBuilder = GeneralXorCompressorConfigBuilder<ChimpEncoder>;
 
@@ -19,9 +17,9 @@ pub struct ChimpEncoder {
 }
 
 impl XorEncoder for ChimpEncoder {
-    fn compress_float(&mut self, w: &mut BufferedWriterExt, bits: u64) -> usize {
+    fn compress_float<W: BitWrite>(&mut self, mut w: W, bits: u64) -> usize {
         let preserved_size = self.size();
-        self.add_value(w, f64::from_bits(bits));
+        self.add_value(&mut w, f64::from_bits(bits));
 
         self.size() - preserved_size
     }
@@ -30,8 +28,8 @@ impl XorEncoder for ChimpEncoder {
         *self = Self::new();
     }
 
-    fn close(&mut self, w: &mut BufferedWriterExt) {
-        ChimpEncoder::close(self, w);
+    fn close<W: BitWrite>(&mut self, mut w: W) {
+        ChimpEncoder::close(self, &mut w);
     }
 
     fn simulate_close(&self) -> usize {
@@ -66,7 +64,7 @@ impl ChimpEncoder {
     }
 
     #[inline]
-    pub fn add_value(&mut self, w: &mut BufferedWriterExt, value: f64) {
+    pub fn add_value<W: BitWrite>(&mut self, w: &mut W, value: f64) {
         let value = value.to_bits();
         if self.first {
             self.write_first(w, value);
@@ -76,24 +74,25 @@ impl ChimpEncoder {
     }
 
     #[inline]
-    fn write_first(&mut self, w: &mut BufferedWriterExt, value: u64) {
+    fn write_first<W: BitWrite>(&mut self, w: &mut W, value: u64) {
         self.first = false;
         self.stored_val = value;
         w.write_bits(value, 64);
         self.size += 64;
     }
 
-    pub fn close(&mut self, w: &mut BufferedWriterExt) {
+    pub fn close<W: BitWrite>(&mut self, w: &mut W) {
         self.add_value(w, f64::NAN);
-        w.write_bit(Bit::Zero);
+        w.write_bit(false);
     }
 
     #[inline]
-    fn compress_value(&mut self, w: &mut BufferedWriterExt, value: u64) {
+    fn compress_value<W: BitWrite>(&mut self, w: &mut W, value: u64) {
         let xor = self.stored_val ^ value;
         if xor == 0 {
-            w.write_bit(Bit::Zero);
-            w.write_bit(Bit::Zero);
+            // case 00
+            w.write_bit(false);
+            w.write_bit(false);
             self.size += 2;
             self.stored_leading_zeros = 65;
         } else {
@@ -102,8 +101,9 @@ impl ChimpEncoder {
 
             if trailing_zeros > Self::THRESHOLD {
                 let significant_bits = 64 - leading_zeros - trailing_zeros;
-                w.write_bit(Bit::Zero);
-                w.write_bit(Bit::One);
+                // case 01
+                w.write_bit(false);
+                w.write_bit(true);
                 w.write_bits(
                     Self::LEADING_REPRESENTATION[leading_zeros as usize] as u64,
                     3,
@@ -113,16 +113,18 @@ impl ChimpEncoder {
                 self.size += (11 + significant_bits) as usize;
                 self.stored_leading_zeros = 65;
             } else if leading_zeros == self.stored_leading_zeros {
-                w.write_bit(Bit::One);
-                w.write_bit(Bit::Zero);
+                // case 10
+                w.write_bit(true);
+                w.write_bit(false);
                 let significant_bits = 64 - leading_zeros;
                 w.write_bits(xor, significant_bits);
                 self.size += (2 + significant_bits) as usize;
             } else {
+                // case 11
                 self.stored_leading_zeros = leading_zeros;
                 let significant_bits = 64 - leading_zeros;
-                w.write_bit(Bit::One);
-                w.write_bit(Bit::One);
+                w.write_bit(true);
+                w.write_bit(true);
                 w.write_bits(
                     Self::LEADING_REPRESENTATION[leading_zeros as usize] as u64,
                     3,
@@ -151,9 +153,9 @@ impl ChimpEncoder {
     ///
     /// ```
     /// use ebi::compressor::chimp::ChimpEncoder;
-    /// use ebi::io::buffered_bit_writer::BufferedWriterExt;
+    /// use ebi::io::bit_write::BufferedBitWriter;
     /// let mut encoder = ChimpEncoder::new();
-    /// let mut w = BufferedWriterExt::new();
+    /// let mut w = BufferedBitWriter::new();
     ///
     /// // Simulate adding a value
     /// let simulated_size = encoder.simulate_add_value(42.0);

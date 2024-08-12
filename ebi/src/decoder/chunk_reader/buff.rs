@@ -1,12 +1,8 @@
 use core::slice;
-use std::{
-    io::{self, Read},
-    iter,
-};
-
-use either::Either;
+use std::{io::Read, iter};
 
 use crate::decoder::{
+    self,
     query::{Predicate, QueryExecutor, RangeValue},
     FileMetadataLike, GeneralChunkHandle,
 };
@@ -14,53 +10,51 @@ use crate::decoder::{
 use super::Reader;
 
 #[derive(Debug, Clone, PartialEq, PartialOrd)]
-pub struct BUFFReader<R: Read> {
-    reader: R,
+pub struct BUFFReader {
     chunk_size: u64,
     number_of_records: u64,
-    bytes: Option<Vec<u8>>,
+    bytes: Vec<u8>,
     decompressed: Option<Vec<f64>>,
 }
 
-impl<R: Read> BUFFReader<R> {
-    pub fn new<T: FileMetadataLike>(handle: &GeneralChunkHandle<T>, reader: R) -> Self {
+impl BUFFReader {
+    pub fn new<T: FileMetadataLike, R: Read>(
+        handle: &GeneralChunkHandle<T>,
+        mut reader: R,
+    ) -> Self {
         let chunk_size = handle.chunk_size();
+        let mut chunk_in_memory = vec![0; chunk_size as usize];
+        reader.read_exact(&mut chunk_in_memory).unwrap();
         let number_of_records = handle.number_of_records();
         Self {
-            reader,
             chunk_size,
             number_of_records,
-            bytes: None,
+            bytes: chunk_in_memory,
             decompressed: None,
         }
     }
 
-    fn bytes(&mut self) -> io::Result<&[u8]> {
-        if self.bytes.is_none() {
-            let mut buf = vec![0; self.chunk_size as usize];
-            self.reader.read_exact(&mut buf)?;
-            self.bytes = Some(buf);
-        }
-        Ok(self.bytes.as_deref().unwrap())
+    fn bytes(&mut self) -> &[u8] {
+        &self.bytes
     }
 }
 
-type F = fn(&f64) -> io::Result<f64>;
-pub type BUFFIterator<'a> = Either<iter::Map<slice::Iter<'a, f64>, F>, iter::Once<io::Result<f64>>>;
+type F = fn(&f64) -> decoder::Result<f64>;
+pub type BUFFIterator<'a> = iter::Map<slice::Iter<'a, f64>, F>;
 
-impl<R: Read> Reader for BUFFReader<R> {
+impl Reader for BUFFReader {
     type NativeHeader = ();
 
     type DecompressIterator<'a> = BUFFIterator<'a>
     where
         Self: 'a;
 
-    fn decompress(&mut self) -> io::Result<&[f64]> {
+    fn decompress(&mut self) -> decoder::Result<&[f64]> {
         if self.decompressed.is_some() {
             return Ok(self.decompressed.as_ref().unwrap());
         }
 
-        let bytes = self.bytes()?;
+        let bytes = self.bytes();
         let result = internal::buff_simd256_decode(bytes);
 
         self.decompressed = Some(result);
@@ -68,13 +62,10 @@ impl<R: Read> Reader for BUFFReader<R> {
         Ok(self.decompressed.as_ref().unwrap())
     }
 
-    fn decompress_iter(&mut self) -> Self::DecompressIterator<'_> {
-        let decompressed = self.decompress();
+    fn decompress_iter(&mut self) -> decoder::Result<Self::DecompressIterator<'_>> {
+        let decompressed = self.decompress()?;
 
-        match decompressed {
-            Ok(decompressed) => Either::Left(decompressed.iter().map(|f| Ok(*f))),
-            Err(e) => Either::Right(iter::once(Err(e))),
-        }
+        Ok(decompressed.iter().map(|f| Ok(*f)))
     }
 
     fn set_decompress_result(&mut self, data: Vec<f64>) -> &[f64] {
@@ -96,7 +87,7 @@ impl<R: Read> Reader for BUFFReader<R> {
 }
 
 // TODO: implement in-situ query execution
-impl<R: Read> QueryExecutor for BUFFReader<R> {
+impl QueryExecutor for BUFFReader {
     fn filter(
         &mut self,
         predicate: Predicate,
@@ -111,7 +102,7 @@ impl<R: Read> QueryExecutor for BUFFReader<R> {
                 .filter(|&x| x >= logical_offset && x < logical_offset + number_of_records)
                 .collect()
         });
-        let bytes = self.bytes()?;
+        let bytes = self.bytes();
         let all = || {
             let mut all = roaring::RoaringBitmap::new();
             all.insert_range(logical_offset..(number_of_records + logical_offset));
