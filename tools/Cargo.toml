@@ -1,0 +1,12 @@
+[package]
+name = "tools"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+anyhow = "1.0.86"
+glob = "0.3.1"
+
+[[bin]]
+name = "csv2bin"
+path = "src/csv2bin.rs"

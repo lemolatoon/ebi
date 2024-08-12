@@ -1,4 +1,6 @@
 use derive_builder::Builder;
+#[cfg(feature = "serde")]
+use serde::{Deserialize, Serialize};
 
 use crate::io::bit_write::{BitWrite as _, BufferedBitWriter};
 
@@ -33,6 +35,7 @@ pub type Chimp128CompressorConfigBuilder = ChimpCompressorConfigBuilder<128>;
 
 #[derive(Builder, Debug, Clone, Copy)]
 #[builder(pattern = "owned", build_fn(skip))]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct ChimpCompressorConfig<const N: usize> {
     #[builder(setter(into), default)]
     pub(crate) capacity: Capacity,

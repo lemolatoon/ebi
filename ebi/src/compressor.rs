@@ -10,6 +10,9 @@ use uncompressed::UncompressedCompressor;
 
 use crate::format::{self, CompressionScheme};
 
+#[cfg(feature = "serde")]
+use serde::{Deserialize, Serialize};
+
 pub mod buff;
 pub mod chimp;
 pub mod chimp_n;
@@ -135,6 +138,8 @@ impl_generic_compressor!(
 );
 
 #[derive(QuickImpl, Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "serde", serde(tag = "type"))]
 pub enum CompressorConfig {
     #[quick_impl(impl From)]
     Uncompressed(UncompressedCompressorConfig),
@@ -245,6 +250,7 @@ impl CompressorConfig {
 }
 
 #[derive(Debug, Clone, Copy)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub(crate) struct Capacity(usize);
 
 const DEFAULT_CAPACITY: usize = 1024 * 8;
@@ -261,6 +267,7 @@ impl From<usize> for Capacity {
 
 #[derive(Builder, Debug, Clone)]
 #[builder(pattern = "owned", build_fn(skip))]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct UncompressedCompressorConfig {
     #[builder(setter(into), default)]
     capacity: Capacity,
@@ -280,6 +287,7 @@ impl UncompressedCompressorConfigBuilder {
 
 #[derive(Builder, Debug, Clone, Copy)]
 #[builder(pattern = "owned", build_fn(skip))]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct RunLengthCompressorConfig {
     #[builder(setter(into), default)]
     capacity: Capacity,
@@ -296,6 +304,7 @@ impl RunLengthCompressorConfigBuilder {
 
 #[derive(Builder, Debug, Clone, Copy)]
 #[builder(pattern = "owned", build_fn(skip))]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct GorillaCompressorConfig {
     #[builder(setter(into), default)]
     capacity: Capacity,
@@ -312,6 +321,7 @@ impl GorillaCompressorConfigBuilder {
 
 #[derive(Builder, Debug, Clone, Copy)]
 #[builder(pattern = "owned", build_fn(skip))]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct BUFFCompressorConfig {
     scale: usize,
 }

@@ -1,0 +1,11 @@
+{
+    "predicate": {
+        "type": "Range",
+        "start": {
+            "Inclusive": 72.0
+        },
+        "end": {
+            "Exclusive": 82.3
+        }
+    }
+}

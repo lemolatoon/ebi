@@ -1,6 +1,8 @@
 use std::mem;
 
 use derive_builder::Builder;
+#[cfg(feature = "serde")]
+use serde::{Deserialize, Serialize};
 
 use crate::io::bit_write::{BitWrite, BufferedBitWriter};
 
@@ -21,6 +23,7 @@ pub struct DeltaSprintzCompressorImpl<W: BitWrite> {
 
 #[derive(Builder, Debug, Clone, Copy)]
 #[builder(pattern = "owned", build_fn(skip))]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct DeltaSprintzCompressorConfig {
     #[builder(setter(into), default)]
     capacity: Capacity,

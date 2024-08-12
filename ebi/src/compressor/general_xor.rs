@@ -6,6 +6,9 @@ use crate::io::bit_write::{BitWrite, BufferedBitWriter};
 
 use super::{Capacity, Compressor};
 
+#[cfg(feature = "serde")]
+use serde::{Deserialize, Serialize};
+
 pub trait XorEncoder: Default {
     /// Compress the passed floats,
     /// Returns the increased size by bits
@@ -52,9 +55,11 @@ impl<T: XorEncoder> Default for GeneralXorCompressor<BitWriter, T> {
 
 #[derive(Builder, Debug, Clone, Copy)]
 #[builder(pattern = "owned", build_fn(skip))]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct GeneralXorCompressorConfig<T: XorEncoder> {
     #[builder(setter(into), default)]
     pub(crate) capacity: Capacity,
+    #[cfg_attr(feature = "serde", serde(skip))]
     #[builder(setter(skip))]
     _encoder_type: PhantomData<T>,
 }

@@ -1,0 +1,9 @@
+{
+    "chunk_option": {
+        "RecordCount": 8192
+    },
+    "compressor_config": {
+        "type": "BUFF",
+        "scale": 10
+    }
+}

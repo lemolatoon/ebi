@@ -1,6 +1,8 @@
 use std::io::Write;
 
-use roaring::RoaringBitmap;
+pub use roaring::RoaringBitmap;
+#[cfg(feature = "serde")]
+use serde::{Deserialize, Serialize};
 
 use crate::decoder;
 
@@ -132,6 +134,7 @@ pub trait PredicateNumber: Copy + PartialEq + PartialOrd {}
 impl<T: Copy + PartialEq + PartialOrd> PredicateNumber for T {}
 
 #[derive(Debug, Clone, Copy, PartialEq, PartialOrd)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum RangeValueImpl<T: PredicateNumber> {
     Inclusive(T),
     Exclusive(T),
@@ -151,6 +154,7 @@ impl<T: PredicateNumber> RangeValueImpl<T> {
 pub type RangeValue = RangeValueImpl<f64>;
 
 #[derive(Debug, Clone, Copy, PartialEq, PartialOrd)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct RangeImpl<T: PredicateNumber> {
     pub start: RangeValueImpl<T>,
     pub end: RangeValueImpl<T>,
@@ -199,6 +203,8 @@ impl<T: PredicateNumber> RangeImpl<T> {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, PartialOrd)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "serde", serde(tag = "type"))]
 pub enum PredicateImpl<T: PredicateNumber> {
     Eq(T),
     Ne(T),

@@ -6,6 +6,8 @@ use std::{
 };
 
 use roaring::RoaringBitmap;
+#[cfg(feature = "serde")]
+use serde::{Deserialize, Serialize};
 
 use crate::{
     decoder::{
@@ -88,6 +90,7 @@ impl DecoderOutput<Cursor<Vec<u8>>> {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct ChunkId(usize);
 
 impl ChunkId {

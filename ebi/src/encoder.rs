@@ -11,6 +11,8 @@ use crate::{
     io::aligned_buf_reader::AlignedBufRead,
 };
 use core::slice;
+#[cfg(feature = "serde")]
+use serde::{Deserialize, Serialize};
 use std::{
     io::{self, Read, Write},
     mem::{offset_of, size_of, size_of_val},
@@ -18,6 +20,7 @@ use std::{
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum ChunkOption {
     Full,
     RecordCount(usize),
