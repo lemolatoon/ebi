@@ -82,8 +82,8 @@ impl<R: Read> Reader for UncompressedReaderImpl<R> {
         &self.header
     }
 
-    fn decompress_iter(&mut self) -> Self::DecompressIterator<'_> {
-        UncompressedIteratorImpl::new(self)
+    fn decompress_iter(&mut self) -> decoder::Result<Self::DecompressIterator<'_>> {
+        Ok(UncompressedIteratorImpl::new(self))
     }
 
     fn set_decompress_result(&mut self, data: Vec<f64>) -> &[f64] {

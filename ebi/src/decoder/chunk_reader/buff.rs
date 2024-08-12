@@ -1,8 +1,6 @@
 use core::slice;
 use std::{io::Read, iter};
 
-use either::Either;
-
 use crate::decoder::{
     self,
     query::{Predicate, QueryExecutor, RangeValue},
@@ -42,8 +40,7 @@ impl BUFFReader {
 }
 
 type F = fn(&f64) -> decoder::Result<f64>;
-pub type BUFFIterator<'a> =
-    Either<iter::Map<slice::Iter<'a, f64>, F>, iter::Once<decoder::Result<f64>>>;
+pub type BUFFIterator<'a> = iter::Map<slice::Iter<'a, f64>, F>;
 
 impl Reader for BUFFReader {
     type NativeHeader = ();
@@ -65,13 +62,10 @@ impl Reader for BUFFReader {
         Ok(self.decompressed.as_ref().unwrap())
     }
 
-    fn decompress_iter(&mut self) -> Self::DecompressIterator<'_> {
-        let decompressed = self.decompress();
+    fn decompress_iter(&mut self) -> decoder::Result<Self::DecompressIterator<'_>> {
+        let decompressed = self.decompress()?;
 
-        match decompressed {
-            Ok(decompressed) => Either::Left(decompressed.iter().map(|f| Ok(*f))),
-            Err(e) => Either::Right(iter::once(Err(e))),
-        }
+        Ok(decompressed.iter().map(|f| Ok(*f)))
     }
 
     fn set_decompress_result(&mut self, data: Vec<f64>) -> &[f64] {

@@ -58,8 +58,11 @@ impl<T: XorDecoder> Reader for GeneralXorReader<T> {
     where
         T: 'a;
 
-    fn decompress_iter(&mut self) -> Self::DecompressIterator<'_> {
-        Self::DecompressIterator::new(&mut self.bit_reader, self.number_of_records)
+    fn decompress_iter(&mut self) -> decoder::Result<Self::DecompressIterator<'_>> {
+        Ok(Self::DecompressIterator::new(
+            &mut self.bit_reader,
+            self.number_of_records,
+        ))
     }
 
     fn set_decompress_result(&mut self, data: Vec<f64>) -> &[f64] {

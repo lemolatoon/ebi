@@ -65,8 +65,8 @@ impl Reader for GorillaReader {
         &()
     }
 
-    fn decompress_iter(&mut self) -> Self::DecompressIterator<'_> {
-        &mut self.decoder
+    fn decompress_iter(&mut self) -> decoder::Result<Self::DecompressIterator<'_>> {
+        Ok(&mut self.decoder)
     }
 
     fn set_decompress_result(&mut self, data: Vec<f64>) -> &[f64] {

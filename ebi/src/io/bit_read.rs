@@ -122,6 +122,11 @@ impl<T: AsRef<[u8]>> BufferedBitReader<T> {
         }
     }
 
+    pub fn reset(&mut self) {
+        self.bit_pos = 0;
+        self.byte_pos = 0;
+    }
+
     pub fn read_bit_unchecked(&mut self) -> bool {
         let buffer = self.buffer.as_ref();
         let bit = (buffer[self.byte_pos] >> (7 - self.bit_pos)) & 1 != 0;

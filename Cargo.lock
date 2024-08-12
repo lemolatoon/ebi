@@ -290,7 +290,6 @@ dependencies = [
  "criterion",
  "derive-getters",
  "derive_builder",
- "either",
  "iter-enum",
  "num_enum",
  "quick-impl",

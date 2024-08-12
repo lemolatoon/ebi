@@ -191,7 +191,7 @@ pub trait Reader {
         Self: 'a;
 
     /// Returns `impl Iterator<Item = io::Result<f64>>`, which decompresses the chunk iteratively.
-    fn decompress_iter(&mut self) -> Self::DecompressIterator<'_>;
+    fn decompress_iter(&mut self) -> decoder::Result<Self::DecompressIterator<'_>>;
 
     /// Decompress the whole chunk and return the slice of the decompressed values.
     fn decompress(&mut self) -> decoder::Result<&[f64]> {
@@ -200,7 +200,7 @@ pub trait Reader {
         }
 
         let data = self
-            .decompress_iter()
+            .decompress_iter()?
             .collect::<decoder::Result<Vec<f64>>>()?;
         let result = self.set_decompress_result(data);
 
@@ -252,9 +252,9 @@ macro_rules! impl_generic_reader {
             }
 
             /// Returns `impl Iterator<Item = io::Result<f64>>`, which decompresses the chunk iteratively.
-            pub fn decompress_iter(&mut self) -> GeneralDecompressIterator<'_> {
+            pub fn decompress_iter(&mut self) -> decoder::Result<GeneralDecompressIterator<'_>> {
                 match self {
-                    $( $enum_name::$variant(c) => c.decompress_iter().into(), )*
+                    $( $enum_name::$variant(c) => c.decompress_iter().map(|c| c.into()), )*
                 }
             }
 
@@ -469,6 +469,7 @@ mod tests {
         let iter_result = reader
             .inner_mut()
             .decompress_iter()
+            .unwrap()
             .collect::<decoder::Result<Vec<f64>>>()
             .unwrap();
 

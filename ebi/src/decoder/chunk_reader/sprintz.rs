@@ -6,7 +6,7 @@ use crate::{
     decoder::{
         self,
         error::DecoderError,
-        query::{default_filter, Predicate, QueryExecutor},
+        query::{default_filter, default_materialize, Predicate, QueryExecutor},
         FileMetadataLike, GeneralChunkHandle,
     },
     io::bit_read::{self, BitRead2, BufferedBitReader},
@@ -50,7 +50,7 @@ impl Reader for DeltaSprintzReader {
     where
         Self: 'a;
 
-    fn decompress_iter(&mut self) -> Self::DecompressIterator<'_> {
+    fn decompress_iter(&mut self) -> decoder::Result<Self::DecompressIterator<'_>> {
         Self::DecompressIterator::new(&mut self.bit_reader, self.number_of_records)
     }
 
@@ -79,6 +79,7 @@ impl QueryExecutor for DeltaSprintzReader {
         bitmask: Option<&RoaringBitmap>,
         logical_offset: usize,
     ) -> decoder::Result<RoaringBitmap> {
+        self.bit_reader.reset();
         if self.decompressed.is_some() {
             return default_filter(self, predicate, bitmask, logical_offset);
         }
@@ -140,6 +141,17 @@ impl QueryExecutor for DeltaSprintzReader {
 
         Ok(bm)
     }
+
+    fn materialize<W: std::io::Write>(
+        &mut self,
+        output: &mut W,
+        bitmask: Option<&RoaringBitmap>,
+        logical_offset: usize,
+    ) -> decoder::Result<()> {
+        self.bit_reader.reset();
+
+        default_materialize(self, output, bitmask, logical_offset)
+    }
 }
 
 pub struct DeltaSprintzDecompressIteratorImpl<R: BitRead2> {
@@ -152,20 +164,25 @@ pub struct DeltaSprintzDecompressIteratorImpl<R: BitRead2> {
 }
 
 impl<R: BitRead2> DeltaSprintzDecompressIteratorImpl<R> {
-    pub fn new(mut bit_reader: R, number_of_records: u64) -> Self {
-        // TODO: Avoid unwrap here
-        let initial_value_bits = bit_reader.read_bits(64).unwrap();
+    pub fn new(mut bit_reader: R, number_of_records: u64) -> decoder::Result<Self> {
+        let initial_value_bits = bit_reader
+            .read_bits(64)
+            .ok_or(DecoderError::UnexpectedEndOfChunk)?;
         let initial_value = unsafe { std::mem::transmute::<u64, i64>(initial_value_bits) };
-        let scale = bit_reader.read_bits(32).unwrap() as u32;
-        let number_of_bits_needed = bit_reader.read_byte().unwrap();
-        Self {
+        let scale = bit_reader
+            .read_bits(32)
+            .ok_or(DecoderError::UnexpectedEndOfChunk)? as u32;
+        let number_of_bits_needed = bit_reader
+            .read_byte()
+            .ok_or(DecoderError::UnexpectedEndOfChunk)?;
+        Ok(Self {
             bit_reader,
             previous_value_quantized: initial_value,
             scale,
             number_of_bits_needed,
             number_of_records,
             record_index: 0,
-        }
+        })
     }
 }
 

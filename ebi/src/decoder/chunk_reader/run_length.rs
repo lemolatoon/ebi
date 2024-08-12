@@ -89,8 +89,8 @@ impl<R: Read> Reader for RunLengthReaderImpl<R> {
         &self.header
     }
 
-    fn decompress_iter(&mut self) -> Self::DecompressIterator<'_> {
-        RunLengthIteratorImpl::new(self)
+    fn decompress_iter(&mut self) -> decoder::Result<Self::DecompressIterator<'_>> {
+        Ok(RunLengthIteratorImpl::new(self))
     }
 
     fn set_decompress_result(&mut self, data: Vec<f64>) -> &[f64] {
