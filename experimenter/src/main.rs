@@ -1,4 +1,7 @@
-use std::{io::Write as _, path::Path};
+use std::{
+    io::{Read, Seek, Write as _},
+    path::Path,
+};
 
 use anyhow::Context as _;
 use clap::{Args, Parser, Subcommand};
@@ -49,11 +52,21 @@ struct MaterializeConfig {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+struct CompressStatistics {
+    compression_elapsed_time_nano_secs: u128,
+    uncompressed_size: u64,
+    compressed_size: u64,
+    compressed_size_chunk_only: u64,
+    compression_ratio: f64,
+    compression_ratio_chunk_only: f64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 struct OutputWrapper<T> {
     version: String,
     config_path: String,
     compression_config: CompressionConfig,
-    config: T,
+    command_specific: T,
     elapsed_time_nanos: u128,
     input_filename: String,
     datetime: chrono::DateTime<chrono::Utc>,
@@ -63,7 +76,7 @@ struct OutputWrapper<T> {
 #[serde(tag = "command_type")]
 enum Output {
     #[quick_impl(impl From)]
-    Compress(OutputWrapper<()>),
+    Compress(OutputWrapper<CompressStatistics>),
     #[quick_impl(impl From)]
     Filter(OutputWrapper<FilterConfig>),
     #[quick_impl(impl From)]
@@ -196,11 +209,31 @@ fn write_output_json(
     Ok(())
 }
 
+fn get_compress_statistics<R: Read + Seek>(
+    decoder: &Decoder<R>,
+) -> anyhow::Result<CompressStatistics> {
+    let compression_elapsed_time_nano_secs = decoder.footer().compression_elapsed_time_nano_secs();
+    let uncompressed_size = decoder.footer().number_of_records() * size_of::<f64>() as u64;
+    let compressed_size = decoder.total_file_size();
+    let compressed_size_chunk_only = decoder.total_chunk_size();
+    let compression_ratio = compressed_size as f64 / uncompressed_size as f64;
+    let compression_ratio_chunk_only = compressed_size_chunk_only as f64 / uncompressed_size as f64;
+
+    Ok(CompressStatistics {
+        compression_elapsed_time_nano_secs,
+        uncompressed_size,
+        compressed_size,
+        compressed_size_chunk_only,
+        compression_ratio,
+        compression_ratio_chunk_only,
+    })
+}
+
 fn compress_command(
     filename: impl AsRef<Path>,
     config: CompressionConfig,
     path: ConfigPath,
-) -> anyhow::Result<OutputWrapper<()>> {
+) -> anyhow::Result<OutputWrapper<CompressStatistics>> {
     let CompressionConfig {
         compressor_config,
         chunk_option,
@@ -228,11 +261,18 @@ fn compress_command(
     encoder.encode().context("Failed to encode")?;
     let elapsed_time_nanos = start.elapsed().as_nanos();
 
+    drop(encoder);
+
+    let decoder = Decoder::new(DecoderInput::from_file(encoded_filename.as_path())?)
+        .context("Failed to create decoder from encoded file")?;
+
+    let statistics = get_compress_statistics(&decoder)?;
+
     let output = OutputWrapper {
         version: env!("CARGO_PKG_VERSION").to_string(),
         config_path: path.config,
         compression_config: config,
-        config: (),
+        command_specific: statistics,
         elapsed_time_nanos,
         input_filename: filename.as_ref().to_string_lossy().to_string(),
         datetime: now,
@@ -278,7 +318,7 @@ fn filter_command(
         version: env!("CARGO_PKG_VERSION").to_string(),
         config_path: path.config.clone(),
         compression_config,
-        config,
+        command_specific: config,
         elapsed_time_nanos,
         input_filename: filename.as_ref().to_string_lossy().to_string(),
         datetime: now,
@@ -328,7 +368,7 @@ fn filter_materialize_command(
         version: env!("CARGO_PKG_VERSION").to_string(),
         config_path: path.config.clone(),
         compression_config,
-        config,
+        command_specific: config,
         elapsed_time_nanos,
         input_filename: filename.as_ref().to_string_lossy().to_string(),
         datetime: now,
@@ -374,7 +414,7 @@ fn materialize_command(
         version: env!("CARGO_PKG_VERSION").to_string(),
         config_path: path.config.clone(),
         compression_config,
-        config,
+        command_specific: config,
         elapsed_time_nanos,
         input_filename: filename.as_ref().to_string_lossy().to_string(),
         datetime: now,
