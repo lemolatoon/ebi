@@ -454,7 +454,6 @@ impl<'a, R: AlignedBufRead> ChunkWriter<'a, R> {
 mod tests {
     use format::{
         deserialize::{FromLeBytes, TryFromLeBytes},
-        uncompressed::UncompressedHeader0,
         ChunkOptionKind, CompressionScheme,
     };
 
@@ -558,10 +557,7 @@ mod tests {
         let fifth_chunk_logical_offset = fifth_chunk_footer.logical_offset as usize;
         let data_in_src = data[fifth_chunk_logical_offset].to_le_bytes();
 
-        let header_head =
-            UncompressedHeader0::from_le_bytes(&dest_vec[fifth_chunk_physical_offset..]);
-        let header_size = header_head.header_size as usize;
-        let val_head = header_size + fifth_chunk_physical_offset;
+        let val_head = fifth_chunk_physical_offset;
         let data_in_dest = &dest_vec[val_head..(val_head + size_of::<f64>())];
         assert_eq!(data_in_src, data_in_dest);
 

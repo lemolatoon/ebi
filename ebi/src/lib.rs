@@ -72,11 +72,7 @@ mod tests {
 
     #[test]
     fn test_round_trip_uncompressed() {
-        let header = b"my_header".to_vec().into_boxed_slice();
-        let compressor_config = CompressorConfig::uncompressed()
-            .capacity(8000)
-            .header(header)
-            .build();
+        let compressor_config = CompressorConfig::uncompressed().capacity(8000).build();
         for n in [1003, 10003, 100004, 100005] {
             #[cfg(miri)] // miri is too slow
             if n > 1003 {

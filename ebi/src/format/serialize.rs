@@ -1,6 +1,6 @@
 use super::{
-    run_length::RunLengthHeader, uncompressed::UncompressedHeader0, ChunkFooter, FileConfig,
-    FileFooter0, FileFooter2, FileHeader, GeneralChunkHeader,
+    run_length::RunLengthHeader, ChunkFooter, FileConfig, FileFooter0, FileFooter2, FileHeader,
+    GeneralChunkHeader,
 };
 
 /// A trait for converting the elements of a struct into little-endian byte order.
@@ -29,12 +29,6 @@ impl ToLe for FileConfig {
 }
 
 impl ToLe for GeneralChunkHeader {
-    fn to_le(&mut self) -> &mut Self {
-        self
-    }
-}
-
-impl ToLe for UncompressedHeader0 {
     fn to_le(&mut self) -> &mut Self {
         self
     }
@@ -78,7 +72,6 @@ mod private {
     impl Sealed for super::FileHeader {}
     impl Sealed for super::FileConfig {}
     impl Sealed for super::GeneralChunkHeader {}
-    impl Sealed for super::UncompressedHeader0 {}
     impl Sealed for super::RunLengthHeader {}
     impl Sealed for super::FileFooter0 {}
     impl Sealed for super::FileFooter2 {}

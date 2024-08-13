@@ -83,10 +83,8 @@ macro_rules! declare_test_api_round_trip {
 }
 
 declare_test_api_round_trip!(uncompressed, {
-    let header = b"my_header".to_vec().into_boxed_slice();
     super::CompressorConfig::uncompressed()
         .capacity(8000)
-        .header(header)
         .build()
 });
 declare_test_api_round_trip!(gorilla);

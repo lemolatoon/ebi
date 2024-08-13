@@ -164,13 +164,9 @@ pub enum CompressorConfig {
 impl CompressorConfig {
     pub fn build(self) -> GenericCompressor {
         match self {
-            CompressorConfig::Uncompressed(c) => GenericCompressor::Uncompressed({
-                let mut comp = UncompressedCompressor::new(c.capacity.0);
-                if let Some(header) = c.header {
-                    comp = comp.header(header);
-                }
-                comp
-            }),
+            CompressorConfig::Uncompressed(c) => {
+                GenericCompressor::Uncompressed(UncompressedCompressor::new(c.capacity.0))
+            }
             CompressorConfig::RLE(c) => {
                 GenericCompressor::RLE(RunLengthCompressor::with_capacity(c.capacity.0))
             }
@@ -271,16 +267,13 @@ impl From<usize> for Capacity {
 pub struct UncompressedCompressorConfig {
     #[builder(setter(into), default)]
     capacity: Capacity,
-    #[builder(setter(into, strip_option), default)]
-    header: Option<Box<[u8]>>,
 }
 
 impl UncompressedCompressorConfigBuilder {
     pub fn build(self) -> UncompressedCompressorConfig {
-        let Self { capacity, header } = self;
+        let Self { capacity } = self;
         UncompressedCompressorConfig {
             capacity: capacity.unwrap_or(Capacity::default()),
-            header: header.unwrap_or(None),
         }
     }
 }
