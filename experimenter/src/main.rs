@@ -52,6 +52,7 @@ struct MaterializeConfig {
 struct OutputWrapper<T> {
     version: String,
     config_path: String,
+    compression_config: CompressionConfig,
     config: T,
     elapsed_time_nanos: u128,
     input_filename: String,
@@ -62,7 +63,7 @@ struct OutputWrapper<T> {
 #[serde(tag = "command_type")]
 enum Output {
     #[quick_impl(impl From)]
-    Compress(OutputWrapper<CompressionConfig>),
+    Compress(OutputWrapper<()>),
     #[quick_impl(impl From)]
     Filter(OutputWrapper<FilterConfig>),
     #[quick_impl(impl From)]
@@ -199,7 +200,7 @@ fn compress_command(
     filename: impl AsRef<Path>,
     config: CompressionConfig,
     path: ConfigPath,
-) -> anyhow::Result<OutputWrapper<CompressionConfig>> {
+) -> anyhow::Result<OutputWrapper<()>> {
     let CompressionConfig {
         compressor_config,
         chunk_option,
@@ -230,7 +231,8 @@ fn compress_command(
     let output = OutputWrapper {
         version: env!("CARGO_PKG_VERSION").to_string(),
         config_path: path.config,
-        config,
+        compression_config: config,
+        config: (),
         elapsed_time_nanos,
         input_filename: filename.as_ref().to_string_lossy().to_string(),
         datetime: now,
@@ -267,9 +269,15 @@ fn filter_command(
 
     println!("filtered: {:?}", bitmask);
 
+    let compression_config = CompressionConfig {
+        chunk_option: *decoder.header().config().chunk_option(),
+        compressor_config: *decoder.footer().compressor_config(),
+    };
+
     let output = OutputWrapper {
         version: env!("CARGO_PKG_VERSION").to_string(),
         config_path: path.config.clone(),
+        compression_config,
         config,
         elapsed_time_nanos,
         input_filename: filename.as_ref().to_string_lossy().to_string(),
@@ -311,23 +319,21 @@ fn filter_materialize_command(
         .context("Failed to perform filter materialize")?;
     let elapsed_time_nanos = start.elapsed().as_nanos();
 
+    let compression_config = CompressionConfig {
+        chunk_option: *decoder.header().config().chunk_option(),
+        compressor_config: *decoder.footer().compressor_config(),
+    };
+
     let output = OutputWrapper {
         version: env!("CARGO_PKG_VERSION").to_string(),
         config_path: path.config.clone(),
+        compression_config,
         config,
         elapsed_time_nanos,
         input_filename: filename.as_ref().to_string_lossy().to_string(),
         datetime: now,
     };
 
-    // let timestamp = chrono::Local::now().format("%Y%m%d%H%M%S").to_string();
-    // let output_filename = filename.as_ref().with_file_name(format!(
-    //     "{}_{}.filter_materialize.json",
-    //     filename.as_ref().file_stem().unwrap().to_string_lossy(),
-    //     timestamp
-    // ));
-
-    // write_output_json(output, output_filename)?;
     Ok(output)
 }
 
@@ -359,9 +365,15 @@ fn materialize_command(
         .context("Failed to perform filter materialize")?;
     let elapsed_time_nanos = start.elapsed().as_nanos();
 
+    let compression_config = CompressionConfig {
+        chunk_option: *decoder.header().config().chunk_option(),
+        compressor_config: *decoder.footer().compressor_config(),
+    };
+
     let output = OutputWrapper {
         version: env!("CARGO_PKG_VERSION").to_string(),
         config_path: path.config.clone(),
+        compression_config,
         config,
         elapsed_time_nanos,
         input_filename: filename.as_ref().to_string_lossy().to_string(),
