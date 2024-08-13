@@ -195,10 +195,8 @@ impl FileReader {
 
         input.read_exact(&mut buf[..1])?;
         let config_size = buf[0] as usize;
-        dbg!(config_size);
         buf.resize(config_size, 0);
         input.read_exact(&mut buf[..config_size])?;
-        println!("buf: {:x?}", &buf[..]);
 
         let compressor_config =
             CompressorConfig::from_le_bytes(header.config().compression_scheme(), &buf[..]);

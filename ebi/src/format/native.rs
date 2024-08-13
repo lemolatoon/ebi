@@ -102,6 +102,13 @@ impl NativeFileFooter {
         }
     }
 
+    pub fn size(&self) -> usize {
+        size_of::<FileFooter0>()
+            + self.chunk_footers.len() * size_of::<ChunkFooter>()
+            + self.compressor_config.serialized_size()
+            + size_of::<FileFooter3>()
+    }
+
     pub fn number_of_records(&self) -> u64 {
         self.number_of_records
     }

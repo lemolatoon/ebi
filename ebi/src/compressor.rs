@@ -230,7 +230,6 @@ impl CompressorConfig {
                 let size = size_of_val(&$comp) as u8;
                 w.write_all(&[size])?;
                 let le_bytes = $comp.to_le().as_bytes();
-                println!("le_bytes: {:x?}", le_bytes);
                 w.write_all(le_bytes)?;
             }};
         }

@@ -31,7 +31,7 @@ fn main() {
                 } else {
                     println!(
                         "[{:03}/{:03}] Finished processing file: {}",
-                        i,
+                        i + 1,
                         n_files,
                         path.display(),
                     );
@@ -46,38 +46,73 @@ fn process_file(path: &Path) -> Result<()> {
     let file = File::open(path).context(format!("Failed to open file: {}", path.display()))?;
     let reader = BufReader::new(file);
 
-    let output_file = File::create(path.with_extension("bin"))
-        .context(format!("Failed to create output file: {}", path.display()))?;
+    let output_dir = path
+        .parent()
+        .ok_or(anyhow::anyhow!("Failed to get parent directory"))?
+        .join("binary");
+    std::fs::create_dir_all(&output_dir).context(format!(
+        "Failed to create output directory: {}",
+        output_dir.display()
+    ))?;
+    let output_filename = output_dir.join({
+        let mut name = path
+            .file_stem()
+            .ok_or(anyhow::anyhow!("Failed to get file stem"))?
+            .to_os_string();
+        name.push(".bin");
+        name
+    });
+    let output_file = File::create(output_filename.as_path()).context(format!(
+        "Failed to create output file: {}",
+        output_filename.display()
+    ))?;
     let mut writer = BufWriter::new(output_file);
 
-    for (line_num, line) in reader.lines().enumerate() {
-        let line = line.context("Failed to read line")?;
-        let floats: Result<Vec<_>, _> = line
-            .split(',')
-            .filter_map(|s| {
-                if s.is_empty() {
-                    None
-                } else {
-                    Some(
-                        s.trim()
-                            .parse::<f64>()
-                            .context(format!("Failed to parse float: {}:{s}", line_num + 1)),
-                    )
-                }
-            })
-            .collect();
+    let process = || {
+        for (line_num, line) in reader.lines().enumerate() {
+            let line = line.context("Failed to read line")?;
+            let floats: Result<Vec<_>, _> = line
+                .split(',')
+                .filter_map(|s| {
+                    if s.is_empty() {
+                        None
+                    } else {
+                        Some(
+                            s.trim()
+                                .parse::<f64>()
+                                .context(format!("Failed to parse float: {}:{s}", line_num + 1)),
+                        )
+                    }
+                })
+                .collect();
 
-        match floats {
-            Ok(numbers) => {
-                for num in numbers {
-                    writer
-                        .write_all(&num.to_le_bytes())
-                        .context("Failed to write to output file")?;
+            match floats {
+                Ok(numbers) => {
+                    for num in numbers {
+                        writer
+                            .write_all(&num.to_le_bytes())
+                            .context("Failed to write to output file")?;
+                    }
+                }
+                Err(e) => {
+                    return Err(
+                        e.context(format!("Error parsing line in file: {}", path.display()))
+                    );
                 }
             }
-            Err(e) => {
-                return Err(e.context(format!("Error parsing line in file: {}", path.display())));
+        }
+
+        Ok(())
+    };
+
+    match process() {
+        Ok(_) => (),
+        Err(e) => {
+            eprintln!("Error processing file: {}", path.display());
+            if output_filename.exists() {
+                std::fs::remove_file(output_filename).context("Failed to remove output file")?;
             }
+            return Err(e);
         }
     }
 

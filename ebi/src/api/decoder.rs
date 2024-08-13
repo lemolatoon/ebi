@@ -130,6 +130,25 @@ impl<R: Read + Seek> Decoder<R> {
         })
     }
 
+    pub fn footer_size(&self) -> u64 {
+        self.file_metadata_ref.footer().size() as u64
+    }
+
+    pub fn total_file_size(&self) -> u64 {
+        self.file_metadata_ref.header().footer_offset() + self.footer_size()
+    }
+
+    pub fn total_chunk_size(&self) -> u64 {
+        let chunk_head = self
+            .chunk_handles
+            .first()
+            .map(|x| x.physical_offset())
+            .unwrap_or(self.header().footer_offset());
+        let chunk_tail = self.header().footer_offset();
+
+        chunk_tail - chunk_head
+    }
+
     pub fn header(&self) -> &NativeFileHeader {
         self.file_metadata_ref.header()
     }
