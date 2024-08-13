@@ -11,6 +11,7 @@ use ebi::{
     decoder::query::Predicate,
     encoder::ChunkOption,
 };
+use quick_impl::QuickImpl;
 use serde::{Deserialize, Serialize};
 
 #[derive(Parser, Debug, Clone)]
@@ -35,6 +36,13 @@ struct FilterConfig {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+struct FilterMaterializeConfig {
+    predicate: Predicate,
+    chunk_id: Option<ChunkId>,
+    bitmask: Option<Vec<u32>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 struct MaterializeConfig {
     chunk_id: Option<ChunkId>,
     bitmask: Option<Vec<u32>>,
@@ -48,6 +56,19 @@ struct OutputWrapper<T> {
     elapsed_time_nanos: u128,
     input_filename: String,
     datetime: chrono::DateTime<chrono::Utc>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, QuickImpl)]
+#[serde(tag = "command_type")]
+enum Output {
+    #[quick_impl(impl From)]
+    Compress(OutputWrapper<CompressionConfig>),
+    #[quick_impl(impl From)]
+    Filter(OutputWrapper<FilterConfig>),
+    #[quick_impl(impl From)]
+    FilterMaterialize(OutputWrapper<FilterMaterializeConfig>),
+    #[quick_impl(impl From)]
+    Materialize(OutputWrapper<MaterializeConfig>),
 }
 
 #[derive(Debug, Clone, Args)]
@@ -65,6 +86,12 @@ impl ConfigPath {
             .context(format!("Failed to parse config file: {}", self.config))?;
         Ok(config)
     }
+
+    fn empty() -> Self {
+        Self {
+            config: String::from("<in-memory>"),
+        }
+    }
 }
 
 #[derive(Subcommand, Debug, Clone)]
@@ -75,25 +102,72 @@ enum Commands {
     Materialize(ConfigPath),
 }
 
-fn main() -> anyhow::Result<()> {
-    let cli = Cli::parse();
-
-    let filename = cli.input;
-
-    match cli.command {
-        Commands::Compress(args) => compress_command(filename, args),
-        Commands::Filter(args) => filter_command(filename, args),
-        Commands::FilterMaterialize(args) => filter_materialize_command(filename, args),
-        Commands::Materialize(args) => materialize_command(filename, args),
+impl Commands {
+    pub fn dir_name(&self) -> &'static str {
+        match self {
+            Commands::Compress(_) => "compress",
+            Commands::Filter(_) => "filter",
+            Commands::FilterMaterialize(_) => "filter_materialize",
+            Commands::Materialize(_) => "materialize",
+        }
     }
 }
 
+fn main() -> anyhow::Result<()> {
+    let cli = Cli::parse();
+
+    let cli2 = cli.clone();
+
+    let filename = cli.input;
+
+    let output: Output = match cli.command {
+        Commands::Compress(args) => compress_command(filename, args.read()?, args)?.into(),
+        Commands::Filter(args) => filter_command(filename, args.read()?, args)?.into(),
+        Commands::FilterMaterialize(args) => {
+            filter_materialize_command(filename, args.read()?, args)?.into()
+        }
+        Commands::Materialize(args) => materialize_command(filename, args.read()?, args)?.into(),
+    };
+
+    save_output_json(output, &cli2.input, &cli2.command)?;
+
+    Ok(())
+}
+
+fn save_output_json(output: Output, filename: &str, command: &Commands) -> anyhow::Result<()> {
+    // Get the directory where the filename is located
+    let file_dir = Path::new(filename).parent().unwrap().join("result");
+    let base_dir = Path::new(filename).file_stem().unwrap().to_str().unwrap();
+    let command_dir = command.dir_name();
+
+    // Create the save directory path based on the file's location
+    let save_dir = file_dir.join(base_dir).join(command_dir);
+
+    // Create the directory if it doesn't exist
+    std::fs::create_dir_all(&save_dir)?;
+
+    // Determine the next available filename
+    let mut file_number = 0;
+    let output_file = loop {
+        let output_filename = save_dir.join(format!("{:03}.json", file_number));
+        if !output_filename.exists() {
+            break output_filename;
+        }
+        file_number += 1;
+    };
+
+    // Write the output to JSON
+    write_output_json(output, output_file)?;
+
+    Ok(())
+}
+
 fn write_output_json(
-    output: OutputWrapper<impl Serialize>,
+    output: impl Into<Output>,
     output_filename: impl AsRef<Path>,
 ) -> anyhow::Result<()> {
     let output_json =
-        serde_json::to_string_pretty(&output).context("Failed to serialize output")?;
+        serde_json::to_string_pretty(&output.into()).context("Failed to serialize output")?;
 
     let output_file = std::fs::File::create(output_filename.as_ref()).context(format!(
         "Failed to create output file: {}",
@@ -121,8 +195,11 @@ fn write_output_json(
     Ok(())
 }
 
-fn compress_command(filename: impl AsRef<Path>, path: ConfigPath) -> anyhow::Result<()> {
-    let config: CompressionConfig = path.read()?;
+fn compress_command(
+    filename: impl AsRef<Path>,
+    config: CompressionConfig,
+    path: ConfigPath,
+) -> anyhow::Result<OutputWrapper<CompressionConfig>> {
     let CompressionConfig {
         compressor_config,
         chunk_option,
@@ -152,27 +229,21 @@ fn compress_command(filename: impl AsRef<Path>, path: ConfigPath) -> anyhow::Res
 
     let output = OutputWrapper {
         version: env!("CARGO_PKG_VERSION").to_string(),
-        config_path: path.config.clone(),
+        config_path: path.config,
         config,
         elapsed_time_nanos,
         input_filename: filename.as_ref().to_string_lossy().to_string(),
         datetime: now,
     };
 
-    let timestamp = chrono::Local::now().format("%Y%m%d%H%M%S").to_string();
-    let output_filename = filename.as_ref().with_file_name(format!(
-        "{}_{}.compress.json",
-        filename.as_ref().file_stem().unwrap().to_string_lossy(),
-        timestamp
-    ));
-
-    write_output_json(output, output_filename)?;
-
-    Ok(())
+    Ok(output)
 }
 
-fn filter_command(filename: impl AsRef<Path>, path: ConfigPath) -> anyhow::Result<()> {
-    let config: FilterConfig = path.read()?;
+fn filter_command(
+    filename: impl AsRef<Path>,
+    config: FilterConfig,
+    path: ConfigPath,
+) -> anyhow::Result<OutputWrapper<FilterConfig>> {
     let FilterConfig {
         predicate,
         chunk_id,
@@ -205,21 +276,15 @@ fn filter_command(filename: impl AsRef<Path>, path: ConfigPath) -> anyhow::Resul
         datetime: now,
     };
 
-    let timestamp = chrono::Local::now().format("%Y%m%d%H%M%S").to_string();
-    let output_filename = filename.as_ref().with_file_name(format!(
-        "{}_{}.filter.json",
-        filename.as_ref().file_stem().unwrap().to_string_lossy(),
-        timestamp
-    ));
-
-    write_output_json(output, output_filename)?;
-
-    Ok(())
+    Ok(output)
 }
 
-fn filter_materialize_command(filename: impl AsRef<Path>, path: ConfigPath) -> anyhow::Result<()> {
-    let config: FilterConfig = path.read()?;
-    let FilterConfig {
+fn filter_materialize_command(
+    filename: impl AsRef<Path>,
+    config: FilterMaterializeConfig,
+    path: ConfigPath,
+) -> anyhow::Result<OutputWrapper<FilterMaterializeConfig>> {
+    let FilterMaterializeConfig {
         predicate,
         chunk_id,
         bitmask,
@@ -255,19 +320,22 @@ fn filter_materialize_command(filename: impl AsRef<Path>, path: ConfigPath) -> a
         datetime: now,
     };
 
-    let timestamp = chrono::Local::now().format("%Y%m%d%H%M%S").to_string();
-    let output_filename = filename.as_ref().with_file_name(format!(
-        "{}_{}.filter_materialize.json",
-        filename.as_ref().file_stem().unwrap().to_string_lossy(),
-        timestamp
-    ));
+    // let timestamp = chrono::Local::now().format("%Y%m%d%H%M%S").to_string();
+    // let output_filename = filename.as_ref().with_file_name(format!(
+    //     "{}_{}.filter_materialize.json",
+    //     filename.as_ref().file_stem().unwrap().to_string_lossy(),
+    //     timestamp
+    // ));
 
-    write_output_json(output, output_filename)?;
-    Ok(())
+    // write_output_json(output, output_filename)?;
+    Ok(output)
 }
 
-fn materialize_command(filename: impl AsRef<Path>, path: ConfigPath) -> anyhow::Result<()> {
-    let config: MaterializeConfig = path.read()?;
+fn materialize_command(
+    filename: impl AsRef<Path>,
+    config: MaterializeConfig,
+    path: ConfigPath,
+) -> anyhow::Result<OutputWrapper<MaterializeConfig>> {
     let MaterializeConfig { chunk_id, bitmask } = config.clone();
     let bitmask = bitmask.map(ebi::decoder::query::RoaringBitmap::from_iter);
     let now = chrono::Utc::now();
@@ -300,13 +368,5 @@ fn materialize_command(filename: impl AsRef<Path>, path: ConfigPath) -> anyhow::
         datetime: now,
     };
 
-    let timestamp = chrono::Local::now().format("%Y%m%d%H%M%S").to_string();
-    let output_filename = filename.as_ref().with_file_name(format!(
-        "{}_{}.materialize.json",
-        filename.as_ref().file_stem().unwrap().to_string_lossy(),
-        timestamp
-    ));
-
-    write_output_json(output, output_filename)?;
-    Ok(())
+    Ok(output)
 }

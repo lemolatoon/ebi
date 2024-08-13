@@ -427,6 +427,7 @@ dependencies = [
  "chrono",
  "clap",
  "ebi",
+ "quick-impl",
  "serde",
  "serde_json",
 ]
