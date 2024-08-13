@@ -1,6 +1,12 @@
 use std::{mem::size_of_val, slice};
 
-use super::{AppendableCompressor, Compressor, RewindableCompressor, MAX_BUFFERS};
+use derive_builder::Builder;
+#[cfg(feature = "serde")]
+use serde::{Deserialize, Serialize};
+
+use crate::format::{deserialize, serialize};
+
+use super::{AppendableCompressor, Capacity, Compressor, RewindableCompressor, MAX_BUFFERS};
 
 #[derive(Debug, Clone, PartialEq, PartialOrd)]
 pub struct UncompressedCompressor {
@@ -74,5 +80,37 @@ impl RewindableCompressor for UncompressedCompressor {
         self.buffer.truncate(self.buffer.len() - n);
 
         true
+    }
+}
+
+#[derive(Builder, Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[builder(pattern = "owned", build_fn(skip))]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[repr(C, packed)]
+pub struct UncompressedCompressorConfig {
+    #[builder(setter(into), default)]
+    capacity: Capacity,
+}
+
+serialize::impl_to_le!(UncompressedCompressorConfig, capacity);
+deserialize::impl_from_le_bytes!(
+    UncompressedCompressorConfig,
+    uncompressed,
+    (capacity, Capacity)
+);
+
+impl From<UncompressedCompressorConfig> for UncompressedCompressor {
+    fn from(config: UncompressedCompressorConfig) -> UncompressedCompressor {
+        let cap = config.capacity.0 as usize;
+        UncompressedCompressor::new(cap)
+    }
+}
+
+impl UncompressedCompressorConfigBuilder {
+    pub fn build(self) -> UncompressedCompressorConfig {
+        let Self { capacity } = self;
+        UncompressedCompressorConfig {
+            capacity: capacity.unwrap_or(Capacity::default()),
+        }
     }
 }

@@ -11,10 +11,13 @@ use std::{
     ops::Deref,
 };
 
-use crate::format::{
-    deserialize::{FromLeBytes, TryFromLeBytes},
-    native::{NativeChunkFooter, NativeFileFooter, NativeFileHeader},
-    ChunkFooter, FileFooter0, FileFooter2, FileHeader,
+use crate::{
+    compressor::CompressorConfig,
+    format::{
+        deserialize::{FromLeBytes, TryFromLeBytes},
+        native::{NativeChunkFooter, NativeFileFooter, NativeFileHeader},
+        ChunkFooter, FileFooter0, FileFooter3, FileHeader,
+    },
 };
 
 pub trait FileMetadataLike {
@@ -35,7 +38,7 @@ where
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone)]
 pub struct Metadata {
     header: NativeFileHeader,
     footer: NativeFileFooter,
@@ -70,7 +73,7 @@ impl Metadata {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, Copy)]
 pub struct MetadataRef<'a, 'b> {
     header: &'a NativeFileHeader,
     footer: &'b NativeFileFooter,
@@ -99,7 +102,7 @@ impl FileMetadataLike for MetadataRef<'_, '_> {
 
 /// A reader for the file format.
 /// This struct reads the file format from the input stream.
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone)]
 pub struct FileReader {
     header: Option<NativeFileHeader>,
     footer: Option<NativeFileFooter>,
@@ -171,29 +174,44 @@ impl FileReader {
             return Ok(self.footer.as_ref().unwrap());
         }
 
-        if self.header().is_none() {
+        let Some(header) = self.header() else {
             return Err(DecoderError::PreconditionsNotMet.into());
-        }
+        };
 
         let mut buf = vec![0u8; size_of::<FileFooter0>()];
         input.read_exact(&mut buf)?;
         let footer0 = FileFooter0::from_le_bytes(&buf);
         let n_chunks = footer0.number_of_chunks as usize;
 
-        let footer_left_size = size_of::<ChunkFooter>() * n_chunks + size_of::<FileFooter2>();
+        let chunk_footers_size = size_of::<ChunkFooter>() * n_chunks;
 
-        buf.resize(footer_left_size, 0);
+        buf.resize(chunk_footers_size, 0);
         input.read_exact(&mut buf[..])?;
 
-        let chunk_footers = buf[..footer_left_size - size_of::<FileFooter2>()]
+        let chunk_footers = buf[..]
             .chunks_exact(size_of::<ChunkFooter>())
             .map(ChunkFooter::from_le_bytes)
             .collect::<Vec<_>>();
 
-        let footer2 =
-            FileFooter2::from_le_bytes(&buf[footer_left_size - size_of::<FileFooter2>()..]);
+        input.read_exact(&mut buf[..1])?;
+        let config_size = buf[0] as usize;
+        dbg!(config_size);
+        buf.resize(config_size, 0);
+        input.read_exact(&mut buf[..config_size])?;
+        println!("buf: {:x?}", &buf[..]);
 
-        let footer = NativeFileFooter::new(&footer0, &chunk_footers[..], &footer2);
+        let compressor_config =
+            CompressorConfig::from_le_bytes(header.config().compression_scheme(), &buf[..]);
+
+        let footer3_size = size_of::<FileFooter3>();
+
+        buf.resize(footer3_size, 0);
+        input.read_exact(&mut buf[..])?;
+
+        let footer2 = FileFooter3::from_le_bytes(&buf);
+
+        let footer =
+            NativeFileFooter::new(&footer0, &chunk_footers[..], compressor_config, &footer2);
 
         self.footer = Some(footer);
 

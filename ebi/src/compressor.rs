@@ -1,14 +1,19 @@
+use std::io;
+
 use buff::BUFFCompressor;
-use chimp::{ChimpCompressor, ChimpCompressorConfig};
-use chimp_n::{Chimp128Compressor, Chimp128CompressorConfig};
-use derive_builder::Builder;
+use chimp::ChimpCompressor;
+use chimp_n::Chimp128Compressor;
 use gorilla::GorillaCompressor;
 use quick_impl::QuickImpl;
 use run_length::RunLengthCompressor;
-// use run_length::RunLengthCompressor;
-use uncompressed::UncompressedCompressor;
+use uncompressed::{UncompressedCompressor, UncompressedCompressorConfig};
 
-use crate::format::{self, CompressionScheme};
+use crate::format::{
+    self,
+    deserialize::FromLeBytes as _,
+    serialize::{AsBytes, ToLe},
+    CompressionScheme,
+};
 
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
@@ -137,22 +142,22 @@ impl_generic_compressor!(
     DeltaSprintz
 );
 
-#[derive(QuickImpl, Debug, Clone)]
+#[derive(QuickImpl, Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(feature = "serde", serde(tag = "type"))]
 pub enum CompressorConfig {
     #[quick_impl(impl From)]
-    Uncompressed(UncompressedCompressorConfig),
+    Uncompressed(uncompressed::UncompressedCompressorConfig),
     #[quick_impl(impl From)]
-    RLE(RunLengthCompressorConfig),
+    RLE(run_length::RunLengthCompressorConfig),
     #[quick_impl(impl From)]
-    Gorilla(GorillaCompressorConfig),
+    Gorilla(gorilla::GorillaCompressorConfig),
     #[quick_impl(impl From)]
-    BUFF(BUFFCompressorConfig),
+    BUFF(buff::BUFFCompressorConfig),
     #[quick_impl(impl From)]
-    Chimp(ChimpCompressorConfig),
+    Chimp(chimp::ChimpCompressorConfig),
     #[quick_impl(impl From)]
-    Chimp128(Chimp128CompressorConfig),
+    Chimp128(chimp_n::Chimp128CompressorConfig),
     #[quick_impl(impl From)]
     ElfOnChimp(elf::on_chimp::ElfCompressorConfig),
     #[quick_impl(impl From)]
@@ -161,67 +166,141 @@ pub enum CompressorConfig {
     DeltaSprintz(sprintz::DeltaSprintzCompressorConfig),
 }
 
-impl CompressorConfig {
-    pub fn build(self) -> GenericCompressor {
-        match self {
-            CompressorConfig::Uncompressed(c) => {
-                GenericCompressor::Uncompressed(UncompressedCompressor::new(c.capacity.0))
+macro_rules! impl_compressor_config {
+    ($enum_name:ident, $($variant:ident),*) => {
+        impl $enum_name {
+            pub fn build(self) -> GenericCompressor {
+                match self {
+                    $( $enum_name::$variant(c) => GenericCompressor::$variant(c.into()), )*
+                }
             }
-            CompressorConfig::RLE(c) => {
-                GenericCompressor::RLE(RunLengthCompressor::with_capacity(c.capacity.0))
-            }
-            CompressorConfig::Gorilla(c) => {
-                GenericCompressor::Gorilla(GorillaCompressor::with_capacity(c.capacity.0))
-            }
-            CompressorConfig::BUFF(c) => GenericCompressor::BUFF(BUFFCompressor::new(c.scale)),
-            CompressorConfig::Chimp(c) => {
-                GenericCompressor::Chimp(ChimpCompressor::with_capacity(c.capacity.0))
-            }
-            CompressorConfig::Chimp128(c) => {
-                GenericCompressor::Chimp128(Chimp128Compressor::with_capacity(c.capacity.0))
-            }
-            CompressorConfig::ElfOnChimp(c) => GenericCompressor::ElfOnChimp(c.into()),
-            CompressorConfig::Elf(c) => GenericCompressor::Elf(c.into()),
-            CompressorConfig::DeltaSprintz(c) => GenericCompressor::DeltaSprintz((&c).into()),
         }
-    }
 
+        impl From<&$enum_name> for CompressionScheme {
+            fn from(value: &$enum_name) -> Self {
+                match value {
+                    $( $enum_name::$variant(_) => CompressionScheme::$variant, )*
+                }
+            }
+        }
+    };
+}
+
+impl_compressor_config!(
+    CompressorConfig,
+    Uncompressed,
+    RLE,
+    Gorilla,
+    BUFF,
+    Chimp,
+    Chimp128,
+    ElfOnChimp,
+    Elf,
+    DeltaSprintz
+);
+
+impl CompressorConfig {
     pub fn compression_scheme(&self) -> CompressionScheme {
         CompressionScheme::from(self)
     }
-}
 
-impl From<&CompressorConfig> for CompressionScheme {
-    fn from(value: &CompressorConfig) -> Self {
-        match value {
-            CompressorConfig::Uncompressed(_) => Self::Uncompressed,
-            CompressorConfig::RLE(_) => Self::RLE,
-            CompressorConfig::Gorilla(_) => Self::Gorilla,
-            CompressorConfig::BUFF(_) => Self::BUFF,
-            CompressorConfig::Chimp(_) => Self::Chimp,
-            CompressorConfig::Chimp128(_) => Self::Chimp128,
-            CompressorConfig::ElfOnChimp(_) => Self::ElfOnChimp,
-            CompressorConfig::Elf(_) => Self::Elf,
-            CompressorConfig::DeltaSprintz(_) => Self::DeltaSprintz,
+    /// Returns the size of the serialized configuration in bytes.
+    /// Includes the first byte that represents the size of the configuration itself.
+    pub fn serialized_size(&self) -> usize {
+        // 1 byte for the size of the config
+        1 + match self {
+            CompressorConfig::Uncompressed(c) => c.serialized_size(),
+            CompressorConfig::RLE(c) => c.serialized_size(),
+            CompressorConfig::Gorilla(c) => c.serialized_size(),
+            CompressorConfig::BUFF(c) => c.serialized_size(),
+            CompressorConfig::Chimp(c) => c.serialized_size(),
+            CompressorConfig::Chimp128(c) => c.serialized_size(),
+            CompressorConfig::ElfOnChimp(c) => c.serialized_size(),
+            CompressorConfig::Elf(c) => c.serialized_size(),
+            CompressorConfig::DeltaSprintz(c) => c.serialized_size(),
+        }
+    }
+
+    /// Serialize the compressor configuration to the given writer.
+    /// The first byte is the size of the configuration in bytes.
+    /// The rest of the bytes are the serialized configuration.
+    pub fn serialize<W: io::Write>(self, mut w: W) -> io::Result<()> {
+        macro_rules! just_write {
+            ($comp:expr, $w:expr) => {{
+                let size = size_of_val(&$comp) as u8;
+                w.write_all(&[size])?;
+                let le_bytes = $comp.to_le().as_bytes();
+                println!("le_bytes: {:x?}", le_bytes);
+                w.write_all(le_bytes)?;
+            }};
+        }
+        macro_rules! into_packed_and_write {
+            ($comp:expr, $w:expr) => {{
+                let mut packed = $comp.into_packed();
+                let size = size_of_val(&packed) as u8;
+                w.write_all(&[size])?;
+                w.write_all(packed.to_le().as_bytes())?;
+            }};
+        }
+        match self {
+            CompressorConfig::Uncompressed(mut c) => just_write!(c, w),
+            CompressorConfig::RLE(mut c) => just_write!(c, w),
+            CompressorConfig::Gorilla(mut c) => just_write!(c, w),
+            CompressorConfig::BUFF(mut c) => just_write!(c, w),
+            CompressorConfig::Chimp(c) => into_packed_and_write!(c, w),
+            CompressorConfig::Chimp128(mut c) => just_write!(c, w),
+            CompressorConfig::ElfOnChimp(c) => into_packed_and_write!(c, w),
+            CompressorConfig::Elf(c) => into_packed_and_write!(c, w),
+            CompressorConfig::DeltaSprintz(mut c) => just_write!(c, w),
+        }
+
+        Ok(())
+    }
+
+    pub fn from_le_bytes(compression_scheme: &CompressionScheme, bytes: &[u8]) -> Self {
+        match compression_scheme {
+            CompressionScheme::Uncompressed => {
+                Self::Uncompressed(UncompressedCompressorConfig::from_le_bytes(bytes))
+            }
+            CompressionScheme::RLE => {
+                Self::RLE(run_length::RunLengthCompressorConfig::from_le_bytes(bytes))
+            }
+            CompressionScheme::BUFF => Self::BUFF(buff::BUFFCompressorConfig::from_le_bytes(bytes)),
+            CompressionScheme::Gorilla => {
+                Self::Gorilla(gorilla::GorillaCompressorConfig::from_le_bytes(bytes))
+            }
+            CompressionScheme::Chimp => {
+                Self::Chimp(chimp::ChimpCompressorConfig::from_le_bytes(bytes))
+            }
+            CompressionScheme::Chimp128 => {
+                Self::Chimp128(chimp_n::Chimp128CompressorConfig::from_le_bytes(bytes))
+            }
+            CompressionScheme::ElfOnChimp => {
+                Self::ElfOnChimp(elf::on_chimp::ElfCompressorConfig::from_le_bytes(bytes))
+            }
+            CompressionScheme::Elf => Self::Elf(elf::ElfCompressorConfig::from_le_bytes(bytes)),
+            CompressionScheme::DeltaSprintz => {
+                Self::DeltaSprintz(sprintz::DeltaSprintzCompressorConfig::from_le_bytes(bytes))
+            }
         }
     }
 }
 
 impl CompressorConfig {
-    pub fn uncompressed() -> UncompressedCompressorConfigBuilder {
-        UncompressedCompressorConfigBuilder::default()
+    pub fn uncompressed() -> uncompressed::UncompressedCompressorConfigBuilder {
+        uncompressed::UncompressedCompressorConfigBuilder::default()
     }
 
-    pub fn rle() -> RunLengthCompressorConfigBuilder {
-        RunLengthCompressorConfigBuilder::default()
+    pub fn rle() -> run_length::RunLengthCompressorConfigBuilder {
+        run_length::RunLengthCompressorConfigBuilder::default()
     }
 
-    pub fn gorilla() -> GorillaCompressorConfigBuilder {
-        GorillaCompressorConfigBuilder::default()
+    pub fn gorilla() -> gorilla::GorillaCompressorConfigBuilder {
+        gorilla::GorillaCompressorConfigBuilder::default()
     }
 
-    pub fn buff() -> BUFFCompressorConfigBuilder {
-        BUFFCompressorConfigBuilder::default()
+    pub fn buff() -> buff::BUFFCompressorConfigBuilder {
+        buff::BUFFCompressorConfigBuilder::default()
     }
 
     pub fn chimp() -> chimp::ChimpCompressorConfigBuilder {
@@ -245,85 +324,25 @@ impl CompressorConfig {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[repr(transparent)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-pub(crate) struct Capacity(usize);
+pub(crate) struct Capacity(pub(crate) u64);
 
-const DEFAULT_CAPACITY: usize = 1024 * 8;
+const DEFAULT_CAPACITY: u64 = 1024 * 8;
 impl Default for Capacity {
     fn default() -> Self {
         Capacity(DEFAULT_CAPACITY)
     }
 }
-impl From<usize> for Capacity {
-    fn from(value: usize) -> Self {
+impl From<u64> for Capacity {
+    fn from(value: u64) -> Self {
         Capacity(value)
     }
 }
-
-#[derive(Builder, Debug, Clone)]
-#[builder(pattern = "owned", build_fn(skip))]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-pub struct UncompressedCompressorConfig {
-    #[builder(setter(into), default)]
-    capacity: Capacity,
-}
-
-impl UncompressedCompressorConfigBuilder {
-    pub fn build(self) -> UncompressedCompressorConfig {
-        let Self { capacity } = self;
-        UncompressedCompressorConfig {
-            capacity: capacity.unwrap_or(Capacity::default()),
-        }
-    }
-}
-
-#[derive(Builder, Debug, Clone, Copy)]
-#[builder(pattern = "owned", build_fn(skip))]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-pub struct RunLengthCompressorConfig {
-    #[builder(setter(into), default)]
-    capacity: Capacity,
-}
-
-impl RunLengthCompressorConfigBuilder {
-    pub fn build(self) -> RunLengthCompressorConfig {
-        let Self { capacity } = self;
-        RunLengthCompressorConfig {
-            capacity: capacity.unwrap_or(Capacity::default()),
-        }
-    }
-}
-
-#[derive(Builder, Debug, Clone, Copy)]
-#[builder(pattern = "owned", build_fn(skip))]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-pub struct GorillaCompressorConfig {
-    #[builder(setter(into), default)]
-    capacity: Capacity,
-}
-
-impl GorillaCompressorConfigBuilder {
-    pub fn build(self) -> GorillaCompressorConfig {
-        let Self { capacity } = self;
-        GorillaCompressorConfig {
-            capacity: capacity.unwrap_or(Capacity::default()),
-        }
-    }
-}
-
-#[derive(Builder, Debug, Clone, Copy)]
-#[builder(pattern = "owned", build_fn(skip))]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-pub struct BUFFCompressorConfig {
-    scale: usize,
-}
-
-impl BUFFCompressorConfigBuilder {
-    pub fn build(self) -> BUFFCompressorConfig {
-        BUFFCompressorConfig {
-            scale: self.scale.unwrap_or(1),
-        }
+impl Capacity {
+    fn to_le(self) -> Capacity {
+        Self(self.0.to_le())
     }
 }
 
@@ -403,6 +422,30 @@ mod tests {
 
                     super::test_total_bytes_in(&mut compressor);
                     super::test_total_bytes_buffered(&mut compressor);
+                }
+
+                #[test]
+                fn test_compressor_config_consistency() {
+                    let config: super::CompressorConfig = $custom_config.into();
+                    let size = config.serialized_size();
+                    let mut cursor = std::io::Cursor::new(Vec::new());
+                    config.serialize(&mut cursor).unwrap();
+
+                    let bytes = cursor.into_inner();
+
+                    assert_eq!(
+                        bytes.len(),
+                        size,
+                        "serialized size should be the size of the configuration plus 1"
+                    );
+
+                    assert_eq!(
+                        config,
+                        super::CompressorConfig::from_le_bytes(
+                            &config.compression_scheme(),
+                            &bytes[1..]
+                        ),
+                    )
                 }
             }
         };

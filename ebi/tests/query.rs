@@ -280,7 +280,7 @@ mod helper {
             ));
             let expected = RoaringBitmap::from_iter(vec![2, 4, 5]);
             test_fn(
-                config.clone(),
+                config,
                 values,
                 ChunkOption::RecordCount(5),
                 predicate,
@@ -298,7 +298,7 @@ mod helper {
             ));
             let expected = RoaringBitmap::from_iter(vec![1, 3, 5]);
             test_fn(
-                config.clone(),
+                config,
                 values,
                 ChunkOption::RecordCount(5),
                 predicate,
@@ -316,7 +316,7 @@ mod helper {
             ));
             let expected = RoaringBitmap::from_iter(vec![1, 2, 3]);
             test_fn(
-                config.clone(),
+                config,
                 values,
                 ChunkOption::RecordCount(5),
                 predicate,
@@ -334,7 +334,7 @@ mod helper {
             ));
             let expected = RoaringBitmap::from_iter(vec![1, 3]);
             test_fn(
-                config.clone(),
+                config,
                 values,
                 ChunkOption::RecordCount(5),
                 predicate,
@@ -350,7 +350,7 @@ mod helper {
                 Predicate::Range(Range::new(RangeValue::Exclusive(3.8), RangeValue::None));
             let expected = RoaringBitmap::from_iter(vec![1, 3, 5, 6]);
             test_fn(
-                config.clone(),
+                config,
                 values,
                 ChunkOption::RecordCount(5),
                 predicate,
@@ -366,7 +366,7 @@ mod helper {
                 Predicate::Range(Range::new(RangeValue::Inclusive(3.8), RangeValue::None));
             let expected = RoaringBitmap::from_iter(vec![1, 2, 3, 5, 6]);
             test_fn(
-                config.clone(),
+                config,
                 values,
                 ChunkOption::RecordCount(5),
                 predicate,
@@ -382,7 +382,7 @@ mod helper {
                 Predicate::Range(Range::new(RangeValue::None, RangeValue::Exclusive(9.9)));
             let expected = RoaringBitmap::from_iter(vec![0, 1, 2, 3, 4]);
             test_fn(
-                config.clone(),
+                config,
                 values,
                 ChunkOption::RecordCount(5),
                 predicate,
@@ -398,7 +398,7 @@ mod helper {
             let bitmask = RoaringBitmap::from_iter(vec![0, 1, 3, 4, 6]);
             let expected = bitmask.clone();
             test_fn(
-                config.clone(),
+                config,
                 values,
                 ChunkOption::RecordCount(5),
                 predicate,
@@ -417,7 +417,7 @@ mod helper {
             ));
             let expected = RoaringBitmap::from_iter(0..values.len() as u32);
             test_fn(
-                config.clone(),
+                config,
                 values,
                 ChunkOption::RecordCount(5),
                 predicate,
@@ -443,7 +443,7 @@ mod helper {
             let expected = RoaringBitmap::from_iter(22..30);
             let chunk_option = ChunkOption::RecordCount(35);
             test_fn(
-                config.clone(),
+                config,
                 values,
                 chunk_option,
                 predicate,
@@ -467,7 +467,7 @@ mod helper {
             let expected = RoaringBitmap::from_iter((0..=21).chain(30..35));
             let chunk_option = ChunkOption::RecordCount(35);
             test_fn(
-                config.clone(),
+                config,
                 values,
                 chunk_option,
                 predicate,
@@ -485,7 +485,7 @@ mod helper {
             let predicate = Predicate::Eq(3.8);
             let expected = RoaringBitmap::from_iter(vec![2, 7]);
             test_fn(
-                config.clone(),
+                config,
                 values,
                 ChunkOption::RecordCount(5),
                 predicate,
@@ -500,7 +500,7 @@ mod helper {
             let predicate = Predicate::Ne(3.8);
             let expected = RoaringBitmap::from_iter(vec![0, 1, 3, 4, 5, 6]);
             test_fn(
-                config.clone(),
+                config,
                 values,
                 ChunkOption::RecordCount(5),
                 predicate,
@@ -523,7 +523,7 @@ mod helper {
             let expected = RoaringBitmap::from_iter(iter::once(20));
             let chunk_option = ChunkOption::RecordCount(35);
             test_fn(
-                config.clone(),
+                config,
                 values,
                 chunk_option,
                 predicate,
@@ -546,7 +546,7 @@ mod helper {
             let expected = RoaringBitmap::from_iter((0..20).chain(21..35));
             let chunk_option = ChunkOption::RecordCount(35);
             test_fn(
-                config.clone(),
+                config,
                 values,
                 chunk_option,
                 predicate,
@@ -565,7 +565,7 @@ mod helper {
             let expected = RoaringBitmap::from_iter(0..32);
             let chunk_option = ChunkOption::RecordCount(35);
             test_fn(
-                config.clone(),
+                config,
                 values,
                 chunk_option,
                 predicate,
@@ -585,7 +585,7 @@ mod helper {
             // let expected = RoaringBitmap::from_iter(0..0);
             let chunk_option = ChunkOption::RecordCount(32 + 1);
             test_fn(
-                config.clone(),
+                config,
                 values,
                 chunk_option,
                 predicate,
@@ -607,7 +607,7 @@ mod helper {
             let bitmask = RoaringBitmap::from_iter(vec![0, 2, 3, 4, 6, 7]);
             let expected = RoaringBitmap::from_iter(vec![3, 6]);
             test_fn(
-                config.clone(),
+                config,
                 values,
                 ChunkOption::RecordCount(5),
                 predicate,
@@ -623,7 +623,7 @@ mod helper {
             let bitmask = RoaringBitmap::from_iter(vec![0, 2, 3, 4, 6, 7]);
             let expected = RoaringBitmap::from_iter(vec![2, 4, 6, 7]);
             test_fn(
-                config.clone(),
+                config,
                 values,
                 ChunkOption::RecordCount(5),
                 predicate,
@@ -643,7 +643,7 @@ mod helper {
             let chunk_id = ChunkId::new(2);
             let expected = RoaringBitmap::from_iter(vec![7]);
             test_fn(
-                config.clone(),
+                config,
                 values,
                 chunk_option,
                 predicate,
@@ -861,7 +861,7 @@ mod helper {
             let chunk_id = gen_chunk_id();
 
             test_fn_random(
-                config.clone(),
+                config,
                 values.clone(),
                 chunk_option,
                 predicate,
@@ -884,7 +884,7 @@ mod helper {
             let chunk_id = gen_chunk_id();
 
             test_fn_random(
-                config.clone(),
+                config,
                 values.clone(),
                 chunk_option,
                 predicate,
@@ -931,12 +931,7 @@ mod helper {
         test_name: impl std::fmt::Display + Clone,
     ) {
         let config = config.into();
-        test_query_filter_optionally_materialize(
-            config.clone(),
-            test_name.clone(),
-            false,
-            round_scale,
-        );
+        test_query_filter_optionally_materialize(config, test_name.clone(), false, round_scale);
         test_query_filter_optionally_materialize_random(
             config,
             test_name,
@@ -957,12 +952,7 @@ mod helper {
         test_name: impl std::fmt::Display + Clone,
     ) {
         let config = config.into();
-        test_query_filter_optionally_materialize(
-            config.clone(),
-            test_name.clone(),
-            true,
-            round_scale,
-        );
+        test_query_filter_optionally_materialize(config, test_name.clone(), true, round_scale);
         test_query_filter_optionally_materialize_random(
             config,
             test_name,
@@ -1038,7 +1028,7 @@ mod helper {
             let values = vec![33.3, 5.6, 3.8, 6.7, 2.1, 9.9, 10.1];
             let expected = values.clone();
             test_query_materialize_inner(
-                config.clone(),
+                config,
                 values,
                 ChunkOption::RecordCount(5),
                 None,
@@ -1051,7 +1041,7 @@ mod helper {
             let values = vec![0.4, 0.4, 0.5];
             let expected = values.clone();
             test_query_materialize_inner(
-                config.clone(),
+                config,
                 values,
                 ChunkOption::RecordCount(5),
                 None,
@@ -1068,7 +1058,7 @@ mod helper {
             let bitmask = RoaringBitmap::from_iter(vec![0, 2, 3, 5]);
             let expected = vec![33.3, 3.8, 6.7, 9.9];
             test_query_materialize_inner(
-                config.clone(),
+                config,
                 values,
                 ChunkOption::RecordCount(5),
                 Some(&bitmask),
@@ -1086,7 +1076,7 @@ mod helper {
             let chunk_id = ChunkId::new(2);
             let expected = vec![10.1, 200.3];
             test_query_materialize_inner(
-                config.clone(),
+                config,
                 values,
                 chunk_option,
                 None,
@@ -1215,7 +1205,7 @@ fn test_buff_filter() {
         config,
         Some(lower_bound),
         Some(upper_bound),
-        Some(scale),
+        Some(scale as usize),
         "BUFF",
     );
 }
@@ -1224,7 +1214,7 @@ fn test_buff_filter() {
 fn test_buff_materialize() {
     let scale = 10;
     let config = CompressorConfig::buff().scale(scale).build();
-    helper::test_query_materialize(config, Some(scale), "BUFF");
+    helper::test_query_materialize(config, Some(scale as usize), "BUFF");
 }
 
 #[test]
@@ -1242,7 +1232,7 @@ fn test_buff_filter_materialize() {
     let lower_bound = (lower_bound * scale as f64).floor() / scale as f64;
     helper::test_query_filter_materialize(
         config,
-        Some(10),
+        Some(scale as usize),
         Some(lower_bound),
         Some(upper_bound),
         "BUFF",

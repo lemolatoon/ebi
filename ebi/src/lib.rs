@@ -80,7 +80,7 @@ mod tests {
             }
 
             let random_values = generate_and_write_random_f64(n);
-            test_round_trip_for_compressor(&random_values, compressor_config.clone());
+            test_round_trip_for_compressor(&random_values, compressor_config);
         }
     }
 

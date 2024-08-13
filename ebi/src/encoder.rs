@@ -5,7 +5,7 @@ use crate::{
     format::{
         self,
         serialize::{AsBytes, ToLe},
-        ChunkFooter, FieldType, FileConfig, FileFooter0, FileFooter2, FileHeader,
+        ChunkFooter, FieldType, FileConfig, FileFooter0, FileFooter3, FileHeader,
         GeneralChunkHeader,
     },
     io::aligned_buf_reader::AlignedBufRead,
@@ -164,12 +164,6 @@ impl<R: AlignedBufRead> FileWriter<R> {
         size_of::<FileHeader>()
     }
 
-    pub fn file_footer_size(&self) -> usize {
-        size_of::<FileFooter0>()
-            + size_of::<ChunkFooter>() * self.n_chunks()
-            + size_of::<FileFooter2>()
-    }
-
     #[allow(unused)]
     /// Returns the wrapper of the contents of the internal buffer, filling it with more data from the inner reader.
     /// If input has already reached EOF, the second element of tuple will be set.
@@ -223,7 +217,7 @@ impl<R: AlignedBufRead> FileWriter<R> {
         if self.reaches_eof {
             return None;
         }
-        let mut compressor = compressor.unwrap_or_else(|| self.compressor.clone().build());
+        let mut compressor = compressor.unwrap_or_else(|| self.compressor.build());
         compressor.reset();
         Some(ChunkWriter::new(self, compressor))
     }
@@ -259,7 +253,7 @@ impl<R: AlignedBufRead> FileWriter<R> {
         f.write_all(header.to_le().as_bytes())
     }
 
-    pub fn write_footer<W: Write>(&mut self, mut f: W) -> io::Result<()> {
+    pub fn write_footer<W: Write + std::io::Seek>(&mut self, mut f: W) -> io::Result<()> {
         let number_of_chunks = self.n_chunks() as u64;
         let number_of_records = self
             .chunk_footers_with_next_chunk_footer()
@@ -284,15 +278,18 @@ impl<R: AlignedBufRead> FileWriter<R> {
             }
         }
 
+        self.compressor.serialize(&mut f)?;
+
         // TODO: calculate `crc` here.
         let crc = 0u32;
 
-        let mut footer2 = FileFooter2 {
+        let mut footer3 = FileFooter3 {
             compression_elapsed_time_nano_secs: 0, // must be written later
             crc,
         };
 
-        f.write_all(footer2.to_le().as_bytes())
+        let le_bytes = footer3.to_le().as_bytes();
+        f.write_all(le_bytes)
     }
 
     pub fn write_footer_offset<W: Write>(&mut self, mut f: W) -> io::Result<()> {
@@ -310,7 +307,8 @@ impl<R: AlignedBufRead> FileWriter<R> {
         let footer_offset = size_of::<FileHeader>() + self.total_bytes_out();
         let slot_offset = size_of::<FileFooter0>()
             + self.n_chunks() * size_of::<ChunkFooter>()
-            + offset_of!(FileFooter2, compression_elapsed_time_nano_secs);
+            + self.compressor.serialized_size()
+            + offset_of!(FileFooter3, compression_elapsed_time_nano_secs);
 
         footer_offset + slot_offset
     }
@@ -457,7 +455,10 @@ mod tests {
         ChunkOptionKind, CompressionScheme,
     };
 
-    use crate::io::aligned_buf_reader::AlignedBufReader;
+    use crate::{
+        compressor::uncompressed::UncompressedCompressorConfig,
+        io::aligned_buf_reader::AlignedBufReader,
+    };
 
     use super::*;
     use std::{
@@ -474,7 +475,7 @@ mod tests {
         };
         const RECORD_COUNT: usize = 100;
         let compressor_config = CompressorConfig::uncompressed()
-            .capacity(data.len())
+            .capacity(data.len() as u64)
             .build()
             .into();
         let mut in_f = AlignedBufReader::new(u8_data);
@@ -565,7 +566,9 @@ mod tests {
 
         let footer_size = size_of::<FileFooter0>()
             + number_of_chunks as usize * size_of::<ChunkFooter>()
-            + size_of::<FileFooter2>();
+            + size_of::<u8>()
+            + size_of::<UncompressedCompressorConfig>()
+            + size_of::<FileFooter3>();
         assert_eq!(
             dest_vec.len(),
             footer_offset + footer_size,

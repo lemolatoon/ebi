@@ -390,7 +390,7 @@ mod tests {
             let input = EncoderInput::from_f64_slice(&random_values);
             let output = EncoderOutput::from_vec(Vec::with_capacity(n));
             let chunk_option = ChunkOption::RecordCount(1024 * 3);
-            let mut encoder = Encoder::new(input, output, chunk_option, compressor_config.clone());
+            let mut encoder = Encoder::new(input, output, chunk_option, compressor_config);
 
             for v in generate_and_write_random_f64(1000) {
                 encoder.append(v).unwrap();

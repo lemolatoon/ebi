@@ -3,10 +3,10 @@
 
 use derive_getters::Getters;
 
-use crate::encoder::ChunkOption;
+use crate::{compressor::CompressorConfig, encoder::ChunkOption};
 
 use super::{
-    ChunkFooter, CompressionScheme, FieldType, FileConfig, FileFooter0, FileFooter2, FileHeader,
+    ChunkFooter, CompressionScheme, FieldType, FileConfig, FileFooter0, FileFooter3, FileHeader,
 };
 
 #[derive(Getters, Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -64,7 +64,7 @@ impl From<&FileConfig> for NativeFileConfig {
     }
 }
 
-#[derive(Getters, Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Getters, Debug, Clone)]
 pub struct NativeFileFooter {
     /// The number of records included in this file.
     #[getter(skip)]
@@ -73,6 +73,7 @@ pub struct NativeFileFooter {
     #[getter(skip)]
     number_of_chunks: u64,
     chunk_footers: Vec<NativeChunkFooter>,
+    compressor_config: CompressorConfig,
     #[getter(skip)]
     compression_elapsed_time_nano_secs: u128,
     #[getter(skip)]
@@ -83,7 +84,8 @@ impl NativeFileFooter {
     pub fn new(
         footer0: &FileFooter0,
         chunk_footers: &[ChunkFooter],
-        footer2: &FileFooter2,
+        compressor_config: CompressorConfig,
+        footer2: &FileFooter3,
     ) -> Self {
         let number_of_records = footer0.number_of_records;
         let number_of_chunks = footer0.number_of_chunks;
@@ -94,6 +96,7 @@ impl NativeFileFooter {
             number_of_records,
             number_of_chunks,
             chunk_footers,
+            compressor_config,
             compression_elapsed_time_nano_secs,
             crc,
         }

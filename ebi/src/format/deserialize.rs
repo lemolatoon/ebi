@@ -6,11 +6,11 @@ use std::{
 use num_enum::TryFromPrimitive;
 use thiserror::Error;
 
-use crate::decoder;
+use crate::{compressor::Capacity, decoder};
 
 use super::{
     ChunkFooter, ChunkOption, ChunkOptionKind, CompressionScheme, FieldType, FileConfig,
-    FileFooter0, FileFooter2, FileHeader,
+    FileFooter0, FileFooter3, FileHeader,
 };
 
 /// A trait for converting a byte slice into a struct instance, assuming little-endian byte order.
@@ -48,7 +48,7 @@ macro_rules! impl_from_le_bytes_ext {
 
 pub(crate) use impl_from_le_bytes_ext;
 
-impl_from_le_bytes_ext!(ChunkFooter, FileFooter0, FileFooter2);
+impl_from_le_bytes_ext!(ChunkFooter, FileFooter0, FileFooter3);
 
 /// A trait for attempting to convert a byte slice into a struct instance, assuming little-endian byte order.
 /// This trait should be implemented for structs that can potentially be constructed from byte slices.
@@ -270,7 +270,7 @@ impl FromLeBytes for FileFooter0 {
     }
 }
 
-impl FromLeBytes for FileFooter2 {
+impl FromLeBytes for FileFooter3 {
     fn from_le_bytes(bytes: &[u8]) -> Self {
         let compression_elapsed_time_nano_secs = u128::from_le_bytes([
             bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5], bytes[6], bytes[7],
@@ -316,3 +316,41 @@ impl FromLeBytes for ChunkFooter {
         }
     }
 }
+
+// compressor configs
+
+impl FromLeBytes for Capacity {
+    fn from_le_bytes(bytes: &[u8]) -> Self {
+        let cap = u64::from_le_bytes(bytes[..8].try_into().unwrap());
+        Capacity(cap)
+    }
+}
+
+macro_rules! impl_from_le_bytes {
+    ($struct_name:path, $builder_method:ident, $( ($field:ident, $type:ty) ),* ) => {
+        #[allow(unused_assignments)]
+        impl $crate::format::deserialize::FromLeBytes for $struct_name {
+            fn from_le_bytes(mut bytes: &[u8]) -> Self {
+                $(
+                    let $field = <$type>::from_le_bytes(bytes[..std::mem::size_of::<$type>()].try_into().unwrap());
+                    bytes = &bytes[std::mem::size_of::<$type>()..];
+                )*
+
+                $crate::compressor::CompressorConfig::$builder_method()
+                    $( .$field($field) )*
+                    .build()
+            }
+        }
+
+        impl $struct_name {
+            pub fn serialized_size(&self) -> usize {
+                let mut size = 0;
+                $(
+                    size += std::mem::size_of::<$type>();
+                )*
+                size
+            }
+        }
+    };
+}
+pub(crate) use impl_from_le_bytes;

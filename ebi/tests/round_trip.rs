@@ -118,7 +118,7 @@ fn test_round_trip_with_scale(
                 encoder_input,
                 encoder_output,
                 chunk_option(n),
-                compressor_config.clone(),
+                compressor_config,
             );
 
             encoder.encode().unwrap();
@@ -134,6 +134,12 @@ fn test_round_trip_with_scale(
             let mut decoder_output = DecoderOutput::from_vec(Vec::new());
 
             let mut decoder = Decoder::new(decoder_input).unwrap();
+
+            assert_eq!(
+                *decoder.footer().compressor_config(),
+                compressor_config,
+                "The compressor config is not equal to the original config"
+            );
 
             decoder
                 .filter_materialize(
@@ -250,6 +256,12 @@ fn round_trip_assert(
 
         let mut decoder = Decoder::new(decoder_input).unwrap();
 
+        assert_eq!(
+            *decoder.footer().compressor_config(),
+            compressor_config,
+            "The compressor config is not equal to the original config"
+        );
+
         decoder
             .filter_materialize(
                 &mut decoder_output,
@@ -312,7 +324,7 @@ fn test_round_trip(
 
         let random_values = generate_and_write_random_f64(n);
 
-        round_trip_assert(&random_values, compressor_config.clone(), chunk_option(n));
+        round_trip_assert(&random_values, compressor_config, chunk_option(n));
     }
 
     const XOR_VALUES: [f64; 66] = const {
@@ -341,7 +353,7 @@ fn test_round_trip(
     };
     round_trip_assert(
         &XOR_VALUES,
-        compressor_config.clone(),
+        compressor_config,
         ChunkOption::RecordCount(XOR_VALUES.len()),
     );
 
@@ -418,7 +430,7 @@ fn test_api_round_trip_buff() {
         test_round_trip_with_scale(
             generate_and_write_random_f64_with_precision,
             compressor_config.into(),
-            scale,
+            scale as usize,
             record_count_chunk_option_by_n,
             true,
         );
@@ -445,7 +457,7 @@ fn test_api_round_trip_buff_bytesize() {
         test_round_trip_with_scale(
             generate_and_write_random_f64_with_precision,
             compressor_config.into(),
-            scale,
+            scale as usize,
             bytesize_chunk_option_by_n,
             true,
         );

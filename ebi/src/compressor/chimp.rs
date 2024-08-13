@@ -1,12 +1,21 @@
-use crate::io::bit_write::{BitWrite, BufferedBitWriter};
+use crate::{
+    format::deserialize,
+    io::bit_write::{BitWrite, BufferedBitWriter},
+};
 
-use super::general_xor::{
-    GeneralXorCompressor, GeneralXorCompressorConfig, GeneralXorCompressorConfigBuilder, XorEncoder,
+use super::{
+    general_xor::{
+        GeneralXorCompressor, GeneralXorCompressorConfig, GeneralXorCompressorConfigBuilder,
+        XorEncoder,
+    },
+    Capacity,
 };
 
 pub type ChimpCompressor = GeneralXorCompressor<BufferedBitWriter, ChimpEncoder>;
 pub type ChimpCompressorConfig = GeneralXorCompressorConfig<ChimpEncoder>;
 pub type ChimpCompressorConfigBuilder = GeneralXorCompressorConfigBuilder<ChimpEncoder>;
+
+deserialize::impl_from_le_bytes!(ChimpCompressorConfig, chimp, (capacity, Capacity));
 
 #[derive(Debug, Clone, PartialEq, PartialOrd)]
 pub struct ChimpEncoder {

@@ -438,7 +438,7 @@ mod tests {
 
     fn test_all_with_precision(compresor_config: CompressorConfig, scale: usize) {
         let values = generate_and_write_random_f64_with_precision(1003, scale);
-        let mut decoder = decoder(values.as_slice(), compresor_config.clone());
+        let mut decoder = decoder(values.as_slice(), compresor_config);
 
         let mut reader = decoder.chunk_reader(ChunkId::new(0)).unwrap();
 
@@ -519,6 +519,9 @@ mod tests {
     #[test]
     fn test_buff() {
         let scale = 100;
-        test_all_with_precision(CompressorConfig::buff().scale(scale).build().into(), scale);
+        test_all_with_precision(
+            CompressorConfig::buff().scale(scale).build().into(),
+            scale as usize,
+        );
     }
 }

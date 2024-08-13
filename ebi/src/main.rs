@@ -51,7 +51,7 @@ fn generate_and_write_random_f64(path: impl AsRef<Path>, n: usize, scale: usize)
 fn main() {
     const RECORD_COUNT: usize = 3;
     let scale = 100;
-    generate_and_write_random_f64("uncompressed.bin", RECORD_COUNT * 3 + 3, scale).unwrap();
+    // generate_and_write_random_f64("uncompressed.bin", RECORD_COUNT * 3 + 3, scale).unwrap();
     // let compressor = GenericCompressor::Uncompressed(UncompressedCompressor::new(100));
     // let compressor_config = CompressorConfig::rle().build();
     // let compressor_config = CompressorConfig::gorilla().build();
