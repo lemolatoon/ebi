@@ -11,7 +11,7 @@ pub mod io;
 mod tests {
     use std::{
         env,
-        io::{self, Seek, SeekFrom, Write},
+        io::{self, Read, Seek, SeekFrom, Write},
     };
 
     use rand::Rng;
@@ -20,7 +20,6 @@ mod tests {
         compressor::CompressorConfig,
         decoder::FileReader,
         encoder::{ChunkOption, FileWriter},
-        io::aligned_buf_reader::{AlignedBufRead, AlignedBufReader},
     };
 
     fn generate_and_write_random_f64(n: usize) -> Vec<f64> {
@@ -38,7 +37,7 @@ mod tests {
         random_values
     }
 
-    fn write_file<R: AlignedBufRead, W: Write + Seek>(
+    fn write_file<R: Read, W: Write + Seek>(
         mut file_writer: FileWriter<R>,
         mut out_f: W,
     ) -> io::Result<()> {
@@ -146,7 +145,7 @@ mod tests {
             in_f.write_all(&bytes).unwrap();
         }
 
-        let mut in_f = AlignedBufReader::new(io::Cursor::new(in_f.into_inner()));
+        let mut in_f = io::Cursor::new(in_f.into_inner());
         let mut out_f = io::Cursor::new(Vec::<u8>::new());
 
         let chunk_option = ChunkOption::RecordCount(RECORD_COUNT_PER_CHUNK);

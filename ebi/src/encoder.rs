@@ -8,14 +8,13 @@ use crate::{
         ChunkFooter, FieldType, FileConfig, FileFooter0, FileFooter3, FileHeader,
         GeneralChunkHeader,
     },
-    io::aligned_buf_reader::AlignedBufRead,
 };
 use core::slice;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 use std::{
     io::{self, Read, Write},
-    mem::{offset_of, size_of, size_of_val},
+    mem::{offset_of, size_of},
     time::Instant,
 };
 
@@ -59,7 +58,7 @@ impl ChunkOption {
     }
 }
 
-pub struct FileWriter<R: AlignedBufRead> {
+pub struct FileWriter<R: Read> {
     input: R,
     start_time: Instant,
     chunk_option: ChunkOption,
@@ -71,68 +70,7 @@ pub struct FileWriter<R: AlignedBufRead> {
     reaches_eof: bool,
 }
 
-struct BufWrapper<'a, R: AlignedBufRead> {
-    input: &'a mut R,
-    buf: &'a [f64],
-    n_consumed_bytes: usize,
-}
-
-impl<'a, R: AlignedBufRead> BufWrapper<'a, R> {
-    /// Provides the wrapper of internal buffer of BufRead.
-    /// Tuple's first element is the `BufWrapper`, the second element indicates
-    /// reader reaches EOF or not.
-    pub fn new(input: &'a mut R) -> Result<(Self, bool), io::Error> {
-        let buf: &[u8] = input.fill_buf()?;
-        let reaches_eof = buf.is_empty();
-
-        if reaches_eof {
-            return Ok((
-                Self {
-                    input,
-                    buf: &[],
-                    n_consumed_bytes: 0,
-                },
-                true,
-            ));
-        }
-
-        let buf_ptr = buf.as_ptr().cast::<f64>();
-        let len = size_of_val(buf) / size_of::<f64>();
-        // Safety:
-        // input buffer is safely interpreted because the user of this struct guarantees
-        // this byte stream is a f64 array.
-        debug_assert!(buf_ptr.is_aligned(), "buf_ptr is not aligned");
-        debug_assert!(size_of::<f64>() * len <= isize::MAX as usize);
-        let buf: &'a [f64] = unsafe { slice::from_raw_parts(buf_ptr, len) };
-        Ok((
-            Self {
-                input,
-                buf,
-                n_consumed_bytes: len * size_of::<f64>(),
-            },
-            reaches_eof,
-        ))
-    }
-
-    #[allow(unused)]
-    pub fn set_n_consumed_bytes(&mut self, consumed: usize) {
-        self.n_consumed_bytes = consumed;
-    }
-}
-
-impl<'a, R: AlignedBufRead> AsRef<[f64]> for BufWrapper<'a, R> {
-    fn as_ref(&self) -> &'a [f64] {
-        self.buf
-    }
-}
-
-impl<'a, R: AlignedBufRead> Drop for BufWrapper<'a, R> {
-    fn drop(&mut self) {
-        self.input.consume(self.n_consumed_bytes);
-    }
-}
-
-impl<R: AlignedBufRead> FileWriter<R> {
+impl<R: Read> FileWriter<R> {
     const MAGIC_NUMBER: &'static [u8; 4] = b"EBI1";
     pub fn new(input: R, compressor: CompressorConfig, chunk_option: ChunkOption) -> Self {
         let start_time = Instant::now();
@@ -162,13 +100,6 @@ impl<R: AlignedBufRead> FileWriter<R> {
 
     pub fn file_header_size(&self) -> usize {
         size_of::<FileHeader>()
-    }
-
-    #[allow(unused)]
-    /// Returns the wrapper of the contents of the internal buffer, filling it with more data from the inner reader.
-    /// If input has already reached EOF, the second element of tuple will be set.
-    fn f64_buf(&mut self) -> Result<(BufWrapper<'_, R>, bool), io::Error> {
-        BufWrapper::new(&mut self.input)
     }
 
     fn total_bytes_out(&self) -> usize {
@@ -322,7 +253,7 @@ impl<R: AlignedBufRead> FileWriter<R> {
     }
 }
 
-pub struct ChunkWriter<'a, R: AlignedBufRead> {
+pub struct ChunkWriter<'a, R: Read> {
     file_writer: &'a mut FileWriter<R>,
     compressor: GenericCompressor,
 }
@@ -355,7 +286,7 @@ fn read_less_or_equal<R: Read>(mut f: R, n_bytes: usize) -> Result<Vec<f64>, io:
     Ok(buf)
 }
 
-impl<'a, R: AlignedBufRead> ChunkWriter<'a, R> {
+impl<'a, R: Read> ChunkWriter<'a, R> {
     fn new(file_writer: &'a mut FileWriter<R>, compressor: GenericCompressor) -> Self {
         Self {
             file_writer,
@@ -455,10 +386,7 @@ mod tests {
         ChunkOptionKind, CompressionScheme,
     };
 
-    use crate::{
-        compressor::uncompressed::UncompressedCompressorConfig,
-        io::aligned_buf_reader::AlignedBufReader,
-    };
+    use crate::compressor::uncompressed::UncompressedCompressorConfig;
 
     use super::*;
     use std::{
@@ -478,7 +406,7 @@ mod tests {
             .capacity(data.len() as u64)
             .build()
             .into();
-        let mut in_f = AlignedBufReader::new(u8_data);
+        let mut in_f = u8_data;
         let mut out_f = Cursor::new(Vec::new());
         let chunk_option = ChunkOption::RecordCount(RECORD_COUNT);
         let mut file_writer = FileWriter::new(&mut in_f, compressor_config, chunk_option);
@@ -510,7 +438,7 @@ mod tests {
         let file_header = file_header.unwrap();
         assert_eq!(
             file_header.magic_number,
-            *FileWriter::<AlignedBufReader<Cursor<Vec<u8>>>>::MAGIC_NUMBER
+            *FileWriter::<Cursor<Vec<u8>>>::MAGIC_NUMBER
         );
         let version = file_header.version;
         assert_eq!(

@@ -3,83 +3,46 @@ use std::{
     io::{BufWriter, Cursor, Read, Seek, SeekFrom, Write},
     mem::size_of_val,
     path::Path,
+    slice,
 };
-
-use thiserror::Error;
 
 use crate::{
     compressor::CompressorConfig,
     encoder::{ChunkOption, FileWriter},
-    io::aligned_buf_reader::{AlignedBufRead, AlignedBufReader, AlignedByteSliceBufReader},
 };
 
-pub struct EncoderInput<R: AlignedBufRead> {
+pub struct EncoderInput<R: Read> {
     inner: R,
 }
 
-impl<R: Read> EncoderInput<AlignedBufReader<R>> {
+impl<R: Read> EncoderInput<R> {
     pub fn from_reader(reader: R) -> Self {
-        Self {
-            inner: AlignedBufReader::new(reader),
-        }
-    }
-
-    pub fn from_reader_with_capacity(reader: R, capacity: usize) -> Self {
-        Self {
-            inner: AlignedBufReader::with_capacity(capacity, reader),
-        }
+        Self { inner: reader }
     }
 }
 
-impl<'a> EncoderInput<AlignedBufReader<&'a [u8]>> {
+impl<'a> EncoderInput<&'a [u8]> {
     pub fn from_slice(slice: &'a [u8]) -> Self {
         Self::from_reader(slice)
     }
 }
 
-impl<'a> EncoderInput<AlignedByteSliceBufReader<'a>> {
+impl<'a> EncoderInput<&'a [u8]> {
     pub fn empty() -> Self {
-        Self {
-            inner: AlignedByteSliceBufReader::new_from_f64_slice(&[]),
-        }
-    }
-
-    pub fn from_aligned_slice(slice: &'a [u8]) -> Option<Self> {
-        let inner = AlignedByteSliceBufReader::new(slice)?;
-        Some(Self { inner })
-    }
-
-    pub fn from_u64_slice(slice: &'a [u64]) -> Self {
-        debug_assert!(
-            slice.as_ptr().is_aligned(),
-            "slice must be always aligned to its element's alignment(u64)"
-        );
-        let inner = AlignedByteSliceBufReader::new_from_u64_slice(slice);
-        Self { inner }
+        Self::from_slice(&[])
     }
 
     pub fn from_f64_slice(slice: &'a [f64]) -> Self {
-        debug_assert!(
-            slice.as_ptr().is_aligned(),
-            "slice must be always aligned to its element's alignment(f64)"
-        );
-        let inner = AlignedByteSliceBufReader::new_from_f64_slice(slice);
-        Self { inner }
+        let u8_slice: &'a [u8] =
+            unsafe { slice::from_raw_parts(slice.as_ptr().cast::<u8>(), size_of_val(slice)) };
+        Self::from_slice(u8_slice)
     }
 }
 
-impl EncoderInput<AlignedBufReader<File>> {
+impl EncoderInput<File> {
     pub fn from_file(file_path: impl AsRef<Path>) -> std::io::Result<Self> {
         let file = std::fs::File::open(file_path)?;
         Ok(Self::from_reader(file))
-    }
-
-    pub fn from_file_with_capacity(
-        file_path: impl AsRef<Path>,
-        capacity: usize,
-    ) -> std::io::Result<Self> {
-        let file = std::fs::File::open(file_path)?;
-        Ok(Self::from_reader_with_capacity(file, capacity))
     }
 }
 
@@ -126,178 +89,44 @@ impl EncoderOutput<Cursor<Vec<u8>>> {
     }
 }
 
-struct AppendableEncoderInput<R: AlignedBufRead> {
-    inner: R,
-    additional_data: Vec<f64>,
-    additional_data_cursor: Option<usize>,
-}
-
-#[derive(Error, Debug, Clone, Copy)]
-pub enum AppendError {
-    #[error("Read has already started")]
-    ReadStarted,
-}
-
-impl<R: AlignedBufRead> AppendableEncoderInput<R> {
-    pub fn with_capacity(inner: R, capacity: usize) -> Self {
-        Self {
-            inner,
-            additional_data: Vec::with_capacity(capacity),
-            additional_data_cursor: None,
-        }
-    }
-
-    pub fn bulk_append(&mut self, additional_data: &[f64]) -> Result<(), AppendError> {
-        if self.additional_data_cursor.is_some() {
-            return Err(AppendError::ReadStarted);
-        }
-
-        self.additional_data.extend_from_slice(additional_data);
-
-        Ok(())
-    }
-
-    pub fn append(&mut self, additional_data: f64) -> Result<(), AppendError> {
-        if self.additional_data_cursor.is_some() {
-            return Err(AppendError::ReadStarted);
-        }
-
-        self.additional_data.push(additional_data);
-
-        Ok(())
-    }
-
-    /// Returns the additional data as a slice of `u8`.
-    /// This slice is guaranteed to be aligned to 8 bytes.
-    fn additional_data_bytes(additional_data: &[f64]) -> &[u8] {
-        let ptr = additional_data.as_ptr().cast::<u8>();
-        let byte_len = size_of_val(additional_data);
-
-        // Safety:
-        // Any slice can be safely casted to a slice of u8.
-        unsafe { std::slice::from_raw_parts(ptr, byte_len) }
-    }
-}
-
-impl<R: AlignedBufRead> Read for AppendableEncoderInput<R> {
+impl<R: Read> Read for EncoderInput<R> {
     fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
-        let Self {
-            inner,
-            additional_data,
-            additional_data_cursor,
-        } = self;
-        let result = AlignedBufRead::fill_buf(inner)?;
+        Read::read(&mut self.inner, buf)
+    }
 
-        if !result.is_empty() {
-            return Read::read(inner, buf);
-        }
+    fn read_vectored(&mut self, bufs: &mut [std::io::IoSliceMut<'_>]) -> std::io::Result<usize> {
+        Read::read_vectored(&mut self.inner, bufs)
+    }
 
-        let cursor_mut = additional_data_cursor.get_or_insert(0);
-        let cursor = *cursor_mut;
+    fn read_to_end(&mut self, buf: &mut Vec<u8>) -> std::io::Result<usize> {
+        Read::read_to_end(&mut self.inner, buf)
+    }
 
-        if Self::additional_data_bytes(additional_data).is_empty() {
-            return Ok(0);
-        }
+    fn read_to_string(&mut self, buf: &mut String) -> std::io::Result<usize> {
+        Read::read_to_string(&mut self.inner, buf)
+    }
 
-        if Self::additional_data_bytes(additional_data).len() <= cursor {
-            return Ok(0);
-        }
-
-        let read_len = std::cmp::min(
-            buf.len(),
-            Self::additional_data_bytes(additional_data)[cursor..].len(),
-        );
-        *cursor_mut += read_len;
-
-        buf[..read_len].copy_from_slice(
-            &Self::additional_data_bytes(additional_data)[cursor..(cursor + read_len)],
-        );
-
-        Ok(read_len)
+    fn read_exact(&mut self, buf: &mut [u8]) -> std::io::Result<()> {
+        Read::read_exact(&mut self.inner, buf)
     }
 }
 
-unsafe impl<R: AlignedBufRead> AlignedBufRead for AppendableEncoderInput<R> {
-    fn fill_buf(&mut self) -> std::io::Result<&[u8]> {
-        let Self {
-            inner,
-            additional_data,
-            additional_data_cursor,
-        } = self;
-        let result = AlignedBufRead::fill_buf(inner)?;
-
-        if !result.is_empty() {
-            return Ok(result);
-        }
-
-        let cursor = *additional_data_cursor.get_or_insert(0);
-
-        if Self::additional_data_bytes(additional_data).is_empty() {
-            return Ok(&[]);
-        }
-
-        if Self::additional_data_bytes(additional_data).len() <= cursor {
-            return Ok(&[]);
-        }
-
-        Ok(&Self::additional_data_bytes(additional_data)[cursor..])
-    }
-
-    fn consume(&mut self, amt: usize) {
-        let Self {
-            inner,
-            additional_data_cursor,
-            ..
-        } = self;
-
-        match additional_data_cursor {
-            Some(ref mut cursor) => {
-                *cursor += amt;
-            }
-            None => {
-                AlignedBufRead::consume(inner, amt);
-            }
-        }
-    }
-}
-
-pub struct Encoder<R: AlignedBufRead, W: Write + Seek> {
-    file_writer: FileWriter<AppendableEncoderInput<R>>,
+pub struct Encoder<R: Read, W: Write + Seek> {
+    file_writer: FileWriter<EncoderInput<R>>,
     output: EncoderOutput<W>,
 }
 
-impl<R: AlignedBufRead, W: Write + Seek> Encoder<R, W> {
+impl<R: Read, W: Write + Seek> Encoder<R, W> {
     pub fn new(
         input: EncoderInput<R>,
         output: EncoderOutput<W>,
         chunk_option: ChunkOption,
         compressor_config: impl Into<CompressorConfig>,
     ) -> Self {
-        Self::with_additional_capacity(input, output, chunk_option, compressor_config, 0)
-    }
-
-    pub fn with_additional_capacity(
-        input: EncoderInput<R>,
-        output: EncoderOutput<W>,
-        chunk_option: ChunkOption,
-        compressor_config: impl Into<CompressorConfig>,
-        capacity: usize,
-    ) -> Self {
-        let input = AppendableEncoderInput::with_capacity(input.inner, capacity);
-        let compressor_config = compressor_config.into();
-        let file_writer = FileWriter::new(input, compressor_config, chunk_option);
         Self {
-            file_writer,
+            file_writer: FileWriter::new(input, compressor_config.into(), chunk_option),
             output,
         }
-    }
-
-    pub fn append(&mut self, additional_data: f64) -> Result<(), AppendError> {
-        self.file_writer.input_mut().append(additional_data)
-    }
-
-    pub fn bulk_append(&mut self, additional_data: &[f64]) -> Result<(), AppendError> {
-        self.file_writer.input_mut().bulk_append(additional_data)
     }
 
     /// Encode the data.
@@ -392,17 +221,12 @@ mod tests {
             let chunk_option = ChunkOption::RecordCount(1024 * 3);
             let mut encoder = Encoder::new(input, output, chunk_option, compressor_config);
 
-            for v in generate_and_write_random_f64(1000) {
-                encoder.append(v).unwrap();
-            }
-            encoder.bulk_append(&[1.0, 2.0, 3.0]).unwrap();
-
             encoder.encode().unwrap();
 
             let output = encoder.into_output().into_vec();
 
             assert!(
-                (random_values.len() + 1000) * size_of::<f64>() < output.len() * size_of::<u8>() ,
+                random_values.len() * size_of::<f64>() < output.len() * size_of::<u8>() ,
                 "output must be bigger than input because this is uncompressed: input({}), output({})", (random_values.len() + 1000) * size_of::<f64>(), output.len() * size_of::<u8>()
             );
         }

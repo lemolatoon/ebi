@@ -188,6 +188,8 @@ fn main() -> anyhow::Result<()> {
             .join("all");
         let all_outputs = all_command(args)?;
         save_output_json(all_outputs.into(), save_dir)?;
+
+        return Ok(());
     }
 
     let Some(input) = &cli.input else {
@@ -558,7 +560,9 @@ fn all_command(args: AllArgs) -> anyhow::Result<HashMap<String, AllOutput>> {
 
             create_saved_file_at(save_dir.as_path(), binary_file_stem, &all_output)?;
             all_outputs.insert(binary_file_stem.to_string_lossy().to_string(), all_output);
+            break;
         }
+        break;
     }
 
     Ok(all_outputs)
@@ -972,11 +976,12 @@ fn filter_materialize_command(
             filename.as_ref().display()
         ))?;
     let decoded_filename = filename.as_ref().with_extension("filter_materialized");
-    let mut decoder_output =
-        DecoderOutput::from_file(decoded_filename.as_path()).context(format!(
+    let mut decoder_output = DecoderOutput::from_file(decoded_filename.as_path())
+        .context(format!(
             "Failed to create decoder output from output file.: {}",
             decoded_filename.as_path().display()
-        ))?;
+        ))?
+        .into_buffered();
 
     let start = std::time::Instant::now();
     decoder
@@ -988,7 +993,8 @@ fn filter_materialize_command(
         chunk_option: *decoder.header().config().chunk_option(),
         compressor_config: *decoder.footer().compressor_config(),
     };
-    let result_string = format!("{:?}", decoder_output.into_writer().metadata()?);
+    let metadata = decoder_output.into_writer().into_inner()?.metadata()?;
+    let result_string = format!("{:?}", metadata);
 
     let output = OutputWrapper {
         version: env!("CARGO_PKG_VERSION").to_string(),
@@ -1020,11 +1026,12 @@ fn materialize_command(
             filename.as_ref().display()
         ))?;
     let decoded_filename = filename.as_ref().with_extension("materialized");
-    let mut decoder_output =
-        DecoderOutput::from_file(decoded_filename.as_path()).context(format!(
+    let mut decoder_output = DecoderOutput::from_file(decoded_filename.as_path())
+        .context(format!(
             "Failed to create decoder output from output file.: {}",
             decoded_filename.as_path().display()
-        ))?;
+        ))?
+        .into_buffered();
 
     let start = std::time::Instant::now();
     decoder
@@ -1037,7 +1044,8 @@ fn materialize_command(
         compressor_config: *decoder.footer().compressor_config(),
     };
 
-    let result_string = format!("{:?}", decoder_output.into_writer().metadata()?);
+    let metadata = decoder_output.into_writer().into_inner()?.metadata()?;
+    let result_string = format!("{:?}", metadata);
 
     let output = OutputWrapper {
         version: env!("CARGO_PKG_VERSION").to_string(),
