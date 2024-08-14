@@ -104,7 +104,7 @@ enum Output {
     #[quick_impl(impl From)]
     Materialize(OutputWrapper<MaterializeConfig>),
     #[quick_impl(impl From)]
-    All(HashMap<String, AllOutput>),
+    All(HashMap<String, HashMap<String, AllOutput>>),
 }
 
 #[derive(Debug, Clone, Args)]
@@ -313,7 +313,7 @@ fn write_output_json(
     Ok(())
 }
 
-fn all_command(args: AllArgs) -> anyhow::Result<HashMap<String, AllOutput>> {
+fn all_command(args: AllArgs) -> anyhow::Result<HashMap<String, HashMap<String, AllOutput>>> {
     let AllArgs {
         create_config,
         compressor_config_dir,
@@ -341,8 +341,6 @@ fn all_command(args: AllArgs) -> anyhow::Result<HashMap<String, AllOutput>> {
         "Save directory does not exist or not directory: {}",
         save_dir.display()
     );
-
-    let mut all_outputs = HashMap::new();
 
     let entries = fs::read_dir(&binary_dir).context(format!(
         "Failed to read directory: {}",
@@ -416,7 +414,7 @@ fn all_command(args: AllArgs) -> anyhow::Result<HashMap<String, AllOutput>> {
     fn check_result_already_exist(
         save_dir: impl AsRef<Path>,
         binary_file_stem: &OsStr,
-    ) -> anyhow::Result<Option<AllOutput>> {
+    ) -> anyhow::Result<Option<HashMap<String, AllOutput>>> {
         let saved_file_name = save_dir
             .as_ref()
             .join(binary_file_stem)
@@ -450,6 +448,7 @@ fn all_command(args: AllArgs) -> anyhow::Result<HashMap<String, AllOutput>> {
 
         Ok(())
     }
+    let mut all_outputs = HashMap::new();
     for (i, binary_file) in entries.into_iter().enumerate() {
         println!(
             "[{:03}/{:03}] Processing binary file: {}",
@@ -478,6 +477,8 @@ fn all_command(args: AllArgs) -> anyhow::Result<HashMap<String, AllOutput>> {
         let filter_config_dir = filter_config_dir.join(binary_file_stem);
         let compressor_config_dir = compressor_config_dir.join(binary_file_stem);
 
+        let mut outputs = HashMap::new();
+
         for compressor_config_file in fs::read_dir(compressor_config_dir)
             .context("Failed to read compressor config directory")?
         {
@@ -495,11 +496,10 @@ fn all_command(args: AllArgs) -> anyhow::Result<HashMap<String, AllOutput>> {
             let compressor_config = ConfigPath {
                 config: compressor_config_file.to_string_lossy().to_string(),
             };
-            let compress_result = compress_command(
-                binary_file.as_path(),
-                compressor_config.read()?,
-                compressor_config,
-            )?;
+            let compression_config: CompressionConfig = compressor_config.read()?;
+            let compression_scheme = compression_config.compressor_config.compression_scheme();
+            let compress_result =
+                compress_command(binary_file.as_path(), compression_config, compressor_config)?;
 
             let compressed_file = binary_file.with_extension("ebi");
 
@@ -559,10 +559,9 @@ fn all_command(args: AllArgs) -> anyhow::Result<HashMap<String, AllOutput>> {
             };
 
             create_saved_file_at(save_dir.as_path(), binary_file_stem, &all_output)?;
-            all_outputs.insert(binary_file_stem.to_string_lossy().to_string(), all_output);
-            break;
+            outputs.insert(format!("{:?}", compression_scheme), all_output);
         }
-        break;
+        all_outputs.insert(binary_file_stem.to_string_lossy().to_string(), outputs);
     }
 
     Ok(all_outputs)
