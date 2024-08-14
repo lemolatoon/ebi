@@ -115,6 +115,36 @@ impl<'handle, T: FileMetadataLike> GeneralChunkReader<'handle, T> {
         self.reader
             .filter_materialize(output, predicate, bitmask, logical_offset)
     }
+
+    /// Calculate the sum of the values filtered by the bitmask.
+    /// `bitmask` is optional. If it is None, all values are written.
+    ///
+    /// `bitmask`'s index is global to the whole chunks.
+    /// That is why `logical_offset` is necessary to access bitmask.
+    pub fn sum(&mut self, bitmask: Option<&RoaringBitmap>) -> Result<f64> {
+        let logical_offset = self.handle.chunk_footer().logical_offset() as usize;
+        self.reader.sum(bitmask, logical_offset)
+    }
+
+    /// Calculate the minimum of the values filtered by the bitmask.
+    /// `bitmask` is optional. If it is None, all values are written.
+    ///
+    /// `bitmask`'s index is global to the whole chunks.
+    /// That is why `logical_offset` is necessary to access bitmask.
+    pub fn min(&mut self, bitmask: Option<&RoaringBitmap>) -> Result<f64> {
+        let logical_offset = self.handle.chunk_footer().logical_offset() as usize;
+        self.reader.min(bitmask, logical_offset)
+    }
+
+    /// Calculate the maximum of the values filtered by the bitmask.
+    /// `bitmask` is optional. If it is None, all values are written.
+    ///
+    /// `bitmask`'s index is global to the whole chunks.
+    /// That is why `logical_offset` is necessary to access bitmask.
+    pub fn max(&mut self, bitmask: Option<&RoaringBitmap>) -> Result<f64> {
+        let logical_offset = self.handle.chunk_footer().logical_offset() as usize;
+        self.reader.max(bitmask, logical_offset)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -327,6 +357,51 @@ macro_rules! impl_generic_reader {
             ) -> Result<()> {
                 match self {
                     $( $enum_name::$variant(c) => c.filter_materialize(output, predicate, bitmask, logical_offset), )*
+                }
+            }
+
+            /// Calculate the sum of the values filtered by the bitmask.
+            /// `bitmask` is optional. If it is None, all values are written.
+            ///
+            /// `bitmask`'s index is global to the whole chunks.
+            /// That is why `logical_offset` is necessary to access bitmask.
+            pub fn sum(
+                &mut self,
+                bitmask: Option<&RoaringBitmap>,
+                logical_offset: usize,
+            ) -> Result<f64> {
+                match self {
+                    $( $enum_name::$variant(c) => c.sum(bitmask, logical_offset), )*
+                }
+            }
+
+            /// Calculate the minimum of the values filtered by the bitmask.
+            /// `bitmask` is optional. If it is None, all values are written.
+            ///
+            /// `bitmask`'s index is global to the whole chunks.
+            /// That is why `logical_offset` is necessary to access bitmask.
+            pub fn min(
+                &mut self,
+                bitmask: Option<&RoaringBitmap>,
+                logical_offset: usize,
+            ) -> Result<f64> {
+                match self {
+                    $( $enum_name::$variant(c) => c.min(bitmask, logical_offset), )*
+                }
+            }
+
+            /// Calculate the maximum of the values filtered by the bitmask.
+            /// `bitmask` is optional. If it is None, all values are written.
+            ///
+            /// `bitmask`'s index is global to the whole chunks.
+            /// That is why `logical_offset` is necessary to access bitmask.
+            pub fn max(
+                &mut self,
+                bitmask: Option<&RoaringBitmap>,
+                logical_offset: usize,
+            ) -> Result<f64> {
+                match self {
+                    $( $enum_name::$variant(c) => c.max(bitmask, logical_offset), )*
                 }
             }
         }

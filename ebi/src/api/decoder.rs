@@ -268,6 +268,111 @@ impl<R: Read + Seek> Decoder<R> {
         Ok(())
     }
 
+    /// Calculate the sum of the values filtered by the bitmask.
+    /// `bitmask` is optional. If it is None, all values are written.
+    pub fn sum(
+        &mut self,
+        bitmask: Option<&RoaringBitmap>,
+        chunk_id: Option<ChunkId>,
+    ) -> decoder::Result<f64> {
+        let Self {
+            input,
+            chunk_handles,
+            ..
+        } = self;
+
+        let mut result = 0.0;
+
+        for chunk_handle in chunk_handles
+            .iter_mut()
+            .enumerate()
+            .filter(|(i, _)| chunk_id.map_or(true, |x| x.index() == *i))
+            .map(|(_, x)| x)
+        {
+            let mut chunk_range_bitmap = RoaringBitmap::new();
+            chunk_range_bitmap.insert_range(chunk_handle.logical_record_range_u32());
+            if bitmask.is_some_and(|bm| (bm & chunk_range_bitmap).is_empty()) {
+                continue;
+            }
+
+            let mut chunk_reader = Self::chunk_reader_from_handle(input, chunk_handle)?;
+
+            result += chunk_reader.sum(bitmask)?;
+        }
+
+        Ok(result)
+    }
+
+    /// Calculate the min of the values filtered by the bitmask.
+    /// `bitmask` is optional. If it is None, all values are written.
+    pub fn min(
+        &mut self,
+        bitmask: Option<&RoaringBitmap>,
+        chunk_id: Option<ChunkId>,
+    ) -> decoder::Result<f64> {
+        let Self {
+            input,
+            chunk_handles,
+            ..
+        } = self;
+
+        let mut result = f64::INFINITY;
+
+        for chunk_handle in chunk_handles
+            .iter_mut()
+            .enumerate()
+            .filter(|(i, _)| chunk_id.map_or(true, |x| x.index() == *i))
+            .map(|(_, x)| x)
+        {
+            let mut chunk_range_bitmap = RoaringBitmap::new();
+            chunk_range_bitmap.insert_range(chunk_handle.logical_record_range_u32());
+            if bitmask.is_some_and(|bm| (bm & chunk_range_bitmap).is_empty()) {
+                continue;
+            }
+
+            let mut chunk_reader = Self::chunk_reader_from_handle(input, chunk_handle)?;
+
+            result = result.min(chunk_reader.min(bitmask)?);
+        }
+
+        Ok(result)
+    }
+
+    /// Calculate the max of the values filtered by the bitmask.
+    /// `bitmask` is optional. If it is None, all values are written.
+    pub fn max(
+        &mut self,
+        bitmask: Option<&RoaringBitmap>,
+        chunk_id: Option<ChunkId>,
+    ) -> decoder::Result<f64> {
+        let Self {
+            input,
+            chunk_handles,
+            ..
+        } = self;
+
+        let mut result = f64::NEG_INFINITY;
+
+        for chunk_handle in chunk_handles
+            .iter_mut()
+            .enumerate()
+            .filter(|(i, _)| chunk_id.map_or(true, |x| x.index() == *i))
+            .map(|(_, x)| x)
+        {
+            let mut chunk_range_bitmap = RoaringBitmap::new();
+            chunk_range_bitmap.insert_range(chunk_handle.logical_record_range_u32());
+            if bitmask.is_some_and(|bm| (bm & chunk_range_bitmap).is_empty()) {
+                continue;
+            }
+
+            let mut chunk_reader = Self::chunk_reader_from_handle(input, chunk_handle)?;
+
+            result = result.max(chunk_reader.min(bitmask)?);
+        }
+
+        Ok(result)
+    }
+
     pub fn chunk_reader(
         &mut self,
         chunk_id: ChunkId,

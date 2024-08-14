@@ -3,7 +3,7 @@ use std::{io::Read, iter};
 
 use crate::decoder::{
     self,
-    query::{Predicate, QueryExecutor, RangeValue},
+    query::{default_materialize, Predicate, QueryExecutor, RangeValue},
     FileMetadataLike, GeneralChunkHandle,
 };
 
@@ -176,6 +176,18 @@ impl QueryExecutor for BUFFReader {
                 }
             }
         })
+    }
+
+    fn filter_materialize<W: std::io::Write>(
+        &mut self,
+        output: &mut W,
+        predicate: Predicate,
+        bitmask: Option<&roaring::RoaringBitmap>,
+        logical_offset: usize,
+    ) -> decoder::Result<()> {
+        let filtered = self.filter(predicate, bitmask, logical_offset)?;
+
+        default_materialize(self, output, Some(&filtered), logical_offset)
     }
 }
 

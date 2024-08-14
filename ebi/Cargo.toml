@@ -35,6 +35,3 @@ bench = false
 
 [lib]
 bench = false
-
-[profile.release]
-debug = 1

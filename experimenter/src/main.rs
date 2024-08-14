@@ -1,6 +1,9 @@
+use glob::glob;
 use std::{
-    io::{Read, Seek, Write as _},
-    path::Path,
+    fs::File,
+    io::{self, BufRead as _, BufReader, Read, Seek, Write as _},
+    iter::{self},
+    path::{Path, PathBuf},
 };
 
 use anyhow::Context as _;
@@ -11,7 +14,7 @@ use ebi::{
         encoder::{Encoder, EncoderInput, EncoderOutput},
     },
     compressor::CompressorConfig,
-    decoder::query::Predicate,
+    decoder::query::{Predicate, Range, RangeValue, RoaringBitmap},
     encoder::ChunkOption,
 };
 use quick_impl::QuickImpl;
@@ -20,6 +23,7 @@ use serde::{Deserialize, Serialize};
 #[derive(Parser, Debug, Clone)]
 #[command(version, about)]
 struct Cli {
+    #[arg(long, short)]
     input: String,
     #[command(subcommand)]
     command: Commands,
@@ -100,16 +104,12 @@ impl ConfigPath {
             .context(format!("Failed to parse config file: {}", self.config))?;
         Ok(config)
     }
-
-    fn empty() -> Self {
-        Self {
-            config: String::from("<in-memory>"),
-        }
-    }
 }
 
 #[derive(Subcommand, Debug, Clone)]
 enum Commands {
+    CreateFilterConfig,
+    CreateDefaultCompressorConfig,
     Compress(ConfigPath),
     Filter(ConfigPath),
     FilterMaterialize(ConfigPath),
@@ -123,6 +123,8 @@ impl Commands {
             Commands::Filter(_) => "filter",
             Commands::FilterMaterialize(_) => "filter_materialize",
             Commands::Materialize(_) => "materialize",
+            Commands::CreateFilterConfig => "filter_config",
+            Commands::CreateDefaultCompressorConfig => "compressor_config",
         }
     }
 }
@@ -130,9 +132,36 @@ impl Commands {
 fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
 
-    let cli2 = cli.clone();
+    let files = glob(&cli.input)
+        .context("Failed to read glob pattern")?
+        .collect::<Result<Vec<PathBuf>, _>>()
+        .context("Failed to collect glob pattern")?;
+    let n_files = files.len();
+    for (i, path) in files.into_iter().enumerate() {
+        println!(
+            "[{:03}/{:03}] Processing file: {}",
+            i,
+            n_files,
+            path.display(),
+        );
+        if let Err(e) = process_file(&path, cli.clone()) {
+            eprintln!("Failed to process file {}: {:?}", path.display(), e);
+        } else {
+            println!(
+                "[{:03}/{:03}] Finished processing file: {}",
+                i + 1,
+                n_files,
+                path.display(),
+            );
+        }
+    }
 
-    let filename = cli.input;
+    Ok(())
+}
+
+fn process_file(filename: impl AsRef<Path>, cli: Cli) -> anyhow::Result<()> {
+    let filename2 = filename.as_ref().to_string_lossy().to_string();
+    let cli2 = cli.clone();
 
     let output: Output = match cli.command {
         Commands::Compress(args) => compress_command(filename, args.read()?, args)?.into(),
@@ -141,16 +170,27 @@ fn main() -> anyhow::Result<()> {
             filter_materialize_command(filename, args.read()?, args)?.into()
         }
         Commands::Materialize(args) => materialize_command(filename, args.read()?, args)?.into(),
+        Commands::CreateFilterConfig => {
+            return create_config_command(filename);
+        }
+        Commands::CreateDefaultCompressorConfig => {
+            return create_default_compressor_config(filename);
+        }
     };
 
-    save_output_json(output, &cli2.input, &cli2.command)?;
+    save_output_json(output, &filename2, &cli2.command)?;
 
     Ok(())
 }
 
 fn save_output_json(output: Output, filename: &str, command: &Commands) -> anyhow::Result<()> {
     // Get the directory where the filename is located
-    let file_dir = Path::new(filename).parent().unwrap().join("result");
+    let file_dir = Path::new(filename)
+        .parent()
+        .unwrap()
+        .parent()
+        .unwrap()
+        .join("result");
     let base_dir = Path::new(filename).file_stem().unwrap().to_str().unwrap();
     let command_dir = command.dir_name();
 
@@ -227,6 +267,217 @@ fn get_compress_statistics<R: Read + Seek>(
         compression_ratio,
         compression_ratio_chunk_only,
     })
+}
+
+/// # Examples
+/// ```rust
+/// assert_eq!(decimal_places("1.0"), 1);
+/// assert_eq!(decimal_places("1.0e-1"), 2);
+/// assert_eq!(decimal_places("3.33", 2));
+/// assert_eq!(decimal_places("100", 0));
+/// assert_eq!(decimal_places("10e-18", 18));
+/// assert_eq!(decimal_places("1.234e-3", 6));
+/// assert_eq!(decimal_places("1e3", 0));
+/// ```
+fn decimal_places(s: &str) -> usize {
+    if let Some(e_pos) = s.find('e') {
+        let (base, exponent) = s.split_at(e_pos);
+        let exponent_value: i32 = exponent[1..].parse().unwrap_or(0);
+
+        if let Some(dot_pos) = base.find('.') {
+            let decimal_length = base.len() - dot_pos - 1;
+            (decimal_length as i32 - exponent_value).max(0) as usize
+        } else if exponent_value < 0 {
+            (-exponent_value) as usize
+        } else {
+            0
+        }
+    } else if let Some(dot_pos) = s.find('.') {
+        s.len() - dot_pos - 1
+    } else {
+        0
+    }
+}
+
+fn get_appropriate_scale(filename: impl AsRef<Path>) -> anyhow::Result<Option<u32>> {
+    let reader = BufReader::new(File::open(filename.as_ref()).context(format!(
+        "Failed to open file.: {}",
+        filename.as_ref().display()
+    ))?);
+    let mut decimal_position = 0;
+    for line in reader.lines() {
+        let line = line.context("Failed to read line")?;
+        let max_decimal_position = line
+            .split(',')
+            .filter_map(|s| {
+                if s.is_empty() {
+                    None
+                } else {
+                    let s = s.trim();
+                    Some(decimal_places(s))
+                }
+            })
+            .max();
+
+        if let Some(max_scale) = max_decimal_position {
+            decimal_position = decimal_position.max(max_scale);
+        }
+    }
+
+    Ok(10u32.checked_pow(decimal_position as u32))
+}
+
+fn create_default_compressor_config(filename: impl AsRef<Path>) -> anyhow::Result<()> {
+    let scale = get_appropriate_scale(filename.as_ref())?;
+    let mut configs: Vec<(&'static str, CompressorConfig)> = vec![
+        (
+            "uncompressed",
+            CompressorConfig::uncompressed().build().into(),
+        ),
+        ("chimp128", CompressorConfig::chimp128().build().into()),
+        ("chimp", CompressorConfig::chimp().build().into()),
+        (
+            "elf_on_chimp",
+            CompressorConfig::elf_on_chimp().build().into(),
+        ),
+        ("elf", CompressorConfig::elf().build().into()),
+        ("gorilla", CompressorConfig::gorilla().build().into()),
+        ("rle", CompressorConfig::rle().build().into()),
+    ];
+    if let Some(scale) = scale {
+        configs.push((
+            "delta_sprintz",
+            CompressorConfig::delta_sprintz()
+                .scale(scale)
+                .build()
+                .into(),
+        ));
+        configs.push(("buff", CompressorConfig::buff().scale(scale).build().into()));
+    } else {
+        println!(
+            "Failed to get appropriate scale for {}",
+            filename.as_ref().display()
+        );
+    }
+    let outdir = std::env::current_dir()
+        .context("Failed to get current directory")?
+        .join("compressor_configs")
+        .join(
+            filename
+                .as_ref()
+                .file_stem()
+                .context("Failed to get file stem")?,
+        );
+    std::fs::create_dir_all(&outdir).context(format!(
+        "Failed to create output directory: {}",
+        outdir.display()
+    ))?;
+    for (name, config) in configs {
+        let output_filename = outdir.join(format!("{name}.json"));
+        let mut f = File::create(&output_filename).context(format!(
+            "Failed to create output file: {}",
+            output_filename.as_path().display()
+        ))?;
+        serde_json::to_writer_pretty(&mut f, &config)
+            .context(format!("Failed to write {} compressor config", name))?;
+    }
+
+    Ok(())
+}
+
+fn create_config_command(filename: impl AsRef<Path>) -> anyhow::Result<()> {
+    let encoder_input = EncoderInput::from_file(filename.as_ref()).context(format!(
+        "Failed to create encoder input from input file.: {}",
+        filename.as_ref().display()
+    ))?;
+    let encoder_output = EncoderOutput::from_vec(Vec::new());
+
+    let mut encoder = Encoder::new(
+        encoder_input,
+        encoder_output,
+        ChunkOption::RecordCount(8192),
+        CompressorConfig::uncompressed().build(),
+    );
+    encoder.encode().context("Failed to encode")?;
+    let mut writer = encoder.into_output().into_inner();
+    writer.seek(io::SeekFrom::Start(0))?;
+    let decoder_input = DecoderInput::from_reader(writer);
+    let mut decoder = Decoder::new(decoder_input)?;
+
+    let _min = decoder
+        .min(None, None)
+        .context("Failed to get min value from decoder")?;
+    let _max = decoder
+        .max(None, None)
+        .context("Failed to get max value from decoder")?;
+    let sum = decoder
+        .sum(None, None)
+        .context("Failed to get sum value from decoder")?;
+    let avg = sum / decoder.footer().number_of_records() as f64;
+
+    let base_dir = Path::new(filename.as_ref())
+        .file_stem()
+        .unwrap()
+        .to_str()
+        .unwrap();
+    let output_dir = filename
+        .as_ref()
+        .parent()
+        .ok_or(anyhow::anyhow!(
+            "Failed to get parent directory: {}",
+            filename.as_ref().display()
+        ))?
+        .parent()
+        .ok_or(anyhow::anyhow!(
+            "Failed to get parent directory: {}",
+            filename.as_ref().display()
+        ))?
+        .join("filter_config")
+        .join(base_dir);
+
+    let greater_predicate =
+        Predicate::Range(Range::new(RangeValue::Inclusive(avg), RangeValue::None));
+
+    let mut out_buf = [0u8; 8];
+    let mut out = DecoderOutput::from_writer(&mut out_buf[..]);
+    let number_of_records = decoder.footer().number_of_records();
+    let bitmask = RoaringBitmap::from_iter(iter::once(number_of_records as u32 / 2));
+    decoder
+        .materialize(&mut out, Some(&bitmask), None)
+        .context("Failed to materialize")?;
+
+    let eq_predicate = Predicate::Eq(f64::from_le_bytes(out_buf));
+
+    let ne_predicate = Predicate::Ne(f64::from_le_bytes(out_buf));
+
+    std::fs::create_dir_all(&output_dir).context(format!(
+        "Failed to create output directory: {}",
+        output_dir.display()
+    ))?;
+
+    for (pred, name) in &[
+        (greater_predicate, "greater"),
+        (eq_predicate, "eq"),
+        (ne_predicate, "ne"),
+    ] {
+        let output_filename = output_dir.join(format!("{name}.json"));
+        dbg!(&output_filename);
+        let mut f = File::create(&output_filename).context(format!(
+            "Failed to create output file: {}",
+            output_filename.display()
+        ))?;
+        serde_json::to_writer_pretty(
+            &mut f,
+            &FilterConfig {
+                predicate: *pred,
+                chunk_id: None,
+                bitmask: None,
+            },
+        )
+        .context(format!("Failed to write {} predicate config", name))?;
+    }
+
+    Ok(())
 }
 
 fn compress_command(
