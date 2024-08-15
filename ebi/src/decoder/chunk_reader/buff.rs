@@ -198,7 +198,7 @@ mod internal {
 
     pub(crate) mod query {
         use roaring::RoaringBitmap;
-        #[cfg(target_arch = "x86_64")]
+        #[cfg(all(target_arch = "x86_64", not(miri)))]
         use simd_x86_64::{comp_simd, equal_simd};
 
         use crate::compression_common::buff::{
@@ -269,7 +269,7 @@ mod internal {
 
             let mut remaining_bits_length = fixed_representation_bits_length;
 
-            #[cfg(target_arch = "x86_64")]
+            #[cfg(all(target_arch = "x86_64", not(miri)))]
             let comp_simd_specialized = if IS_GREATER {
                 comp_simd::<{ simd_x86_64::GREATER }>
             } else {
@@ -293,37 +293,36 @@ mod internal {
                     }
                     let (mut next_to_check_bitmask, mut expected_record_index_if_sequential) =
                         if use_simd {
-                            #[cfg(target_arch = "x86_64")]
-                            {
-                                let simd_chunk = bitpack
-                                    .read_n_byte(
-                                        number_of_records as usize
-                                            - number_of_records as usize % simd_x86_64::VECTOR_SIZE,
-                                    )
-                                    .unwrap();
-                                let mut temporary_qualified_bitmask = RoaringBitmap::new();
-                                let mut next_to_check_bitmask = unsafe {
-                                    comp_simd_specialized(
-                                        simd_chunk,
-                                        delta_fixed_pred_subcolumn,
-                                        &mut temporary_qualified_bitmask,
-                                        logical_offset,
-                                    )
-                                };
-                                temporary_qualified_bitmask &= to_check_bitmask;
-                                qualified_bitmask |= temporary_qualified_bitmask;
+                            cfg_if! {
+                                if #[cfg(all(target_arch = "x86_64", not(miri)))] {
+                                    let simd_chunk = bitpack
+                                        .read_n_byte(
+                                            number_of_records as usize
+                                                - number_of_records as usize % simd_x86_64::VECTOR_SIZE,
+                                        )
+                                        .unwrap();
+                                    let mut temporary_qualified_bitmask = RoaringBitmap::new();
+                                    let mut next_to_check_bitmask = unsafe {
+                                        comp_simd_specialized(
+                                            simd_chunk,
+                                            delta_fixed_pred_subcolumn,
+                                            &mut temporary_qualified_bitmask,
+                                            logical_offset,
+                                        )
+                                    };
+                                    temporary_qualified_bitmask &= to_check_bitmask;
+                                    qualified_bitmask |= temporary_qualified_bitmask;
 
-                                next_to_check_bitmask &= to_check_bitmask;
+                                    next_to_check_bitmask &= to_check_bitmask;
 
-                                (
-                                    next_to_check_bitmask,
-                                    number_of_records
-                                        - number_of_records % simd_x86_64::VECTOR_SIZE as u32,
-                                )
-                            }
-                            #[cfg(not(target_arch = "x86_64"))]
-                            {
-                                unreachable!()
+                                    (
+                                        next_to_check_bitmask,
+                                        number_of_records
+                                            - number_of_records % simd_x86_64::VECTOR_SIZE as u32,
+                                    )
+                                } else {
+                                    (RoaringBitmap::new(), 0)
+                                }
                             }
                         } else {
                             (RoaringBitmap::new(), 0)

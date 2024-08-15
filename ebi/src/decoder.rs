@@ -175,6 +175,7 @@ impl FileReader {
         }
 
         let Some(header) = self.header() else {
+            #[allow(clippy::useless_conversion)]
             return Err(DecoderError::PreconditionsNotMet.into());
         };
 
