@@ -2,6 +2,7 @@ import json
 import os
 import sys
 import numpy as np
+import pandas as pd
 import matplotlib.pyplot as plt
 
 
@@ -21,6 +22,22 @@ def plot_comparison(data, title, y_label, output_path, max_value=None):
     plt.xticks(rotation=45, ha="right")
     plt.tight_layout()
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
+    plt.savefig(output_path)
+    plt.close()
+
+
+def plot_boxplot(data, title, y_label, output_path):
+    # Plot the boxplot
+    plt.figure(figsize=(10, 6))
+    data.boxplot(grid=False)
+
+    # Customize the plot
+    plt.title(title)
+    plt.ylabel(y_label)
+    plt.xticks(rotation=45, ha='right')
+
+    # Save the plot
+    plt.tight_layout()
     plt.savefig(output_path)
     plt.close()
 
@@ -159,6 +176,50 @@ def main():
             os.path.join(dataset_out_dir, f"{
                          dataset_name}_materialize_elapsed_seconds.png")
         )
+
+    print("Creating boxplot")
+    compression_ratios_data = {method_name: []
+                               for method_name in average_compression_ratios.keys()}
+    compression_throughput_data = {
+        method_name: [] for method_name in average_compression_throughput.keys()}
+    decompression_throughput_data = {
+        method_name: [] for method_name in average_decompression_throughput.keys()}
+
+    for dataset_name, methods in all_output.items():
+        if dataset_name == "command_type":
+            continue
+        for method_name, output in methods.items():
+            compression_statistics = output['compress']["command_specific"]
+            ratio = compression_statistics['compression_ratio']
+            compression_throughput = compression_statistics['uncompressed_size'] / \
+                compression_statistics['compression_elapsed_time_nano_secs']
+            decompression_throughput = compression_statistics['uncompressed_size'] / \
+                output["materialize"]["elapsed_time_nanos"]
+
+            compression_ratios_data[method_name].append(ratio)
+            compression_throughput_data[method_name].append(
+                compression_throughput)
+            decompression_throughput_data[method_name].append(
+                decompression_throughput)
+
+    # Convert to DataFrame
+    compression_ratios_df = pd.DataFrame(compression_ratios_data)
+    compression_throughput_df = pd.DataFrame(compression_throughput_data)
+    decompression_throughput_df = pd.DataFrame(decompression_throughput_data)
+
+    plot_boxplot(compression_ratios_df, "Boxplot for Compression Ratios", "Compression Ratio(smaller, better)", os.path.join(
+        out_dir, "boxplot_compression_ratios.png"))
+    plot_boxplot(
+        compression_throughput_df,
+        "Boxplot for Compression Throughput",
+        "Compression Throughput (GB/s, bigger, better)",
+        os.path.join(out_dir, "boxplot_compression_throughput.png")
+    )
+
+    plot_boxplot(decompression_throughput_df,
+                 "Boxplot for Decompression Throughput",
+                 "Decompression Throughput (GB/s, bigger, better)",
+                 os.path.join(out_dir, "boxplot_decompression_throughput.png"))
 
 
 if __name__ == "__main__":
