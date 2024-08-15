@@ -8,11 +8,14 @@ use quick_impl::QuickImpl;
 use run_length::RunLengthCompressor;
 use uncompressed::{UncompressedCompressor, UncompressedCompressorConfig};
 
-use crate::format::{
-    self,
-    deserialize::FromLeBytes as _,
-    serialize::{AsBytes, ToLe},
-    CompressionScheme,
+use crate::{
+    encoder,
+    format::{
+        self,
+        deserialize::FromLeBytes as _,
+        serialize::{AsBytes, ToLe},
+        CompressionScheme,
+    },
 };
 
 #[cfg(feature = "serde")]
@@ -27,11 +30,12 @@ pub mod gorilla;
 pub mod run_length;
 pub mod sprintz;
 pub mod uncompressed;
+// pub mod zstd;
 
 const MAX_BUFFERS: usize = 5;
 pub trait Compressor {
     /// Perform the compression and return the size of the compressed data.
-    fn compress(&mut self, input: &[f64]);
+    fn compress(&mut self, input: &[f64]) -> encoder::Result<()>;
 
     /// Returns the total number of input bytes which have been processed by this Compressor.
     fn total_bytes_in(&self) -> usize;
@@ -81,7 +85,7 @@ pub enum GenericCompressor {
 macro_rules! impl_generic_compressor {
     ($enum_name:ident, $($variant:ident),*) => {
         impl Compressor for $enum_name {
-            fn compress(&mut self, input: &[f64]) {
+            fn compress(&mut self, input: &[f64]) -> encoder::Result<()> {
                 match self {
                     $( $enum_name::$variant(c) => c.compress(input), )*
                 }
@@ -361,7 +365,7 @@ mod tests {
             "total_bytes_in() should be 0 before compressing"
         );
 
-        compressor.compress(&floats);
+        compressor.compress(&floats).unwrap();
 
         assert_eq!(
             compressor.total_bytes_in(),
@@ -373,10 +377,10 @@ mod tests {
     fn test_total_bytes_buffered(compressor: &mut GenericCompressor) {
         let mut floats: Vec<f64> = (0..10).map(|x| (x / 2) as f64).collect();
 
-        compressor.compress(&floats);
+        compressor.compress(&floats).unwrap();
 
         floats.reverse();
-        compressor.compress(&floats[..3]);
+        compressor.compress(&floats[..3]).unwrap();
 
         let total_bytes_buffered = compressor.total_bytes_buffered();
 

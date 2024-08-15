@@ -7,10 +7,13 @@ use derive_builder::Builder;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-use crate::format::{
-    deserialize,
-    run_length::RunLengthHeader,
-    serialize::{self, AsBytes, ToLe},
+use crate::{
+    encoder,
+    format::{
+        deserialize,
+        run_length::RunLengthHeader,
+        serialize::{self, AsBytes, ToLe},
+    },
 };
 
 use super::{AppendableCompressor, Capacity, Compressor, RewindableCompressor};
@@ -58,7 +61,7 @@ impl Default for RunLengthCompressor {
 }
 
 impl Compressor for RunLengthCompressor {
-    fn compress(&mut self, input: &[f64]) {
+    fn compress(&mut self, input: &[f64]) -> encoder::Result<()> {
         self.reset();
         let is_starting = self.previous_run_count == 0;
         if is_starting {
@@ -84,6 +87,8 @@ impl Compressor for RunLengthCompressor {
         }
 
         self.total_bytes_in += n_bytes_compressed;
+
+        Ok(())
     }
 
     fn total_bytes_in(&self) -> usize {

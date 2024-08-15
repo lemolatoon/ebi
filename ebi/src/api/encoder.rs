@@ -8,7 +8,7 @@ use std::{
 
 use crate::{
     compressor::CompressorConfig,
-    encoder::{ChunkOption, FileWriter},
+    encoder::{self, ChunkOption, FileWriter},
 };
 
 pub struct EncoderInput<R: Read> {
@@ -134,7 +134,7 @@ impl<R: Read, W: Write + Seek> Encoder<R, W> {
     /// # Errors
     /// This function will return an error if I/O Error happends.
     /// The output will be in an invalid state if an error occurs.
-    pub fn encode(&mut self) -> std::io::Result<()> {
+    pub fn encode(&mut self) -> encoder::Result<()> {
         let Self {
             file_writer,
             output,

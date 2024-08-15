@@ -5,6 +5,7 @@ use derive_builder::Builder;
 use serde::{Deserialize, Serialize};
 
 use crate::{
+    encoder,
     format::{deserialize, serialize},
     io::bit_write::{BitWrite, BufferedBitWriter},
 };
@@ -71,11 +72,14 @@ impl<W: BitWrite> DeltaSprintzCompressorImpl<W> {
 }
 
 impl<W: BitWrite> Compressor for DeltaSprintzCompressorImpl<W> {
-    fn compress(&mut self, input: &[f64]) {
+    fn compress(&mut self, input: &[f64]) -> encoder::Result<()> {
         self.reset();
         // quantize
         self.total_bytes_in += size_of_val(input);
+        // TODO: return quantize error here
         delta_impl::delta_sprintz_compress_impl(input, self.scale, &mut self.buffer, &mut self.w);
+
+        Ok(())
     }
 
     fn total_bytes_in(&self) -> usize {

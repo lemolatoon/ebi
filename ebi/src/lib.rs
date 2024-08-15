@@ -19,7 +19,7 @@ mod tests {
     use crate::{
         compressor::CompressorConfig,
         decoder::FileReader,
-        encoder::{ChunkOption, FileWriter},
+        encoder::{self, ChunkOption, FileWriter},
     };
 
     fn generate_and_write_random_f64(n: usize) -> Vec<f64> {
@@ -40,7 +40,7 @@ mod tests {
     fn write_file<R: Read, W: Write + Seek>(
         mut file_writer: FileWriter<R>,
         mut out_f: W,
-    ) -> io::Result<()> {
+    ) -> encoder::Result<()> {
         // write header leaving footer offset blank
         file_writer.write_header(&mut out_f)?;
 
