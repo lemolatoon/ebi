@@ -38,6 +38,7 @@ def main():
     # smaller is better
     average_compression_ratios = {}
     average_compression_throughput = {}
+    average_decompression_throughput = {}
 
     for dataset_name, methods in all_output.items():
         print(f"Processing {dataset_name}")
@@ -48,18 +49,23 @@ def main():
             ratio = compression_statistics['compression_ratio']
             throughput = compression_statistics['uncompressed_size'] / \
                 compression_statistics['compression_elapsed_time_nano_secs']
+            decompression_throughput = compression_statistics['uncompressed_size'] / \
+                output["materialize"]["elapsed_time_nanos"]
 
             if method_name in average_compression_ratios:
                 average_compression_ratios[method_name] += ratio
                 average_compression_throughput[method_name] += throughput
+                average_decompression_throughput[method_name] += decompression_throughput
             else:
                 average_compression_ratios[method_name] = ratio
                 average_compression_throughput[method_name] = throughput
+                average_decompression_throughput[method_name] = decompression_throughput
 
     num_datasets = len(all_output)
     for method in average_compression_ratios:
         average_compression_ratios[method] /= num_datasets
         average_compression_throughput[method] /= num_datasets
+        average_decompression_throughput[method] /= num_datasets
 
     out_dir = "results"
     os.makedirs(out_dir, exist_ok=True)
@@ -73,9 +79,15 @@ def main():
     )
     plot_comparison(
         average_compression_throughput,
-        "Average Compression Throughput",
+        "Average Compression Throughput (bigger, better)",
         "Throughput (GB/s)",
         os.path.join(out_dir, "average_compression_throughput.png")
+    )
+    plot_comparison(
+        average_decompression_throughput,
+        "Average Decompression Throughput (bigger, better)",
+        "Throughput (GB/s)",
+        os.path.join(out_dir, "average_decompression_throughput.png")
     )
 
     for dataset_name, output_per_compression_methods in all_output.items():

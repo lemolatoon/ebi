@@ -139,6 +139,21 @@ impl AllOutput {
 
         total_compression_throughput / dataset_to_output.len() as f64
     }
+
+    pub fn average_decompression_throughput(
+        dataset_to_output: HashMap<String, AllOutputInner>,
+    ) -> f64 {
+        let total_decompression_throughput = dataset_to_output
+            .values()
+            .map(|output| {
+                let elapsed_time = output.materialize.elapsed_time_nanos as f64;
+                let uncompressed_size = output.compress.command_specific.uncompressed_size as f64;
+                uncompressed_size / elapsed_time
+            })
+            .sum::<f64>();
+
+        total_decompression_throughput / dataset_to_output.len() as f64
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, QuickImpl)]
