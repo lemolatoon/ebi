@@ -475,5 +475,6 @@ mod tests {
     declare_test_compressor!(elf);
     declare_test_compressor!(delta_sprintz);
     declare_test_compressor!(buff, super::CompressorConfig::buff().scale(100).build());
+    #[cfg(not(miri))]
     declare_test_compressor!(zstd);
 }
