@@ -194,6 +194,7 @@ impl GeneralChunkReaderInner {
             CompressionScheme::DeltaSprintz => GeneralChunkReaderInner::DeltaSprintz(
                 sprintz::DeltaSprintzReader::new(handle, reader)?,
             ),
+            CompressionScheme::Zstd => todo!(),
         })
     }
 }

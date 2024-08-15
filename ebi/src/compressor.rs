@@ -30,7 +30,7 @@ pub mod gorilla;
 pub mod run_length;
 pub mod sprintz;
 pub mod uncompressed;
-// pub mod zstd;
+pub mod zstd;
 
 const MAX_BUFFERS: usize = 5;
 pub trait Compressor {
@@ -80,6 +80,7 @@ pub enum GenericCompressor {
     ElfOnChimp(elf::on_chimp::ElfCompressor),
     Elf(elf::ElfCompressor),
     DeltaSprintz(sprintz::DeltaSprintzCompressor),
+    Zstd(zstd::ZstdCompressor),
 }
 
 macro_rules! impl_generic_compressor {
@@ -143,7 +144,8 @@ impl_generic_compressor!(
     Chimp128,
     ElfOnChimp,
     Elf,
-    DeltaSprintz
+    DeltaSprintz,
+    Zstd
 );
 
 #[derive(QuickImpl, Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -168,6 +170,8 @@ pub enum CompressorConfig {
     Elf(elf::ElfCompressorConfig),
     #[quick_impl(impl From)]
     DeltaSprintz(sprintz::DeltaSprintzCompressorConfig),
+    #[quick_impl(impl From)]
+    Zstd(zstd::ZstdCompressorConfig),
 }
 
 macro_rules! impl_compressor_config {
@@ -200,7 +204,8 @@ impl_compressor_config!(
     Chimp128,
     ElfOnChimp,
     Elf,
-    DeltaSprintz
+    DeltaSprintz,
+    Zstd
 );
 
 impl CompressorConfig {
@@ -222,6 +227,7 @@ impl CompressorConfig {
             CompressorConfig::ElfOnChimp(c) => c.serialized_size(),
             CompressorConfig::Elf(c) => c.serialized_size(),
             CompressorConfig::DeltaSprintz(c) => c.serialized_size(),
+            CompressorConfig::Zstd(c) => c.serialized_size(),
         }
     }
 
@@ -255,6 +261,7 @@ impl CompressorConfig {
             CompressorConfig::ElfOnChimp(c) => into_packed_and_write!(c, w),
             CompressorConfig::Elf(c) => into_packed_and_write!(c, w),
             CompressorConfig::DeltaSprintz(mut c) => just_write!(c, w),
+            CompressorConfig::Zstd(mut c) => just_write!(c, w),
         }
 
         Ok(())
@@ -285,6 +292,7 @@ impl CompressorConfig {
             CompressionScheme::DeltaSprintz => {
                 Self::DeltaSprintz(sprintz::DeltaSprintzCompressorConfig::from_le_bytes(bytes))
             }
+            CompressionScheme::Zstd => Self::Zstd(zstd::ZstdCompressorConfig::from_le_bytes(bytes)),
         }
     }
 }
@@ -324,6 +332,10 @@ impl CompressorConfig {
 
     pub fn delta_sprintz() -> sprintz::DeltaSprintzCompressorConfigBuilder {
         sprintz::DeltaSprintzCompressorConfigBuilder::default()
+    }
+
+    pub fn zstd() -> zstd::ZstdCompressorConfigBuilder {
+        zstd::ZstdCompressorConfigBuilder::default()
     }
 }
 
@@ -463,4 +475,5 @@ mod tests {
     declare_test_compressor!(elf);
     declare_test_compressor!(delta_sprintz);
     declare_test_compressor!(buff, super::CompressorConfig::buff().scale(100).build());
+    declare_test_compressor!(zstd);
 }

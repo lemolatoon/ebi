@@ -96,7 +96,7 @@ mod private {
         buff::BUFFCompressorConfig, chimp_n::Chimp128CompressorConfig,
         general_xor::PackedGeneralXorCompressorConfig, gorilla::GorillaCompressorConfig,
         run_length::RunLengthCompressorConfig, sprintz::DeltaSprintzCompressorConfig,
-        uncompressed::UncompressedCompressorConfig,
+        uncompressed::UncompressedCompressorConfig, zstd::ZstdCompressorConfig,
     };
 
     pub trait Sealed {}
@@ -116,6 +116,7 @@ mod private {
     impl Sealed for Chimp128CompressorConfig {}
     impl Sealed for GorillaCompressorConfig {}
     impl Sealed for DeltaSprintzCompressorConfig {}
+    impl Sealed for ZstdCompressorConfig {}
 }
 
 impl<T: private::Sealed> AsBytes for T {
