@@ -16,15 +16,13 @@ use anyhow::Context as _;
 use clap::{Args, Parser, Subcommand};
 use ebi::{
     api::{
-        decoder::{ChunkId, Decoder, DecoderInput, DecoderOutput},
+        decoder::{Decoder, DecoderInput, DecoderOutput},
         encoder::{Encoder, EncoderInput, EncoderOutput},
     },
     compressor::CompressorConfig,
     decoder::query::{Predicate, Range, RangeValue, RoaringBitmap},
     encoder::ChunkOption,
 };
-use quick_impl::QuickImpl;
-use serde::{Deserialize, Serialize};
 
 #[derive(Parser, Debug, Clone)]
 #[command(version, about)]
