@@ -102,9 +102,16 @@
 //! pub struct FileFooter1 {
 //!     pub chunk_footers: [ChunkFooter], // ?Sized
 //! }
-//!
 //! #[repr(C, packed(1))]
 //! pub struct FileFooter2 {
+//!     pub config_size: u8,
+//!     compressor_config: [u8],
+//! }
+//!
+//! #[repr(C, packed(1))]
+//! pub struct FileFooter3 {
+//!     /// Compression Elapsed Time (nano seconds)
+//!     pub compression_elapsed_time_nano_secs: u128,
 //!     pub crc: u32,
 //! }
 //!
@@ -125,7 +132,6 @@ pub mod native;
 pub mod serialize;
 
 pub mod run_length;
-pub mod uncompressed;
 // ============== FileHeader ==================
 
 #[repr(C, packed(1))]
@@ -219,6 +225,12 @@ pub struct FileFooter1 {
 
 #[repr(C, packed(1))]
 pub struct FileFooter2 {
+    pub config_size: u8,
+    compressor_config: [u8],
+}
+
+#[repr(C, packed(1))]
+pub struct FileFooter3 {
     /// Compression Elapsed Time (nano seconds)
     pub compression_elapsed_time_nano_secs: u128,
     pub crc: u32,

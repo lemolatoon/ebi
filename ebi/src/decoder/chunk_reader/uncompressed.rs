@@ -5,10 +5,6 @@ use std::{
 
 use crate::{
     decoder::{self, query::QueryExecutor, FileMetadataLike, GeneralChunkHandle},
-    format::{
-        deserialize::FromLeBytesExt,
-        uncompressed::{NativeUncompressedHeader, UncompressedHeader0},
-    },
     io::as_bytes_mut::AsBytesMut,
 };
 
@@ -19,7 +15,6 @@ pub type UncompressedIterator<'a> = UncompressedIteratorImpl<'a, io::Cursor<Vec<
 
 #[derive(Debug, Clone, PartialEq, PartialOrd)]
 pub struct UncompressedReaderImpl<R: Read> {
-    header: NativeUncompressedHeader,
     number_of_records: usize,
     values: Option<Vec<f64>>,
     reader: R,
@@ -32,22 +27,14 @@ impl UncompressedReader {
         handle: &GeneralChunkHandle<T>,
         mut reader: R,
     ) -> io::Result<UncompressedReaderImpl<io::Cursor<Vec<u8>>>> {
-        let header_head = UncompressedHeader0::from_le_bytes_by_reader(&mut reader)?;
-        let header_size = header_head.header_size as usize;
-        let header1_size = header_size - size_of::<UncompressedHeader0>();
-        let mut header = vec![0u8; header1_size].into_boxed_slice();
-        reader.read_exact(&mut header)?;
-
-        let header = NativeUncompressedHeader::new(header_head, header);
         let number_of_records = handle.number_of_records() as usize;
 
-        let chunk_size = handle.chunk_size() as usize - header_size;
+        let chunk_size = handle.chunk_size() as usize;
         let mut chunk_in_memory = vec![0; chunk_size];
         reader.read_exact(&mut chunk_in_memory)?;
         let reader = io::Cursor::new(chunk_in_memory);
 
         Ok(UncompressedReaderImpl {
-            header,
             number_of_records,
             reader,
             values: None,
@@ -56,7 +43,7 @@ impl UncompressedReader {
 }
 
 impl<R: Read> Reader for UncompressedReaderImpl<R> {
-    type NativeHeader = NativeUncompressedHeader;
+    type NativeHeader = ();
     type DecompressIterator<'a> = UncompressedIteratorImpl<'a, R> where Self: 'a;
 
     fn decompress(&mut self) -> decoder::Result<&[f64]> {
@@ -75,11 +62,11 @@ impl<R: Read> Reader for UncompressedReaderImpl<R> {
     }
 
     fn header_size(&self) -> usize {
-        *self.header.header_size() as usize
+        0
     }
 
     fn read_header(&mut self) -> &Self::NativeHeader {
-        &self.header
+        &()
     }
 
     fn decompress_iter(&mut self) -> decoder::Result<Self::DecompressIterator<'_>> {

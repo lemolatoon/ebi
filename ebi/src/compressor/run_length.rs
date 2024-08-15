@@ -3,12 +3,17 @@ use std::{
     mem::{size_of, size_of_val},
 };
 
+use derive_builder::Builder;
+#[cfg(feature = "serde")]
+use serde::{Deserialize, Serialize};
+
 use crate::format::{
+    deserialize,
     run_length::RunLengthHeader,
-    serialize::{AsBytes, ToLe},
+    serialize::{self, AsBytes, ToLe},
 };
 
-use super::{AppendableCompressor, Compressor, RewindableCompressor};
+use super::{AppendableCompressor, Capacity, Compressor, RewindableCompressor};
 
 /// Run Length Encoding (RLE) Compression Scheme
 /// Chunk Layout:
@@ -201,5 +206,32 @@ impl RewindableCompressor for RunLengthCompressor {
         self.total_bytes_in -= n * size_of::<f64>();
 
         true
+    }
+}
+
+#[derive(Builder, Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[builder(pattern = "owned", build_fn(skip))]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[repr(C, packed)]
+pub struct RunLengthCompressorConfig {
+    #[builder(setter(into), default)]
+    capacity: Capacity,
+}
+serialize::impl_to_le!(RunLengthCompressorConfig, capacity);
+deserialize::impl_from_le_bytes!(RunLengthCompressorConfig, rle, (capacity, Capacity));
+
+impl From<RunLengthCompressorConfig> for RunLengthCompressor {
+    fn from(config: RunLengthCompressorConfig) -> RunLengthCompressor {
+        let cap = config.capacity.0 as usize;
+        RunLengthCompressor::with_capacity(cap)
+    }
+}
+
+impl RunLengthCompressorConfigBuilder {
+    pub fn build(self) -> RunLengthCompressorConfig {
+        let Self { capacity } = self;
+        RunLengthCompressorConfig {
+            capacity: capacity.unwrap_or(Capacity::default()),
+        }
     }
 }

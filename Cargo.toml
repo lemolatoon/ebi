@@ -1,6 +1,6 @@
 [workspace]
-
-members = ["ebi"]
+resolver = "2"
+members = ["ebi", "tools", "experimenter"]
 
 [profile.release]
-debug = 1
+debug = true

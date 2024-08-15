@@ -2,6 +2,7 @@ use std::mem;
 
 use crate::{
     compression_common::elf,
+    format::deserialize,
     io::bit_write::{BitWrite, BufferedBitWriter},
 };
 
@@ -11,6 +12,7 @@ use super::{
         GeneralXorCompressor, GeneralXorCompressorConfig, GeneralXorCompressorConfigBuilder,
         XorEncoder,
     },
+    Capacity,
 };
 
 type ElfOnTCompressor<T> = GeneralXorCompressor<BufferedBitWriter, ElfEncoderWrapper<T>>;
@@ -32,6 +34,12 @@ macro_rules! declare_elf_on_t_compressor {
 }
 
 declare_elf_on_t_compressor!(on_chimp, super::ChimpEncoder);
+deserialize::impl_from_le_bytes!(
+    on_chimp::ElfCompressorConfig,
+    elf_on_chimp,
+    (capacity, Capacity)
+);
+deserialize::impl_from_le_bytes!(ElfCompressorConfig, elf, (capacity, Capacity));
 
 impl<T: XorEncoder> XorEncoder for ElfEncoderWrapper<T> {
     fn compress_float<W: BitWrite>(&mut self, w: W, bits: u64) -> usize {

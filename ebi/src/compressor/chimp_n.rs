@@ -1,6 +1,11 @@
 use derive_builder::Builder;
+#[cfg(feature = "serde")]
+use serde::{Deserialize, Serialize};
 
-use crate::io::bit_write::{BitWrite as _, BufferedBitWriter};
+use crate::{
+    format::{deserialize, serialize},
+    io::bit_write::{BitWrite as _, BufferedBitWriter},
+};
 
 use super::{Capacity, Compressor};
 
@@ -31,11 +36,22 @@ impl<const N: usize> ChimpNCompressor<N> {
 pub type Chimp128CompressorConfig = ChimpCompressorConfig<128>;
 pub type Chimp128CompressorConfigBuilder = ChimpCompressorConfigBuilder<128>;
 
-#[derive(Builder, Debug, Clone, Copy)]
+#[derive(Builder, Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 #[builder(pattern = "owned", build_fn(skip))]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[repr(C, packed)]
 pub struct ChimpCompressorConfig<const N: usize> {
     #[builder(setter(into), default)]
     pub(crate) capacity: Capacity,
+}
+serialize::impl_to_le!(Chimp128CompressorConfig, capacity);
+deserialize::impl_from_le_bytes!(Chimp128CompressorConfig, chimp128, (capacity, Capacity));
+
+impl<const N: usize> From<ChimpCompressorConfig<N>> for ChimpNCompressor<N> {
+    fn from(config: ChimpCompressorConfig<N>) -> ChimpNCompressor<N> {
+        let cap = config.capacity.0 as usize;
+        ChimpNCompressor::with_capacity(cap)
+    }
 }
 
 impl<const N: usize> ChimpCompressorConfigBuilder<N> {

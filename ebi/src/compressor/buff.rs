@@ -1,4 +1,11 @@
-use crate::compression_common::buff::precision_bound::{self, PRECISION_MAP};
+use derive_builder::Builder;
+#[cfg(feature = "serde")]
+use serde::{Deserialize, Serialize};
+
+use crate::{
+    compression_common::buff::precision_bound::{self, PRECISION_MAP},
+    format::{deserialize, serialize},
+};
 
 use super::Compressor;
 
@@ -6,12 +13,12 @@ use super::Compressor;
 pub struct BUFFCompressor {
     total_bytes_in: usize,
     data: Vec<f64>,
-    scale: usize,
+    scale: u32,
     compressed: Option<Vec<u8>>,
 }
 
 impl BUFFCompressor {
-    pub fn new(scale: usize) -> Self {
+    pub fn new(scale: u32) -> Self {
         Self {
             total_bytes_in: 0,
             data: Vec::new(),
@@ -31,7 +38,7 @@ impl BUFFCompressor {
 
 impl Compressor for BUFFCompressor {
     fn compress(&mut self, data: &[f64]) {
-        self.compress_with_precalculated(Precalculated::precalculate(self.scale, data));
+        self.compress_with_precalculated(Precalculated::precalculate(self.scale as usize, data));
     }
 
     fn total_bytes_in(&self) -> usize {
@@ -54,6 +61,31 @@ impl Compressor for BUFFCompressor {
         self.total_bytes_in = 0;
         self.data.clear();
         self.compressed = None;
+    }
+}
+
+#[derive(Builder, Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[builder(pattern = "owned", build_fn(skip))]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[repr(C, packed)]
+pub struct BUFFCompressorConfig {
+    scale: u32,
+}
+
+serialize::impl_to_le!(BUFFCompressorConfig, scale);
+deserialize::impl_from_le_bytes!(BUFFCompressorConfig, buff, (scale, u32));
+
+impl From<BUFFCompressorConfig> for BUFFCompressor {
+    fn from(c: BUFFCompressorConfig) -> Self {
+        Self::new(c.scale)
+    }
+}
+
+impl BUFFCompressorConfigBuilder {
+    pub fn build(self) -> BUFFCompressorConfig {
+        BUFFCompressorConfig {
+            scale: self.scale.unwrap_or(1),
+        }
     }
 }
 

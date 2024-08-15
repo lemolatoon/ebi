@@ -1,6 +1,6 @@
 use super::{
-    run_length::RunLengthHeader, uncompressed::UncompressedHeader0, ChunkFooter, FileConfig,
-    FileFooter0, FileFooter2, FileHeader, GeneralChunkHeader,
+    run_length::RunLengthHeader, ChunkFooter, FileConfig, FileFooter0, FileFooter3, FileHeader,
+    GeneralChunkHeader,
 };
 
 /// A trait for converting the elements of a struct into little-endian byte order.
@@ -34,12 +34,6 @@ impl ToLe for GeneralChunkHeader {
     }
 }
 
-impl ToLe for UncompressedHeader0 {
-    fn to_le(&mut self) -> &mut Self {
-        self
-    }
-}
-
 impl ToLe for FileFooter0 {
     fn to_le(&mut self) -> &mut Self {
         self.number_of_records = self.number_of_records.to_le();
@@ -49,7 +43,7 @@ impl ToLe for FileFooter0 {
     }
 }
 
-impl ToLe for FileFooter2 {
+impl ToLe for FileFooter3 {
     fn to_le(&mut self) -> &mut Self {
         self.crc = self.crc.to_le();
 
@@ -66,6 +60,31 @@ impl ToLe for ChunkFooter {
     }
 }
 
+macro_rules! impl_to_le {
+    ($struct_name:ident, $( $field:ident ),* ) => {
+        impl $crate::format::serialize::ToLe for $struct_name {
+            fn to_le(&mut self) -> &mut Self {
+                $(
+                    let $field = self.$field;
+                    self.$field = $field.to_le();
+                )*
+                self
+            }
+        }
+    };
+    (< $( $declare:tt ),* >, $struct_name:ident< $( $gen:ident ),* >, $( $field:ident ),* ) => {
+        impl< $( $declare ),* > ToLe for $struct_name< $( $gen ),* > {
+            fn to_le(&mut self) -> &mut Self {
+                $(
+                    self.$field.to_le();
+                )*
+                self
+            }
+        }
+    };
+}
+pub(crate) use impl_to_le;
+
 /// A trait for obtaining a byte slice representation of a struct instance.
 pub trait AsBytes {
     /// Returns a byte slice representation of the struct instance.
@@ -73,16 +92,30 @@ pub trait AsBytes {
 }
 
 mod private {
+    use crate::compressor::{
+        buff::BUFFCompressorConfig, chimp_n::Chimp128CompressorConfig,
+        general_xor::PackedGeneralXorCompressorConfig, gorilla::GorillaCompressorConfig,
+        run_length::RunLengthCompressorConfig, sprintz::DeltaSprintzCompressorConfig,
+        uncompressed::UncompressedCompressorConfig,
+    };
 
     pub trait Sealed {}
     impl Sealed for super::FileHeader {}
     impl Sealed for super::FileConfig {}
     impl Sealed for super::GeneralChunkHeader {}
-    impl Sealed for super::UncompressedHeader0 {}
     impl Sealed for super::RunLengthHeader {}
     impl Sealed for super::FileFooter0 {}
-    impl Sealed for super::FileFooter2 {}
+    impl Sealed for super::FileFooter3 {}
     impl Sealed for super::ChunkFooter {}
+
+    // CompressorConfigs
+    impl Sealed for UncompressedCompressorConfig {}
+    impl Sealed for RunLengthCompressorConfig {}
+    impl Sealed for BUFFCompressorConfig {}
+    impl Sealed for PackedGeneralXorCompressorConfig {}
+    impl Sealed for Chimp128CompressorConfig {}
+    impl Sealed for GorillaCompressorConfig {}
+    impl Sealed for DeltaSprintzCompressorConfig {}
 }
 
 impl<T: private::Sealed> AsBytes for T {

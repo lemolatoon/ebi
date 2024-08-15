@@ -1,6 +1,8 @@
 use std::io::Write;
 
-use roaring::RoaringBitmap;
+pub use roaring::RoaringBitmap;
+#[cfg(feature = "serde")]
+use serde::{Deserialize, Serialize};
 
 use crate::decoder;
 
@@ -49,22 +51,79 @@ pub fn default_filter<T: Reader + ?Sized>(
 
 #[inline]
 pub fn default_filter_materialize<T: Reader + ?Sized, W: Write>(
-    filter_fn: impl Fn(
-        &mut T,
-        Predicate,
-        Option<&RoaringBitmap>,
-        usize,
-    ) -> decoder::Result<RoaringBitmap>,
-    materialize_fn: impl Fn(&mut T, &mut W, Option<&RoaringBitmap>, usize) -> decoder::Result<()>,
     reader: &mut T,
     output: &mut W,
     predicate: Predicate,
     bitmask: Option<&RoaringBitmap>,
     logical_offset: usize,
 ) -> decoder::Result<()> {
-    let filter_result = filter_fn(reader, predicate, bitmask, logical_offset)?;
+    for (i, v) in reader.decompress()?.iter().enumerate() {
+        let record_offset = logical_offset + i;
 
-    materialize_fn(reader, output, Some(&filter_result), logical_offset)
+        if bitmask.is_some_and(|bm| !bm.contains(record_offset as u32)) {
+            continue;
+        }
+
+        if predicate.eval(*v) {
+            output.write_all(&v.to_ne_bytes())?;
+        }
+    }
+
+    Ok(())
+}
+
+#[inline]
+pub fn default_sum<T: Reader + ?Sized>(
+    reader: &mut T,
+    bitmask: Option<&RoaringBitmap>,
+    logical_offset: usize,
+) -> decoder::Result<f64> {
+    let mut sum = 0.0;
+    for (i, v) in reader.decompress()?.iter().enumerate() {
+        let record_offset = logical_offset + i;
+        if bitmask.is_some_and(|bm| !bm.contains(record_offset as u32)) {
+            continue;
+        }
+        sum += *v;
+    }
+
+    Ok(sum)
+}
+
+#[inline]
+pub fn default_min<T: Reader + ?Sized>(
+    reader: &mut T,
+    bitmask: Option<&RoaringBitmap>,
+    logical_offset: usize,
+) -> decoder::Result<f64> {
+    let mut min = f64::INFINITY;
+    for (i, v) in reader.decompress()?.iter().enumerate() {
+        let record_offset = logical_offset + i;
+        if bitmask.is_some_and(|bm| !bm.contains(record_offset as u32)) {
+            continue;
+        }
+        min = min.min(*v);
+    }
+
+    Ok(min)
+}
+
+#[inline]
+pub fn default_max<T: Reader + ?Sized>(
+    reader: &mut T,
+    bitmask: Option<&RoaringBitmap>,
+    logical_offset: usize,
+) -> decoder::Result<f64> {
+    let mut max = f64::NEG_INFINITY;
+    for (i, v) in reader.decompress()?.iter().enumerate() {
+        let record_offset = logical_offset + i;
+        if bitmask.is_some_and(|bm| !bm.contains(record_offset as u32)) {
+            continue;
+        }
+        max = max.max(*v);
+    }
+
+    Ok(max)
 }
 
 /// A trait for query execution.
@@ -116,15 +175,46 @@ pub trait QueryExecutor: Reader {
         bitmask: Option<&RoaringBitmap>,
         logical_offset: usize,
     ) -> decoder::Result<()> {
-        default_filter_materialize(
-            Self::filter,
-            Self::materialize,
-            self,
-            output,
-            predicate,
-            bitmask,
-            logical_offset,
-        )
+        default_filter_materialize(self, output, predicate, bitmask, logical_offset)
+    }
+
+    /// Calculate the sum of the values filtered by the bitmask.
+    /// `bitmask` is optional. If it is None, all values are written.
+    ///
+    /// `bitmask`'s index is global to the whole chunks.
+    /// That is why `logical_offset` is necessary to access bitmask.
+    fn sum(
+        &mut self,
+        bitmask: Option<&RoaringBitmap>,
+        logical_offset: usize,
+    ) -> decoder::Result<f64> {
+        default_sum(self, bitmask, logical_offset)
+    }
+
+    /// Calculate the minimum of the values filtered by the bitmask.
+    /// `bitmask` is optional. If it is None, all values are written.
+    ///
+    /// `bitmask`'s index is global to the whole chunks.
+    /// That is why `logical_offset` is necessary to access bitmask.
+    fn min(
+        &mut self,
+        bitmask: Option<&RoaringBitmap>,
+        logical_offset: usize,
+    ) -> decoder::Result<f64> {
+        default_min(self, bitmask, logical_offset)
+    }
+
+    /// Calculate the maximum of the values filtered by the bitmask.
+    /// `bitmask` is optional. If it is None, all values are written.
+    ///
+    /// `bitmask`'s index is global to the whole chunks.
+    /// That is why `logical_offset` is necessary to access bitmask.
+    fn max(
+        &mut self,
+        bitmask: Option<&RoaringBitmap>,
+        logical_offset: usize,
+    ) -> decoder::Result<f64> {
+        default_max(self, bitmask, logical_offset)
     }
 }
 
@@ -132,6 +222,7 @@ pub trait PredicateNumber: Copy + PartialEq + PartialOrd {}
 impl<T: Copy + PartialEq + PartialOrd> PredicateNumber for T {}
 
 #[derive(Debug, Clone, Copy, PartialEq, PartialOrd)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum RangeValueImpl<T: PredicateNumber> {
     Inclusive(T),
     Exclusive(T),
@@ -151,6 +242,7 @@ impl<T: PredicateNumber> RangeValueImpl<T> {
 pub type RangeValue = RangeValueImpl<f64>;
 
 #[derive(Debug, Clone, Copy, PartialEq, PartialOrd)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct RangeImpl<T: PredicateNumber> {
     pub start: RangeValueImpl<T>,
     pub end: RangeValueImpl<T>,
@@ -199,6 +291,8 @@ impl<T: PredicateNumber> RangeImpl<T> {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, PartialOrd)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "serde", serde(tag = "type", content = "predicate"))]
 pub enum PredicateImpl<T: PredicateNumber> {
     Eq(T),
     Ne(T),

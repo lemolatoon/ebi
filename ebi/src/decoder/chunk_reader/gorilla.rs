@@ -158,6 +158,7 @@ mod modified_tsz {
         }
 
         fn read_first_value(&mut self) -> decoder::Result<u64> {
+            #[allow(clippy::useless_conversion)]
             self.r
                 .read_bits(64)
                 .map(|bits| {
@@ -201,6 +202,7 @@ mod modified_tsz {
             }
 
             let size = 64 - self.leading_zeroes - self.trailing_zeroes;
+            #[allow(clippy::useless_conversion)]
             self.r
                 .read_bits(size)
                 .map(|bits| {

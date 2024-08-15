@@ -1,8 +1,13 @@
 use std::mem;
 
 use derive_builder::Builder;
+#[cfg(feature = "serde")]
+use serde::{Deserialize, Serialize};
 
-use crate::io::bit_write::{BitWrite, BufferedBitWriter};
+use crate::{
+    format::{deserialize, serialize},
+    io::bit_write::{BitWrite, BufferedBitWriter},
+};
 
 use super::{Capacity, Compressor};
 
@@ -19,13 +24,22 @@ pub struct DeltaSprintzCompressorImpl<W: BitWrite> {
     total_bytes_in: usize,
 }
 
-#[derive(Builder, Debug, Clone, Copy)]
+#[derive(Builder, Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 #[builder(pattern = "owned", build_fn(skip))]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[repr(C, packed)]
 pub struct DeltaSprintzCompressorConfig {
     #[builder(setter(into), default)]
     capacity: Capacity,
     scale: u32,
 }
+serialize::impl_to_le!(DeltaSprintzCompressorConfig, capacity, scale);
+deserialize::impl_from_le_bytes!(
+    DeltaSprintzCompressorConfig,
+    delta_sprintz,
+    (capacity, Capacity),
+    (scale, u32)
+);
 
 impl DeltaSprintzCompressorConfigBuilder {
     pub fn build(self) -> DeltaSprintzCompressorConfig {
@@ -36,9 +50,12 @@ impl DeltaSprintzCompressorConfigBuilder {
     }
 }
 
-impl From<&DeltaSprintzCompressorConfig> for DeltaSprintzCompressorImpl<BitWriter> {
-    fn from(c: &DeltaSprintzCompressorConfig) -> Self {
-        Self::new(BufferedBitWriter::with_capacity(c.capacity.0), c.scale)
+impl From<DeltaSprintzCompressorConfig> for DeltaSprintzCompressorImpl<BitWriter> {
+    fn from(c: DeltaSprintzCompressorConfig) -> Self {
+        Self::new(
+            BufferedBitWriter::with_capacity(c.capacity.0 as usize),
+            c.scale,
+        )
     }
 }
 

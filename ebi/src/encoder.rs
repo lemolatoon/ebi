@@ -5,19 +5,21 @@ use crate::{
     format::{
         self,
         serialize::{AsBytes, ToLe},
-        ChunkFooter, FieldType, FileConfig, FileFooter0, FileFooter2, FileHeader,
+        ChunkFooter, FieldType, FileConfig, FileFooter0, FileFooter3, FileHeader,
         GeneralChunkHeader,
     },
-    io::aligned_buf_reader::AlignedBufRead,
 };
 use core::slice;
+#[cfg(feature = "serde")]
+use serde::{Deserialize, Serialize};
 use std::{
     io::{self, Read, Write},
-    mem::{offset_of, size_of, size_of_val},
+    mem::{offset_of, size_of},
     time::Instant,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum ChunkOption {
     Full,
     RecordCount(usize),
@@ -56,7 +58,7 @@ impl ChunkOption {
     }
 }
 
-pub struct FileWriter<R: AlignedBufRead> {
+pub struct FileWriter<R: Read> {
     input: R,
     start_time: Instant,
     chunk_option: ChunkOption,
@@ -68,68 +70,7 @@ pub struct FileWriter<R: AlignedBufRead> {
     reaches_eof: bool,
 }
 
-struct BufWrapper<'a, R: AlignedBufRead> {
-    input: &'a mut R,
-    buf: &'a [f64],
-    n_consumed_bytes: usize,
-}
-
-impl<'a, R: AlignedBufRead> BufWrapper<'a, R> {
-    /// Provides the wrapper of internal buffer of BufRead.
-    /// Tuple's first element is the `BufWrapper`, the second element indicates
-    /// reader reaches EOF or not.
-    pub fn new(input: &'a mut R) -> Result<(Self, bool), io::Error> {
-        let buf: &[u8] = input.fill_buf()?;
-        let reaches_eof = buf.is_empty();
-
-        if reaches_eof {
-            return Ok((
-                Self {
-                    input,
-                    buf: &[],
-                    n_consumed_bytes: 0,
-                },
-                true,
-            ));
-        }
-
-        let buf_ptr = buf.as_ptr().cast::<f64>();
-        let len = size_of_val(buf) / size_of::<f64>();
-        // Safety:
-        // input buffer is safely interpreted because the user of this struct guarantees
-        // this byte stream is a f64 array.
-        debug_assert!(buf_ptr.is_aligned(), "buf_ptr is not aligned");
-        debug_assert!(size_of::<f64>() * len <= isize::MAX as usize);
-        let buf: &'a [f64] = unsafe { slice::from_raw_parts(buf_ptr, len) };
-        Ok((
-            Self {
-                input,
-                buf,
-                n_consumed_bytes: len * size_of::<f64>(),
-            },
-            reaches_eof,
-        ))
-    }
-
-    #[allow(unused)]
-    pub fn set_n_consumed_bytes(&mut self, consumed: usize) {
-        self.n_consumed_bytes = consumed;
-    }
-}
-
-impl<'a, R: AlignedBufRead> AsRef<[f64]> for BufWrapper<'a, R> {
-    fn as_ref(&self) -> &'a [f64] {
-        self.buf
-    }
-}
-
-impl<'a, R: AlignedBufRead> Drop for BufWrapper<'a, R> {
-    fn drop(&mut self) {
-        self.input.consume(self.n_consumed_bytes);
-    }
-}
-
-impl<R: AlignedBufRead> FileWriter<R> {
+impl<R: Read> FileWriter<R> {
     const MAGIC_NUMBER: &'static [u8; 4] = b"EBI1";
     pub fn new(input: R, compressor: CompressorConfig, chunk_option: ChunkOption) -> Self {
         let start_time = Instant::now();
@@ -159,19 +100,6 @@ impl<R: AlignedBufRead> FileWriter<R> {
 
     pub fn file_header_size(&self) -> usize {
         size_of::<FileHeader>()
-    }
-
-    pub fn file_footer_size(&self) -> usize {
-        size_of::<FileFooter0>()
-            + size_of::<ChunkFooter>() * self.n_chunks()
-            + size_of::<FileFooter2>()
-    }
-
-    #[allow(unused)]
-    /// Returns the wrapper of the contents of the internal buffer, filling it with more data from the inner reader.
-    /// If input has already reached EOF, the second element of tuple will be set.
-    fn f64_buf(&mut self) -> Result<(BufWrapper<'_, R>, bool), io::Error> {
-        BufWrapper::new(&mut self.input)
     }
 
     fn total_bytes_out(&self) -> usize {
@@ -220,7 +148,7 @@ impl<R: AlignedBufRead> FileWriter<R> {
         if self.reaches_eof {
             return None;
         }
-        let mut compressor = compressor.unwrap_or_else(|| self.compressor.clone().build());
+        let mut compressor = compressor.unwrap_or_else(|| self.compressor.build());
         compressor.reset();
         Some(ChunkWriter::new(self, compressor))
     }
@@ -256,7 +184,7 @@ impl<R: AlignedBufRead> FileWriter<R> {
         f.write_all(header.to_le().as_bytes())
     }
 
-    pub fn write_footer<W: Write>(&mut self, mut f: W) -> io::Result<()> {
+    pub fn write_footer<W: Write + std::io::Seek>(&mut self, mut f: W) -> io::Result<()> {
         let number_of_chunks = self.n_chunks() as u64;
         let number_of_records = self
             .chunk_footers_with_next_chunk_footer()
@@ -281,15 +209,18 @@ impl<R: AlignedBufRead> FileWriter<R> {
             }
         }
 
+        self.compressor.serialize(&mut f)?;
+
         // TODO: calculate `crc` here.
         let crc = 0u32;
 
-        let mut footer2 = FileFooter2 {
+        let mut footer3 = FileFooter3 {
             compression_elapsed_time_nano_secs: 0, // must be written later
             crc,
         };
 
-        f.write_all(footer2.to_le().as_bytes())
+        let le_bytes = footer3.to_le().as_bytes();
+        f.write_all(le_bytes)
     }
 
     pub fn write_footer_offset<W: Write>(&mut self, mut f: W) -> io::Result<()> {
@@ -307,7 +238,8 @@ impl<R: AlignedBufRead> FileWriter<R> {
         let footer_offset = size_of::<FileHeader>() + self.total_bytes_out();
         let slot_offset = size_of::<FileFooter0>()
             + self.n_chunks() * size_of::<ChunkFooter>()
-            + offset_of!(FileFooter2, compression_elapsed_time_nano_secs);
+            + self.compressor.serialized_size()
+            + offset_of!(FileFooter3, compression_elapsed_time_nano_secs);
 
         footer_offset + slot_offset
     }
@@ -321,7 +253,7 @@ impl<R: AlignedBufRead> FileWriter<R> {
     }
 }
 
-pub struct ChunkWriter<'a, R: AlignedBufRead> {
+pub struct ChunkWriter<'a, R: Read> {
     file_writer: &'a mut FileWriter<R>,
     compressor: GenericCompressor,
 }
@@ -354,7 +286,7 @@ fn read_less_or_equal<R: Read>(mut f: R, n_bytes: usize) -> Result<Vec<f64>, io:
     Ok(buf)
 }
 
-impl<'a, R: AlignedBufRead> ChunkWriter<'a, R> {
+impl<'a, R: Read> ChunkWriter<'a, R> {
     fn new(file_writer: &'a mut FileWriter<R>, compressor: GenericCompressor) -> Self {
         Self {
             file_writer,
@@ -451,11 +383,10 @@ impl<'a, R: AlignedBufRead> ChunkWriter<'a, R> {
 mod tests {
     use format::{
         deserialize::{FromLeBytes, TryFromLeBytes},
-        uncompressed::UncompressedHeader0,
         ChunkOptionKind, CompressionScheme,
     };
 
-    use crate::io::aligned_buf_reader::AlignedBufReader;
+    use crate::compressor::uncompressed::UncompressedCompressorConfig;
 
     use super::*;
     use std::{
@@ -472,10 +403,10 @@ mod tests {
         };
         const RECORD_COUNT: usize = 100;
         let compressor_config = CompressorConfig::uncompressed()
-            .capacity(data.len())
+            .capacity(data.len() as u64)
             .build()
             .into();
-        let mut in_f = AlignedBufReader::new(u8_data);
+        let mut in_f = u8_data;
         let mut out_f = Cursor::new(Vec::new());
         let chunk_option = ChunkOption::RecordCount(RECORD_COUNT);
         let mut file_writer = FileWriter::new(&mut in_f, compressor_config, chunk_option);
@@ -507,7 +438,7 @@ mod tests {
         let file_header = file_header.unwrap();
         assert_eq!(
             file_header.magic_number,
-            *FileWriter::<AlignedBufReader<Cursor<Vec<u8>>>>::MAGIC_NUMBER
+            *FileWriter::<Cursor<Vec<u8>>>::MAGIC_NUMBER
         );
         let version = file_header.version;
         assert_eq!(
@@ -555,10 +486,7 @@ mod tests {
         let fifth_chunk_logical_offset = fifth_chunk_footer.logical_offset as usize;
         let data_in_src = data[fifth_chunk_logical_offset].to_le_bytes();
 
-        let header_head =
-            UncompressedHeader0::from_le_bytes(&dest_vec[fifth_chunk_physical_offset..]);
-        let header_size = header_head.header_size as usize;
-        let val_head = header_size + fifth_chunk_physical_offset;
+        let val_head = fifth_chunk_physical_offset;
         let data_in_dest = &dest_vec[val_head..(val_head + size_of::<f64>())];
         assert_eq!(data_in_src, data_in_dest);
 
@@ -566,7 +494,9 @@ mod tests {
 
         let footer_size = size_of::<FileFooter0>()
             + number_of_chunks as usize * size_of::<ChunkFooter>()
-            + size_of::<FileFooter2>();
+            + size_of::<u8>()
+            + size_of::<UncompressedCompressorConfig>()
+            + size_of::<FileFooter3>();
         assert_eq!(
             dest_vec.len(),
             footer_offset + footer_size,

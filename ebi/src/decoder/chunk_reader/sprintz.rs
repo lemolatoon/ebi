@@ -202,6 +202,7 @@ impl<R: BitRead2> Iterator for DeltaSprintzDecompressIteratorImpl<R> {
         }
         let delta = match self.bit_reader.read_bits(self.number_of_bits_needed) {
             Some(delta) => delta,
+            #[allow(clippy::useless_conversion)]
             None => return Some(Err(DecoderError::UnexpectedEndOfChunk.into())),
         };
         let quantized = unzigzag(delta) + self.previous_value_quantized;

@@ -2,9 +2,15 @@ use std::marker::PhantomData;
 
 use derive_builder::Builder;
 
-use crate::io::bit_write::{BitWrite, BufferedBitWriter};
+use crate::{
+    format::serialize,
+    io::bit_write::{BitWrite, BufferedBitWriter},
+};
 
 use super::{Capacity, Compressor};
+
+#[cfg(feature = "serde")]
+use serde::{Deserialize, Serialize};
 
 pub trait XorEncoder: Default {
     /// Compress the passed floats,
@@ -50,13 +56,55 @@ impl<T: XorEncoder> Default for GeneralXorCompressor<BitWriter, T> {
     }
 }
 
-#[derive(Builder, Debug, Clone, Copy)]
+#[derive(Builder, Debug)]
 #[builder(pattern = "owned", build_fn(skip))]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct GeneralXorCompressorConfig<T: XorEncoder> {
     #[builder(setter(into), default)]
     pub(crate) capacity: Capacity,
+    #[cfg_attr(feature = "serde", serde(skip))]
     #[builder(setter(skip))]
-    _encoder_type: PhantomData<T>,
+    _encoder_type: PhantomData<fn() -> T>,
+}
+
+impl<T: XorEncoder> Clone for GeneralXorCompressorConfig<T> {
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+
+impl<T: XorEncoder> Copy for GeneralXorCompressorConfig<T> {}
+
+impl<T: XorEncoder> PartialEq for GeneralXorCompressorConfig<T> {
+    fn eq(&self, other: &Self) -> bool {
+        self.capacity == other.capacity
+    }
+}
+impl<T: XorEncoder> Eq for GeneralXorCompressorConfig<T> {}
+impl<T: XorEncoder> PartialOrd for GeneralXorCompressorConfig<T> {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+impl<T: XorEncoder> Ord for GeneralXorCompressorConfig<T> {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.capacity.cmp(&other.capacity)
+    }
+}
+
+#[derive(Builder, Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[repr(C, packed)]
+pub struct PackedGeneralXorCompressorConfig {
+    capacity: Capacity,
+}
+serialize::impl_to_le!(PackedGeneralXorCompressorConfig, capacity);
+
+impl<T: XorEncoder> GeneralXorCompressorConfig<T> {
+    pub fn into_packed(self) -> PackedGeneralXorCompressorConfig {
+        PackedGeneralXorCompressorConfig {
+            capacity: self.capacity,
+        }
+    }
 }
 
 impl<T: XorEncoder> GeneralXorCompressorConfigBuilder<T> {
@@ -71,8 +119,8 @@ impl<T: XorEncoder> GeneralXorCompressorConfigBuilder<T> {
 
 impl<T: XorEncoder> From<GeneralXorCompressorConfig<T>> for GeneralXorCompressor<BitWriter, T> {
     fn from(value: GeneralXorCompressorConfig<T>) -> Self {
-        let capacity = value.capacity;
-        Self::with_capacity(capacity.0)
+        let capacity = value.capacity.0 as usize;
+        Self::with_capacity(capacity)
     }
 }
 

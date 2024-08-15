@@ -1,6 +1,13 @@
-use crate::io::bit_write::BufferedBitWriter;
+use derive_builder::Builder;
+#[cfg(feature = "serde")]
+use serde::{Deserialize, Serialize};
 
-use super::{AppendableCompressor, Compressor};
+use crate::{
+    format::{deserialize, serialize},
+    io::bit_write::BufferedBitWriter,
+};
+
+use super::{AppendableCompressor, Capacity, Compressor};
 
 #[derive(Debug, Clone, PartialEq, PartialOrd)]
 pub struct GorillaCompressor {
@@ -64,6 +71,32 @@ impl AppendableCompressor for GorillaCompressor {
     fn append_compress(&mut self, input: &[f64]) {
         for value in input {
             self.encoder.encode(*value);
+        }
+    }
+}
+
+#[derive(Builder, Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[builder(pattern = "owned", build_fn(skip))]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[repr(C, packed)]
+pub struct GorillaCompressorConfig {
+    #[builder(setter(into), default)]
+    capacity: Capacity,
+}
+serialize::impl_to_le!(GorillaCompressorConfig, capacity);
+deserialize::impl_from_le_bytes!(GorillaCompressorConfig, gorilla, (capacity, Capacity));
+
+impl From<GorillaCompressorConfig> for GorillaCompressor {
+    fn from(config: GorillaCompressorConfig) -> Self {
+        Self::with_capacity(config.capacity.0 as usize)
+    }
+}
+
+impl GorillaCompressorConfigBuilder {
+    pub fn build(self) -> GorillaCompressorConfig {
+        let Self { capacity } = self;
+        GorillaCompressorConfig {
+            capacity: capacity.unwrap_or(Capacity::default()),
         }
     }
 }

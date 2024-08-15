@@ -15,10 +15,14 @@ anyhow = "1.0.86"
 rand_distr = "0.4.3"
 iter-enum = "1"
 num_enum = "0.7.3"
+serde = { version = "1", features = ["derive"], optional = true }
 
 [dev-dependencies]
 criterion = "0.5"
 rand_chacha = "0.3"
+
+[features]
+serde = ["dep:serde"]
 
 [[bench]]
 name = "bench"
@@ -31,6 +35,3 @@ bench = false
 
 [lib]
 bench = false
-
-[profile.release]
-debug = 1
