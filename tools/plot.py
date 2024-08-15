@@ -56,6 +56,7 @@ def main():
     average_compression_ratios = {}
     average_compression_throughput = {}
     average_decompression_throughput = {}
+    average_filter_throughput = {key: {} for key in ["eq", "ne", "greater"]}
 
     for dataset_name, methods in all_output.items():
         print(f"Processing {dataset_name}")
@@ -78,14 +79,35 @@ def main():
                 average_compression_throughput[method_name] = throughput
                 average_decompression_throughput[method_name] = decompression_throughput
 
+            for filter_name in ["eq", "ne", "greater"]:
+                filter_throughput = compression_statistics['uncompressed_size'] / \
+                    output['filters'][filter_name]['filter']['elapsed_time_nanos']
+                if method_name in average_filter_throughput[filter_name]:
+                    average_filter_throughput[filter_name][method_name] += filter_throughput
+                else:
+                    average_filter_throughput[filter_name][method_name] = filter_throughput
+
     num_datasets = len(all_output)
     for method in average_compression_ratios:
         average_compression_ratios[method] /= num_datasets
         average_compression_throughput[method] /= num_datasets
         average_decompression_throughput[method] /= num_datasets
 
+    for filter_name in ["eq", "ne", "greater"]:
+        for method in average_filter_throughput[filter_name]:
+            average_filter_throughput[filter_name][method] /= num_datasets
+
     out_dir = "results"
     os.makedirs(out_dir, exist_ok=True)
+
+    for filter_name in ["eq", "ne", "greater"]:
+        plot_comparison(
+            average_filter_throughput[filter_name],
+            f"Average {filter_name.upper()} Filter Throughput (bigger, better)",
+            "Throughput (GB/s)",
+            os.path.join(out_dir, f"average_{
+                         filter_name}_filter_throughput.png")
+        )
 
     plot_comparison(
         average_compression_ratios,
@@ -113,7 +135,7 @@ def main():
         print(f"Processing {dataset_name}")
         compression_ratios = {}
         compression_throughputs = {}
-        filters_elapsed_nanos = {key: {} for key in ["eq", "ne", "greater"]}
+        filters_elapsed_secs = {key: {} for key in ["eq", "ne", "greater"]}
         filter_materializes_elapsed_nanos = {
             key: {} for key in ["eq", "ne", "greater"]}
         materialize_elapsed_nanos = {}
@@ -128,7 +150,7 @@ def main():
             compression_throughputs[compression_method] = compression_throughput
 
             for filter_name in ["eq", "ne", "greater"]:
-                filters_elapsed_nanos[filter_name][compression_method] = output['filters'][
+                filters_elapsed_secs[filter_name][compression_method] = output['filters'][
                     filter_name]['filter']['elapsed_time_nanos'] / 1_000_000_000.0
                 filter_materializes_elapsed_nanos[filter_name][compression_method] = output[
                     'filters'][filter_name]['filter_materialize']['elapsed_time_nanos'] / 1_000_000_000.0
@@ -155,7 +177,7 @@ def main():
         )
         for filter_name in ["eq", "ne", "greater"]:
             plot_comparison(
-                filters_elapsed_nanos[filter_name],
+                filters_elapsed_secs[filter_name],
                 f"{dataset_name}: {filter_name} Filter Elapsed Time",
                 "Elapsed Time (s)",
                 os.path.join(dataset_out_dir, f"{dataset_name}_{
@@ -184,6 +206,8 @@ def main():
         method_name: [] for method_name in average_compression_throughput.keys()}
     decompression_throughput_data = {
         method_name: [] for method_name in average_decompression_throughput.keys()}
+    filter_throughput_data = {key: {method_name: [
+    ] for method_name in average_compression_ratios.keys()} for key in ["eq", "ne", "greater"]}
 
     for dataset_name, methods in all_output.items():
         if dataset_name == "command_type":
@@ -202,10 +226,18 @@ def main():
             decompression_throughput_data[method_name].append(
                 decompression_throughput)
 
+            for filter_name in ["eq", "ne", "greater"]:
+                filter_throughput = compression_statistics['uncompressed_size'] / \
+                    output['filters'][filter_name]['filter']['elapsed_time_nanos']
+                filter_throughput_data[filter_name][method_name].append(
+                    filter_throughput)
+
     # Convert to DataFrame
     compression_ratios_df = pd.DataFrame(compression_ratios_data)
     compression_throughput_df = pd.DataFrame(compression_throughput_data)
     decompression_throughput_df = pd.DataFrame(decompression_throughput_data)
+    filter_throughput_dfs = {key: pd.DataFrame(
+        filter_throughput_data[key]) for key in ["eq", "ne", "greater"]}
 
     plot_boxplot(compression_ratios_df, "Boxplot for Compression Ratios", "Compression Ratio(smaller, better)", os.path.join(
         out_dir, "boxplot_compression_ratios.png"))
@@ -220,6 +252,15 @@ def main():
                  "Boxplot for Decompression Throughput",
                  "Decompression Throughput (GB/s, bigger, better)",
                  os.path.join(out_dir, "boxplot_decompression_throughput.png"))
+
+    for filter_name in ["eq", "ne", "greater"]:
+        plot_boxplot(
+            filter_throughput_dfs[filter_name],
+            f"Boxplot for {filter_name.upper()} Filter Throughput",
+            f"{filter_name.upper()} Filter Throughput (GB/s, bigger, better)",
+            os.path.join(out_dir, f"boxplot_{
+                         filter_name}_filter_throughput.png")
+        )
 
 
 if __name__ == "__main__":
