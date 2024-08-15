@@ -1,3 +1,7 @@
+use experimenter::{
+    AllOutput, AllOutputInner, CompressStatistics, CompressionConfig, FilterConfig,
+    FilterFamilyOutput, FilterMaterializeConfig, MaterializeConfig, Output, OutputWrapper,
+};
 use glob::glob;
 use std::{
     collections::{HashMap, HashSet},
@@ -29,82 +33,6 @@ struct Cli {
     input: Option<String>,
     #[command(subcommand)]
     command: Commands,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct CompressionConfig {
-    chunk_option: ChunkOption,
-    compressor_config: CompressorConfig,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct FilterConfig {
-    predicate: Predicate,
-    chunk_id: Option<ChunkId>,
-    bitmask: Option<Vec<u32>>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct FilterMaterializeConfig {
-    predicate: Predicate,
-    chunk_id: Option<ChunkId>,
-    bitmask: Option<Vec<u32>>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct MaterializeConfig {
-    chunk_id: Option<ChunkId>,
-    bitmask: Option<Vec<u32>>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct CompressStatistics {
-    compression_elapsed_time_nano_secs: u128,
-    uncompressed_size: u64,
-    compressed_size: u64,
-    compressed_size_chunk_only: u64,
-    compression_ratio: f64,
-    compression_ratio_chunk_only: f64,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct OutputWrapper<T> {
-    version: String,
-    config_path: String,
-    compression_config: CompressionConfig,
-    command_specific: T,
-    elapsed_time_nanos: u128,
-    input_filename: String,
-    datetime: chrono::DateTime<chrono::Utc>,
-    result_string: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, QuickImpl)]
-struct FilterFamilyOutput {
-    filter: OutputWrapper<FilterConfig>,
-    filter_materialize: OutputWrapper<FilterMaterializeConfig>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, QuickImpl)]
-struct AllOutput {
-    compress: OutputWrapper<CompressStatistics>,
-    filters: HashMap<String, FilterFamilyOutput>,
-    materialize: OutputWrapper<MaterializeConfig>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, QuickImpl)]
-#[serde(tag = "command_type")]
-enum Output {
-    #[quick_impl(impl From)]
-    Compress(OutputWrapper<CompressStatistics>),
-    #[quick_impl(impl From)]
-    Filter(OutputWrapper<FilterConfig>),
-    #[quick_impl(impl From)]
-    FilterMaterialize(OutputWrapper<FilterMaterializeConfig>),
-    #[quick_impl(impl From)]
-    Materialize(OutputWrapper<MaterializeConfig>),
-    #[quick_impl(impl From)]
-    All(HashMap<String, HashMap<String, AllOutput>>),
 }
 
 #[derive(Debug, Clone, Args)]
@@ -313,7 +241,7 @@ fn write_output_json(
     Ok(())
 }
 
-fn all_command(args: AllArgs) -> anyhow::Result<HashMap<String, HashMap<String, AllOutput>>> {
+fn all_command(args: AllArgs) -> anyhow::Result<AllOutput> {
     let AllArgs {
         create_config,
         compressor_config_dir,
@@ -414,7 +342,7 @@ fn all_command(args: AllArgs) -> anyhow::Result<HashMap<String, HashMap<String, 
     fn check_result_already_exist(
         save_dir: impl AsRef<Path>,
         binary_file_stem: &OsStr,
-    ) -> anyhow::Result<Option<HashMap<String, AllOutput>>> {
+    ) -> anyhow::Result<Option<HashMap<String, AllOutputInner>>> {
         let saved_file_name = save_dir
             .as_ref()
             .join(binary_file_stem)
@@ -435,7 +363,7 @@ fn all_command(args: AllArgs) -> anyhow::Result<HashMap<String, HashMap<String, 
     fn create_saved_file_at(
         save_dir: impl AsRef<Path>,
         binary_file_stem: &OsStr,
-        all_output: &AllOutput,
+        all_output: &AllOutputInner,
     ) -> anyhow::Result<()> {
         let saved_file_name = save_dir
             .as_ref()
@@ -552,7 +480,7 @@ fn all_command(args: AllArgs) -> anyhow::Result<HashMap<String, HashMap<String, 
                 ConfigPath::empty(),
             )?;
 
-            let all_output = AllOutput {
+            let all_output = AllOutputInner {
                 compress: compress_result,
                 filters: filter_outputs,
                 materialize: materialize_result,
@@ -564,7 +492,7 @@ fn all_command(args: AllArgs) -> anyhow::Result<HashMap<String, HashMap<String, 
         all_outputs.insert(binary_file_stem.to_string_lossy().to_string(), outputs);
     }
 
-    Ok(all_outputs)
+    Ok(AllOutput(all_outputs))
 }
 
 fn get_compress_statistics<R: Read + Seek>(
