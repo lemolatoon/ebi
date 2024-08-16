@@ -11,6 +11,7 @@ use std::{
     iter::{self},
     path::{Path, PathBuf},
 };
+use tqdm::tqdm;
 
 use anyhow::Context as _;
 use clap::{Args, Parser, Subcommand};
@@ -68,6 +69,8 @@ struct AllArgs {
     binary_dir: PathBuf,
     #[arg(long, short('s'))]
     save_dir: PathBuf,
+    #[arg(long, short('s'))]
+    n: Option<usize>,
 }
 
 #[derive(Subcommand, Debug, Clone)]
@@ -246,7 +249,9 @@ fn all_command(args: AllArgs) -> anyhow::Result<AllOutput> {
         filter_config_dir,
         binary_dir,
         save_dir,
+        n,
     } = args;
+    let n = n.unwrap_or(1);
     anyhow::ensure!(
         compressor_config_dir.is_dir(),
         "Config directory does not exist or not directory: {}",
@@ -283,18 +288,13 @@ fn all_command(args: AllArgs) -> anyhow::Result<AllOutput> {
             }
         })
         .collect::<Vec<_>>();
-    let n_binary_files = entries.len();
 
     let mut skip_files = HashSet::new();
     // Create Config!
     if create_config {
-        for (i, binary_file) in entries.clone().into_iter().enumerate() {
-            println!(
-                "[{:03}/{:03}] Creating config for: {}",
-                i,
-                n_binary_files,
-                binary_file.display(),
-            );
+        for (_i, binary_file) in
+            tqdm(entries.clone().into_iter().enumerate()).desc(Some("Create Config"))
+        {
             let binary_file_stem = binary_file.file_stem().context("Failed to get file stem")?;
             let compressor_config_dir = compressor_config_dir.join(binary_file_stem);
             let filter_config_dir = filter_config_dir.join(binary_file_stem);
@@ -375,13 +375,7 @@ fn all_command(args: AllArgs) -> anyhow::Result<AllOutput> {
         Ok(())
     }
     let mut all_outputs = HashMap::new();
-    for (i, binary_file) in entries.into_iter().enumerate() {
-        println!(
-            "[{:03}/{:03}] Processing binary file: {}",
-            i,
-            n_binary_files,
-            binary_file.display(),
-        );
+    for (_i, binary_file) in tqdm(entries.into_iter().enumerate()).desc(Some("Datasets")) {
         if skip_files.contains(binary_file.file_stem().unwrap().to_str().unwrap()) {
             println!("Skip processing file: {}", binary_file.display());
             continue;
@@ -405,27 +399,36 @@ fn all_command(args: AllArgs) -> anyhow::Result<AllOutput> {
 
         let mut outputs = HashMap::new();
 
-        for compressor_config_file in fs::read_dir(compressor_config_dir)
-            .context("Failed to read compressor config directory")?
-        {
-            let compressor_config_file = compressor_config_file.context("Failed to read file")?;
-            let compressor_config_file = compressor_config_file.path();
-            println!(
-                "Processing compressor config: {}",
-                compressor_config_file.display()
-            );
-            if !compressor_config_file.is_file()
-                || compressor_config_file.extension().and_then(|s| s.to_str()) != Some("json")
-            {
-                continue;
-            }
+        let entries = fs::read_dir(compressor_config_dir)
+            .context("Failed to read compressor config directory")?;
+        let entries = entries
+            .filter_map(|e| {
+                let e = e.ok()?;
+                let path = e.path();
+                if path.is_file()
+                    && matches!(path.extension().and_then(|s| s.to_str()), Some("json"))
+                {
+                    Some(path)
+                } else {
+                    None
+                }
+            })
+            .collect::<Vec<_>>();
+        for compressor_config_file in tqdm(entries.into_iter()).desc(Some("Compressor Configs")) {
             let compressor_config = ConfigPath {
                 config: compressor_config_file.to_string_lossy().to_string(),
             };
             let compression_config: CompressionConfig = compressor_config.read()?;
             let compression_scheme = compression_config.compressor_config.compression_scheme();
-            let compress_result =
-                compress_command(binary_file.as_path(), compression_config, compressor_config)?;
+            let mut compress_results = Vec::with_capacity(n);
+            for _i in tqdm(0..n).desc(Some("Compress")) {
+                let compress_result = compress_command(
+                    binary_file.as_path(),
+                    compression_config.clone(),
+                    compressor_config.clone(),
+                )?;
+                compress_results.push(compress_result);
+            }
 
             let compressed_file = binary_file.with_extension("ebi");
 
@@ -448,40 +451,62 @@ fn all_command(args: AllArgs) -> anyhow::Result<AllOutput> {
                     config: filter_config_file.to_string_lossy().to_string(),
                 };
 
-                let filter_result = filter_command(
-                    compressed_file.as_path(),
-                    filter_config.read()?,
-                    filter_config.clone(),
-                )?;
+                let mut filter_results = Vec::with_capacity(n);
+                let filter_config_content: FilterConfig = filter_config.read()?;
+                for _i in tqdm(0..n).desc(Some(format!(
+                    "Filter: {}",
+                    filter_config_stem.to_str().unwrap_or("")
+                ))) {
+                    let filter_result = filter_command(
+                        compressed_file.as_path(),
+                        filter_config_content.clone(),
+                        filter_config.clone(),
+                    )?;
+                    filter_results.push(filter_result);
+                }
 
-                let filter_materialize_result = filter_materialize_command(
-                    compressed_file.as_path(),
-                    filter_config.read()?,
-                    filter_config,
-                )?;
+                let mut filter_materialize_results = Vec::with_capacity(n);
+                let filter_materialize_config_content: FilterMaterializeConfig =
+                    filter_config.read()?;
+
+                for _i in tqdm(0..n).desc(Some(format!(
+                    "Filter Materialize: {}",
+                    filter_config_stem.to_str().unwrap_or("")
+                ))) {
+                    let filter_materialize_result = filter_materialize_command(
+                        compressed_file.as_path(),
+                        filter_materialize_config_content.clone(),
+                        filter_config.clone(),
+                    )?;
+                    filter_materialize_results.push(filter_materialize_result);
+                }
 
                 filter_outputs.insert(
                     filter_config_stem.to_string_lossy().to_string(),
                     FilterFamilyOutput {
-                        filter: filter_result,
-                        filter_materialize: filter_materialize_result,
+                        filter: filter_results,
+                        filter_materialize: filter_materialize_results,
                     },
                 );
             }
 
-            let materialize_result = materialize_command(
-                compressed_file.as_path(),
-                MaterializeConfig {
-                    chunk_id: None,
-                    bitmask: None,
-                },
-                ConfigPath::empty(),
-            )?;
+            let mut materialize_results = Vec::with_capacity(n);
+            for _i in tqdm(0..n).desc(Some("Materialize")) {
+                let materialize_result = materialize_command(
+                    compressed_file.as_path(),
+                    MaterializeConfig {
+                        chunk_id: None,
+                        bitmask: None,
+                    },
+                    ConfigPath::empty(),
+                )?;
+                materialize_results.push(materialize_result);
+            }
 
             let all_output = AllOutputInner {
-                compress: compress_result,
+                compress: compress_results,
                 filters: filter_outputs,
-                materialize: materialize_result,
+                materialize: materialize_results,
             };
 
             create_saved_file_at(save_dir.as_path(), binary_file_stem, &all_output)?;
@@ -590,6 +615,9 @@ fn create_default_compressor_config(
         ("elf", CompressorConfig::elf().build().into()),
         ("gorilla", CompressorConfig::gorilla().build().into()),
         ("rle", CompressorConfig::rle().build().into()),
+        ("zstd", CompressorConfig::zstd().build().into()),
+        ("gzip", CompressorConfig::gzip().build().into()),
+        ("snappy", CompressorConfig::snappy().build().into()),
     ];
     if let Some(scale) = scale {
         configs.push((
@@ -844,7 +872,6 @@ fn filter_command(
     } = config.clone();
     let bitmask = bitmask.map(ebi::decoder::query::RoaringBitmap::from_iter);
     let now = chrono::Utc::now();
-    println!("{:?}", predicate);
 
     let mut decoder =
         Decoder::new(DecoderInput::from_file(filename.as_ref())?).context(format!(
@@ -857,8 +884,6 @@ fn filter_command(
         .filter(predicate, bitmask.as_ref(), chunk_id)
         .context("Failed to perform filter")?;
     let elapsed_time_nanos = start.elapsed().as_nanos();
-
-    println!("filtered: {:?}", bitmask);
 
     let compression_config = CompressionConfig {
         chunk_option: *decoder.header().config().chunk_option(),
@@ -893,7 +918,6 @@ fn filter_materialize_command(
     } = config.clone();
     let bitmask = bitmask.map(ebi::decoder::query::RoaringBitmap::from_iter);
     let now = chrono::Utc::now();
-    println!("{:?}", predicate);
 
     let mut decoder =
         Decoder::new(DecoderInput::from_file(filename.as_ref())?).context(format!(
