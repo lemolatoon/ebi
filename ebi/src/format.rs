@@ -188,6 +188,7 @@ pub enum CompressionScheme {
     DeltaSprintz = 8,
     Zstd = 9,
     Gzip = 10,
+    Snappy = 11,
 }
 
 // =============== Chunk ===================

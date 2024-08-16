@@ -330,6 +330,8 @@ macro_rules! impl_from_le_bytes {
     ($struct_name:path, $builder_method:ident, $( ($field:ident, $type:ty) ),* ) => {
         #[allow(unused_assignments)]
         impl $crate::format::deserialize::FromLeBytes for $struct_name {
+            #[allow(unused_variables)]
+            #[allow(unused_mut)]
             fn from_le_bytes(mut bytes: &[u8]) -> Self {
                 $(
                     let $field = <$type>::from_le_bytes(bytes[..std::mem::size_of::<$type>()].try_into().unwrap());
@@ -344,6 +346,7 @@ macro_rules! impl_from_le_bytes {
 
         impl $struct_name {
             pub fn serialized_size(&self) -> usize {
+                #[allow(unused_mut)]
                 let mut size = 0;
                 $(
                     size += std::mem::size_of::<$type>();

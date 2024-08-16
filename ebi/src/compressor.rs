@@ -29,6 +29,7 @@ pub mod general_xor;
 pub mod gorilla;
 pub mod gzip;
 pub mod run_length;
+pub mod snappy;
 pub mod sprintz;
 pub mod uncompressed;
 pub mod zstd;
@@ -83,6 +84,7 @@ pub enum GenericCompressor {
     DeltaSprintz(sprintz::DeltaSprintzCompressor),
     Zstd(zstd::ZstdCompressor),
     Gzip(gzip::GzipCompressor),
+    Snappy(snappy::SnappyCompressor),
 }
 
 macro_rules! impl_generic_compressor {
@@ -148,7 +150,8 @@ impl_generic_compressor!(
     Elf,
     DeltaSprintz,
     Zstd,
-    Gzip
+    Gzip,
+    Snappy
 );
 
 #[derive(QuickImpl, Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -177,6 +180,8 @@ pub enum CompressorConfig {
     Zstd(zstd::ZstdCompressorConfig),
     #[quick_impl(impl From)]
     Gzip(gzip::GzipCompressorConfig),
+    #[quick_impl(impl From)]
+    Snappy(snappy::SnappyCompressorConfig),
 }
 
 macro_rules! impl_compressor_config {
@@ -221,7 +226,8 @@ impl_compressor_config!(
     Elf,
     DeltaSprintz,
     Zstd,
-    Gzip
+    Gzip,
+    Snappy
 );
 
 impl CompressorConfig {
@@ -261,6 +267,7 @@ impl CompressorConfig {
             CompressorConfig::DeltaSprintz(mut c) => just_write!(c, w),
             CompressorConfig::Zstd(mut c) => just_write!(c, w),
             CompressorConfig::Gzip(mut c) => just_write!(c, w),
+            CompressorConfig::Snappy(mut c) => just_write!(c, w),
         }
 
         Ok(())
@@ -293,6 +300,9 @@ impl CompressorConfig {
             }
             CompressionScheme::Zstd => Self::Zstd(zstd::ZstdCompressorConfig::from_le_bytes(bytes)),
             CompressionScheme::Gzip => Self::Gzip(gzip::GzipCompressorConfig::from_le_bytes(bytes)),
+            CompressionScheme::Snappy => {
+                Self::Snappy(snappy::SnappyCompressorConfig::from_le_bytes(bytes))
+            }
         }
     }
 }
@@ -340,6 +350,10 @@ impl CompressorConfig {
 
     pub fn gzip() -> gzip::GzipCompressorConfigBuilder {
         gzip::GzipCompressorConfigBuilder::default()
+    }
+
+    pub fn snappy() -> snappy::SnappyCompressorConfigBuilder {
+        snappy::SnappyCompressorConfigBuilder::default()
     }
 }
 
@@ -482,4 +496,5 @@ mod tests {
     #[cfg(not(miri))]
     declare_test_compressor!(zstd);
     declare_test_compressor!(gzip);
+    declare_test_compressor!(snappy);
 }

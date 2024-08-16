@@ -204,6 +204,7 @@ impl<R: Read> GeneralChunkReaderInner<R> {
             CompressionScheme::Gzip => {
                 GeneralChunkReaderInner::Gzip(gzip::GzipReader::new(handle, reader))
             }
+            CompressionScheme::Snappy => todo!(),
         })
     }
 }
