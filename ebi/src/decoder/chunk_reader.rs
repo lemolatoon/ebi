@@ -199,6 +199,7 @@ impl<R: Read> GeneralChunkReaderInner<R> {
             CompressionScheme::Zstd => {
                 GeneralChunkReaderInner::Zstd(zstd::ZstdReader::new(handle, reader))
             }
+            CompressionScheme::Gzip => todo!(),
         })
     }
 }

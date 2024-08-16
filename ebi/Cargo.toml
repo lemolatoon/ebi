@@ -17,6 +17,7 @@ iter-enum = "1"
 num_enum = "0.7.3"
 serde = { version = "1", features = ["derive"], optional = true }
 zstd = "0.13.2"
+flate2 = "1.0"
 
 [dev-dependencies]
 criterion = "0.5"

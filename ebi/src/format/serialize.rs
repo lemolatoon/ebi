@@ -71,6 +71,8 @@ macro_rules! impl_to_le {
                 self
             }
         }
+
+        impl $crate::format::serialize::private::Sealed for $struct_name {}
     };
     (< $( $declare:tt ),* >, $struct_name:ident< $( $gen:ident ),* >, $( $field:ident ),* ) => {
         impl< $( $declare ),* > ToLe for $struct_name< $( $gen ),* > {
@@ -81,7 +83,9 @@ macro_rules! impl_to_le {
                 self
             }
         }
+        impl< $( $declare ),* > $crate::format::serialize::private::Sealed for $struct_name< $( $gen ),* > {}
     };
+
 }
 pub(crate) use impl_to_le;
 
@@ -91,13 +95,7 @@ pub trait AsBytes {
     fn as_bytes(&self) -> &[u8];
 }
 
-mod private {
-    use crate::compressor::{
-        buff::BUFFCompressorConfig, chimp_n::Chimp128CompressorConfig,
-        general_xor::PackedGeneralXorCompressorConfig, gorilla::GorillaCompressorConfig,
-        run_length::RunLengthCompressorConfig, sprintz::DeltaSprintzCompressorConfig,
-        uncompressed::UncompressedCompressorConfig, zstd::ZstdCompressorConfig,
-    };
+pub(crate) mod private {
 
     pub trait Sealed {}
     impl Sealed for super::FileHeader {}
@@ -107,16 +105,6 @@ mod private {
     impl Sealed for super::FileFooter0 {}
     impl Sealed for super::FileFooter3 {}
     impl Sealed for super::ChunkFooter {}
-
-    // CompressorConfigs
-    impl Sealed for UncompressedCompressorConfig {}
-    impl Sealed for RunLengthCompressorConfig {}
-    impl Sealed for BUFFCompressorConfig {}
-    impl Sealed for PackedGeneralXorCompressorConfig {}
-    impl Sealed for Chimp128CompressorConfig {}
-    impl Sealed for GorillaCompressorConfig {}
-    impl Sealed for DeltaSprintzCompressorConfig {}
-    impl Sealed for ZstdCompressorConfig {}
 }
 
 impl<T: private::Sealed> AsBytes for T {

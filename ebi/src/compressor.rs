@@ -27,6 +27,7 @@ pub mod chimp_n;
 pub mod elf;
 pub mod general_xor;
 pub mod gorilla;
+pub mod gzip;
 pub mod run_length;
 pub mod sprintz;
 pub mod uncompressed;
@@ -81,6 +82,7 @@ pub enum GenericCompressor {
     Elf(elf::ElfCompressor),
     DeltaSprintz(sprintz::DeltaSprintzCompressor),
     Zstd(zstd::ZstdCompressor),
+    Gzip(gzip::GzipCompressor),
 }
 
 macro_rules! impl_generic_compressor {
@@ -145,7 +147,8 @@ impl_generic_compressor!(
     ElfOnChimp,
     Elf,
     DeltaSprintz,
-    Zstd
+    Zstd,
+    Gzip
 );
 
 #[derive(QuickImpl, Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -172,6 +175,8 @@ pub enum CompressorConfig {
     DeltaSprintz(sprintz::DeltaSprintzCompressorConfig),
     #[quick_impl(impl From)]
     Zstd(zstd::ZstdCompressorConfig),
+    #[quick_impl(impl From)]
+    Gzip(gzip::GzipCompressorConfig),
 }
 
 macro_rules! impl_compressor_config {
@@ -182,6 +187,16 @@ macro_rules! impl_compressor_config {
                     $( $enum_name::$variant(c) => GenericCompressor::$variant(c.into()), )*
                 }
             }
+
+            /// Returns the size of the serialized configuration in bytes.
+            /// Includes the first byte that represents the size of the configuration itself.
+            pub fn serialized_size(&self) -> usize {
+                // 1 byte for the size of the config
+                1 + match self {
+                    $( $enum_name::$variant(c) => c.serialized_size(), )*
+                }
+            }
+
         }
 
         impl From<&$enum_name> for CompressionScheme {
@@ -205,30 +220,13 @@ impl_compressor_config!(
     ElfOnChimp,
     Elf,
     DeltaSprintz,
-    Zstd
+    Zstd,
+    Gzip
 );
 
 impl CompressorConfig {
     pub fn compression_scheme(&self) -> CompressionScheme {
         CompressionScheme::from(self)
-    }
-
-    /// Returns the size of the serialized configuration in bytes.
-    /// Includes the first byte that represents the size of the configuration itself.
-    pub fn serialized_size(&self) -> usize {
-        // 1 byte for the size of the config
-        1 + match self {
-            CompressorConfig::Uncompressed(c) => c.serialized_size(),
-            CompressorConfig::RLE(c) => c.serialized_size(),
-            CompressorConfig::Gorilla(c) => c.serialized_size(),
-            CompressorConfig::BUFF(c) => c.serialized_size(),
-            CompressorConfig::Chimp(c) => c.serialized_size(),
-            CompressorConfig::Chimp128(c) => c.serialized_size(),
-            CompressorConfig::ElfOnChimp(c) => c.serialized_size(),
-            CompressorConfig::Elf(c) => c.serialized_size(),
-            CompressorConfig::DeltaSprintz(c) => c.serialized_size(),
-            CompressorConfig::Zstd(c) => c.serialized_size(),
-        }
     }
 
     /// Serialize the compressor configuration to the given writer.
@@ -262,6 +260,7 @@ impl CompressorConfig {
             CompressorConfig::Elf(c) => into_packed_and_write!(c, w),
             CompressorConfig::DeltaSprintz(mut c) => just_write!(c, w),
             CompressorConfig::Zstd(mut c) => just_write!(c, w),
+            CompressorConfig::Gzip(mut c) => just_write!(c, w),
         }
 
         Ok(())
@@ -293,6 +292,7 @@ impl CompressorConfig {
                 Self::DeltaSprintz(sprintz::DeltaSprintzCompressorConfig::from_le_bytes(bytes))
             }
             CompressionScheme::Zstd => Self::Zstd(zstd::ZstdCompressorConfig::from_le_bytes(bytes)),
+            CompressionScheme::Gzip => Self::Gzip(gzip::GzipCompressorConfig::from_le_bytes(bytes)),
         }
     }
 }
@@ -336,6 +336,10 @@ impl CompressorConfig {
 
     pub fn zstd() -> zstd::ZstdCompressorConfigBuilder {
         zstd::ZstdCompressorConfigBuilder::default()
+    }
+
+    pub fn gzip() -> gzip::GzipCompressorConfigBuilder {
+        gzip::GzipCompressorConfigBuilder::default()
     }
 }
 
@@ -477,4 +481,5 @@ mod tests {
     declare_test_compressor!(buff, super::CompressorConfig::buff().scale(100).build());
     #[cfg(not(miri))]
     declare_test_compressor!(zstd);
+    declare_test_compressor!(gzip);
 }
