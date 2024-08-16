@@ -6,6 +6,7 @@ pub mod general_xor;
 pub mod gorilla;
 pub mod gzip;
 pub mod run_length;
+pub mod snappy;
 pub mod sprintz;
 pub mod uncompressed;
 pub mod zstd;
@@ -162,6 +163,7 @@ pub enum GeneralChunkReaderInner<R: Read> {
     DeltaSprintz(sprintz::DeltaSprintzReader),
     Zstd(zstd::ZstdReader<R>),
     Gzip(gzip::GzipReader<R>),
+    Snappy(snappy::SnappyReader<R>),
 }
 
 impl<R: Read> GeneralChunkReaderInner<R> {
@@ -204,7 +206,9 @@ impl<R: Read> GeneralChunkReaderInner<R> {
             CompressionScheme::Gzip => {
                 GeneralChunkReaderInner::Gzip(gzip::GzipReader::new(handle, reader))
             }
-            CompressionScheme::Snappy => todo!(),
+            CompressionScheme::Snappy => {
+                GeneralChunkReaderInner::Snappy(snappy::SnappyReader::new(handle, reader))
+            }
         })
     }
 }
@@ -423,7 +427,8 @@ impl_generic_reader!(
     Elf,
     DeltaSprintz,
     Zstd,
-    Gzip
+    Gzip,
+    Snappy
 );
 
 #[cfg(test)]
@@ -598,6 +603,7 @@ mod tests {
     #[cfg(not(miri))]
     declare_test_reader!(zstd);
     declare_test_reader!(gzip);
+    declare_test_reader!(snappy);
 
     #[test]
     fn test_buff() {

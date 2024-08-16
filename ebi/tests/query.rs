@@ -1151,6 +1151,7 @@ declare_query_tests!(elf);
 #[cfg(not(miri))]
 declare_query_tests!(zstd);
 declare_query_tests!(gzip);
+declare_query_tests!(snappy);
 
 #[test]
 fn test_delta_sprintz_filter() {

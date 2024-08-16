@@ -96,6 +96,7 @@ declare_test_api_round_trip!(elf);
 #[cfg(not(miri))]
 declare_test_api_round_trip!(zstd);
 declare_test_api_round_trip!(gzip);
+declare_test_api_round_trip!(snappy);
 
 fn test_round_trip_with_scale(
     generator: fn(usize, usize) -> Vec<f64>,
