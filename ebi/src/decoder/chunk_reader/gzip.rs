@@ -1,18 +1,20 @@
 use std::{io::Read, iter, slice};
 
+use flate2::read::GzDecoder;
+
 use crate::decoder::{self, query::QueryExecutor, FileMetadataLike, GeneralChunkHandle};
 
 use super::Reader;
 
 #[derive(Debug, Clone, PartialEq, PartialOrd)]
-pub struct ZstdReader<R: Read> {
+pub struct GzipReader<R: Read> {
     reader: R,
     chunk_size: usize,
     decompressed: Vec<f64>,
     is_decompressed: bool,
 }
 
-impl<R: Read> ZstdReader<R> {
+impl<R: Read> GzipReader<R> {
     pub fn new<F: FileMetadataLike>(handle: &GeneralChunkHandle<F>, reader: R) -> Self {
         let number_of_records = handle.number_of_records() as usize;
         let chunk_size = handle.chunk_size() as usize;
@@ -27,7 +29,7 @@ impl<R: Read> ZstdReader<R> {
 
 type F = fn(&f64) -> decoder::Result<f64>;
 pub type ZstdDecompressIterator<'a> = iter::Map<slice::Iter<'a, f64>, F>;
-impl<R: Read> Reader for ZstdReader<R> {
+impl<R: Read> Reader for GzipReader<R> {
     type NativeHeader = ();
 
     type DecompressIterator<'a> = ZstdDecompressIterator<'a>
@@ -41,13 +43,24 @@ impl<R: Read> Reader for ZstdReader<R> {
 
         let buf_ptr = self.decompressed.as_mut_ptr().cast::<u8>();
         let buf_len = size_of_val(self.decompressed.as_slice());
+        println!(
+            "self.decompressed.len(): {}, buf_len: {}",
+            self.decompressed.len(),
+            buf_len
+        );
         let buf = unsafe { slice::from_raw_parts_mut(buf_ptr, buf_len) };
 
         // TODO: If underlying reader is in-memory, we can avoid copying
         let mut src_buf = vec![0; self.chunk_size];
         self.reader.read_exact(&mut src_buf)?;
 
-        zstd::stream::copy_decode(src_buf.as_slice(), buf)?;
+        let mut decoder = GzDecoder::new(src_buf.as_slice());
+        decoder.read_exact(buf)?;
+        debug_assert_eq!(
+            decoder.read(&mut [0]).ok(),
+            Some(0),
+            "Should have read all bytes"
+        );
 
         self.is_decompressed = true;
 
@@ -86,4 +99,4 @@ impl<R: Read> Reader for ZstdReader<R> {
     }
 }
 
-impl<R: Read> QueryExecutor for ZstdReader<R> {}
+impl<R: Read> QueryExecutor for GzipReader<R> {}

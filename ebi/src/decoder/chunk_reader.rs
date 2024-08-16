@@ -4,6 +4,7 @@ pub mod chimp_n;
 pub mod elf;
 pub mod general_xor;
 pub mod gorilla;
+pub mod gzip;
 pub mod run_length;
 pub mod sprintz;
 pub mod uncompressed;
@@ -160,6 +161,7 @@ pub enum GeneralChunkReaderInner<R: Read> {
     Elf(elf::ElfReader),
     DeltaSprintz(sprintz::DeltaSprintzReader),
     Zstd(zstd::ZstdReader<R>),
+    Gzip(gzip::GzipReader<R>),
 }
 
 impl<R: Read> GeneralChunkReaderInner<R> {
@@ -199,25 +201,10 @@ impl<R: Read> GeneralChunkReaderInner<R> {
             CompressionScheme::Zstd => {
                 GeneralChunkReaderInner::Zstd(zstd::ZstdReader::new(handle, reader))
             }
-            CompressionScheme::Gzip => todo!(),
+            CompressionScheme::Gzip => {
+                GeneralChunkReaderInner::Gzip(gzip::GzipReader::new(handle, reader))
+            }
         })
-    }
-}
-
-impl<R: Read> From<&GeneralChunkReaderInner<R>> for CompressionScheme {
-    fn from(value: &GeneralChunkReaderInner<R>) -> Self {
-        match value {
-            GeneralChunkReaderInner::Uncompressed(_) => CompressionScheme::Uncompressed,
-            GeneralChunkReaderInner::RLE(_) => CompressionScheme::RLE,
-            GeneralChunkReaderInner::Gorilla(_) => CompressionScheme::Gorilla,
-            GeneralChunkReaderInner::BUFF(_) => CompressionScheme::BUFF,
-            GeneralChunkReaderInner::Chimp(_) => CompressionScheme::Chimp,
-            GeneralChunkReaderInner::Chimp128(_) => CompressionScheme::Chimp128,
-            GeneralChunkReaderInner::ElfOnChimp(_) => CompressionScheme::ElfOnChimp,
-            GeneralChunkReaderInner::Elf(_) => CompressionScheme::Elf,
-            GeneralChunkReaderInner::DeltaSprintz(_) => CompressionScheme::DeltaSprintz,
-            GeneralChunkReaderInner::Zstd(_) => CompressionScheme::Zstd,
-        }
     }
 }
 
@@ -412,6 +399,14 @@ macro_rules! impl_generic_reader {
                 }
             }
         }
+
+        impl<R: Read> From<&$enum_name<R>> for CompressionScheme {
+            fn from(value: &$enum_name<R>) -> Self {
+                match value {
+                    $( $enum_name::$variant(_) => CompressionScheme::$variant, )*
+                }
+            }
+        }
     };
 }
 
@@ -426,7 +421,8 @@ impl_generic_reader!(
     ElfOnChimp,
     Elf,
     DeltaSprintz,
-    Zstd
+    Zstd,
+    Gzip
 );
 
 #[cfg(test)]
@@ -600,6 +596,7 @@ mod tests {
     declare_test_reader!(delta_sprintz);
     #[cfg(not(miri))]
     declare_test_reader!(zstd);
+    declare_test_reader!(gzip);
 
     #[test]
     fn test_buff() {

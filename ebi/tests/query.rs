@@ -1150,6 +1150,7 @@ declare_query_tests!(elf_on_chimp);
 declare_query_tests!(elf);
 #[cfg(not(miri))]
 declare_query_tests!(zstd);
+declare_query_tests!(gzip);
 
 #[test]
 fn test_delta_sprintz_filter() {
