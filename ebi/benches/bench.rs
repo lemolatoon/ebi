@@ -27,7 +27,7 @@ pub fn run_length_compressor_bench(c: &mut Criterion) {
             |b, random_values| {
                 let mut compressor = RunLengthCompressor::new();
                 b.iter(|| {
-                    compressor.compress(black_box(random_values));
+                    compressor.compress(black_box(random_values)).unwrap();
                     compressor.reset();
                 });
             },
@@ -56,7 +56,7 @@ pub fn run_length_compressor_bench(c: &mut Criterion) {
             |b, random_values| {
                 let mut compressor = RunLengthCompressor::new();
                 b.iter(|| {
-                    compressor.compress(black_box(random_values));
+                    compressor.compress(black_box(random_values)).unwrap();
                     compressor.reset();
                 });
             },

@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     compression_common::buff::precision_bound::{self, PRECISION_MAP},
+    encoder,
     format::{deserialize, serialize},
 };
 
@@ -37,8 +38,10 @@ impl BUFFCompressor {
 }
 
 impl Compressor for BUFFCompressor {
-    fn compress(&mut self, data: &[f64]) {
+    fn compress(&mut self, data: &[f64]) -> encoder::Result<()> {
         self.compress_with_precalculated(Precalculated::precalculate(self.scale as usize, data));
+
+        Ok(())
     }
 
     fn total_bytes_in(&self) -> usize {

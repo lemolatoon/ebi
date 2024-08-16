@@ -1,10 +1,10 @@
 [package]
 name = "experimenter"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 
 [dependencies]
-ebi = { version = "0.1.0", path = "../ebi", features = ["serde"] }
+ebi = { version = "0.1.1", path = "../ebi", features = ["serde"] }
 clap = { version = "4.5.15", features = ["derive"] }
 anyhow = "1.0.86"
 serde = { version = "1", features = ["derive"] }

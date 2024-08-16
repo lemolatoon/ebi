@@ -4,7 +4,10 @@ use derive_builder::Builder;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-use crate::format::{deserialize, serialize};
+use crate::{
+    encoder,
+    format::{deserialize, serialize},
+};
 
 use super::{AppendableCompressor, Capacity, Compressor, RewindableCompressor, MAX_BUFFERS};
 
@@ -24,7 +27,7 @@ impl UncompressedCompressor {
 }
 
 impl Compressor for UncompressedCompressor {
-    fn compress(&mut self, input: &[f64]) {
+    fn compress(&mut self, input: &[f64]) -> encoder::Result<()> {
         self.reset();
         for &value in input {
             self.buffer.push(value);
@@ -32,6 +35,8 @@ impl Compressor for UncompressedCompressor {
 
         let size = size_of_val(input);
         self.total_bytes_in += size;
+
+        Ok(())
     }
 
     fn total_bytes_in(&self) -> usize {

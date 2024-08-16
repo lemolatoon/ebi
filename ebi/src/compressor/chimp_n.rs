@@ -3,6 +3,7 @@ use derive_builder::Builder;
 use serde::{Deserialize, Serialize};
 
 use crate::{
+    encoder,
     format::{deserialize, serialize},
     io::bit_write::{BitWrite as _, BufferedBitWriter},
 };
@@ -64,13 +65,15 @@ impl<const N: usize> ChimpCompressorConfigBuilder<N> {
 }
 
 impl<const N: usize> Compressor for ChimpNCompressor<N> {
-    fn compress(&mut self, input: &[f64]) {
+    fn compress(&mut self, input: &[f64]) -> encoder::Result<()> {
         self.reset();
         self.total_bytes_in += size_of_val(input);
 
         for &value in input {
             self.encoder.add_value(value);
         }
+
+        Ok(())
     }
 
     fn total_bytes_in(&self) -> usize {

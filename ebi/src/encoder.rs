@@ -1,3 +1,7 @@
+pub mod error;
+
+pub use error::Result;
+
 use cfg_if::cfg_if;
 
 use crate::{
@@ -258,7 +262,7 @@ pub struct ChunkWriter<'a, R: Read> {
     compressor: GenericCompressor,
 }
 
-fn read_less_or_equal<R: Read>(mut f: R, n_bytes: usize) -> Result<Vec<f64>, io::Error> {
+fn read_less_or_equal<R: Read>(mut f: R, n_bytes: usize) -> Result<Vec<f64>> {
     let mut buf = vec![0.0; (n_bytes + 7) / size_of::<f64>()];
     let u8_slice = unsafe {
         let ptr = buf.as_mut_ptr().cast::<u8>();
@@ -274,11 +278,11 @@ fn read_less_or_equal<R: Read>(mut f: R, n_bytes: usize) -> Result<Vec<f64>, io:
                     || e.kind() == io::ErrorKind::UnexpectedEof =>
             {
                 if n_read == 0 {
-                    return Err(e);
+                    return Err(e.into());
                 }
                 break;
             }
-            Err(e) => return Err(e),
+            Err(e) => return Err(e.into()),
         }
     }
 
@@ -298,7 +302,7 @@ impl<'a, R: Read> ChunkWriter<'a, R> {
         self.compressor
     }
 
-    pub fn write<W: Write>(&mut self, mut f: W) -> Result<(), io::Error> {
+    pub fn write<W: Write>(&mut self, mut f: W) -> Result<()> {
         let chunk_option = *self.file_writer.chunk_option();
 
         match chunk_option {
@@ -318,7 +322,7 @@ impl<'a, R: Read> ChunkWriter<'a, R> {
                     return Ok(());
                 }
 
-                self.compressor.compress(buf.as_mut_slice());
+                self.compressor.compress(buf.as_mut_slice())?;
             }
             ChunkOption::ByteSizeBestEffort(n) => {
                 // TODO: implement good estimation
@@ -333,7 +337,7 @@ impl<'a, R: Read> ChunkWriter<'a, R> {
                     return Ok(());
                 }
 
-                self.compressor.compress(buf.as_mut_slice());
+                self.compressor.compress(buf.as_mut_slice())?;
             }
         }
         if self.compressor.total_bytes_in() == 0 {
@@ -389,13 +393,10 @@ mod tests {
     use crate::compressor::uncompressed::UncompressedCompressorConfig;
 
     use super::*;
-    use std::{
-        io::{self, Cursor},
-        ptr::addr_of,
-    };
+    use std::{io::Cursor, ptr::addr_of};
 
     #[test]
-    fn test_write() -> io::Result<()> {
+    fn test_write() -> Result<()> {
         let data = (0..1000).map(|i| i as f64).collect::<Vec<f64>>();
         let u8_data = unsafe {
             let ptr = data.as_ptr().cast::<u8>();

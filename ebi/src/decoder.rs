@@ -364,7 +364,7 @@ impl<T: FileMetadataLike> GeneralChunkHandle<T> {
         Ok(())
     }
 
-    pub fn make_chunk_reader<R: Read>(&self, reader: R) -> Result<GeneralChunkReader<'_, T>> {
+    pub fn make_chunk_reader<R: Read>(&self, reader: R) -> Result<GeneralChunkReader<'_, T, R>> {
         GeneralChunkReader::new(self, reader)
     }
 }

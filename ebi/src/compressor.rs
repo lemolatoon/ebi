@@ -8,11 +8,14 @@ use quick_impl::QuickImpl;
 use run_length::RunLengthCompressor;
 use uncompressed::{UncompressedCompressor, UncompressedCompressorConfig};
 
-use crate::format::{
-    self,
-    deserialize::FromLeBytes as _,
-    serialize::{AsBytes, ToLe},
-    CompressionScheme,
+use crate::{
+    encoder,
+    format::{
+        self,
+        deserialize::FromLeBytes as _,
+        serialize::{AsBytes, ToLe},
+        CompressionScheme,
+    },
 };
 
 #[cfg(feature = "serde")]
@@ -24,14 +27,17 @@ pub mod chimp_n;
 pub mod elf;
 pub mod general_xor;
 pub mod gorilla;
+pub mod gzip;
 pub mod run_length;
+pub mod snappy;
 pub mod sprintz;
 pub mod uncompressed;
+pub mod zstd;
 
 const MAX_BUFFERS: usize = 5;
 pub trait Compressor {
     /// Perform the compression and return the size of the compressed data.
-    fn compress(&mut self, input: &[f64]);
+    fn compress(&mut self, input: &[f64]) -> encoder::Result<()>;
 
     /// Returns the total number of input bytes which have been processed by this Compressor.
     fn total_bytes_in(&self) -> usize;
@@ -76,12 +82,15 @@ pub enum GenericCompressor {
     ElfOnChimp(elf::on_chimp::ElfCompressor),
     Elf(elf::ElfCompressor),
     DeltaSprintz(sprintz::DeltaSprintzCompressor),
+    Zstd(zstd::ZstdCompressor),
+    Gzip(gzip::GzipCompressor),
+    Snappy(snappy::SnappyCompressor),
 }
 
 macro_rules! impl_generic_compressor {
     ($enum_name:ident, $($variant:ident),*) => {
         impl Compressor for $enum_name {
-            fn compress(&mut self, input: &[f64]) {
+            fn compress(&mut self, input: &[f64]) -> encoder::Result<()> {
                 match self {
                     $( $enum_name::$variant(c) => c.compress(input), )*
                 }
@@ -139,7 +148,10 @@ impl_generic_compressor!(
     Chimp128,
     ElfOnChimp,
     Elf,
-    DeltaSprintz
+    DeltaSprintz,
+    Zstd,
+    Gzip,
+    Snappy
 );
 
 #[derive(QuickImpl, Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -164,6 +176,12 @@ pub enum CompressorConfig {
     Elf(elf::ElfCompressorConfig),
     #[quick_impl(impl From)]
     DeltaSprintz(sprintz::DeltaSprintzCompressorConfig),
+    #[quick_impl(impl From)]
+    Zstd(zstd::ZstdCompressorConfig),
+    #[quick_impl(impl From)]
+    Gzip(gzip::GzipCompressorConfig),
+    #[quick_impl(impl From)]
+    Snappy(snappy::SnappyCompressorConfig),
 }
 
 macro_rules! impl_compressor_config {
@@ -174,6 +192,16 @@ macro_rules! impl_compressor_config {
                     $( $enum_name::$variant(c) => GenericCompressor::$variant(c.into()), )*
                 }
             }
+
+            /// Returns the size of the serialized configuration in bytes.
+            /// Includes the first byte that represents the size of the configuration itself.
+            pub fn serialized_size(&self) -> usize {
+                // 1 byte for the size of the config
+                1 + match self {
+                    $( $enum_name::$variant(c) => c.serialized_size(), )*
+                }
+            }
+
         }
 
         impl From<&$enum_name> for CompressionScheme {
@@ -196,29 +224,15 @@ impl_compressor_config!(
     Chimp128,
     ElfOnChimp,
     Elf,
-    DeltaSprintz
+    DeltaSprintz,
+    Zstd,
+    Gzip,
+    Snappy
 );
 
 impl CompressorConfig {
     pub fn compression_scheme(&self) -> CompressionScheme {
         CompressionScheme::from(self)
-    }
-
-    /// Returns the size of the serialized configuration in bytes.
-    /// Includes the first byte that represents the size of the configuration itself.
-    pub fn serialized_size(&self) -> usize {
-        // 1 byte for the size of the config
-        1 + match self {
-            CompressorConfig::Uncompressed(c) => c.serialized_size(),
-            CompressorConfig::RLE(c) => c.serialized_size(),
-            CompressorConfig::Gorilla(c) => c.serialized_size(),
-            CompressorConfig::BUFF(c) => c.serialized_size(),
-            CompressorConfig::Chimp(c) => c.serialized_size(),
-            CompressorConfig::Chimp128(c) => c.serialized_size(),
-            CompressorConfig::ElfOnChimp(c) => c.serialized_size(),
-            CompressorConfig::Elf(c) => c.serialized_size(),
-            CompressorConfig::DeltaSprintz(c) => c.serialized_size(),
-        }
     }
 
     /// Serialize the compressor configuration to the given writer.
@@ -251,6 +265,9 @@ impl CompressorConfig {
             CompressorConfig::ElfOnChimp(c) => into_packed_and_write!(c, w),
             CompressorConfig::Elf(c) => into_packed_and_write!(c, w),
             CompressorConfig::DeltaSprintz(mut c) => just_write!(c, w),
+            CompressorConfig::Zstd(mut c) => just_write!(c, w),
+            CompressorConfig::Gzip(mut c) => just_write!(c, w),
+            CompressorConfig::Snappy(mut c) => just_write!(c, w),
         }
 
         Ok(())
@@ -280,6 +297,11 @@ impl CompressorConfig {
             CompressionScheme::Elf => Self::Elf(elf::ElfCompressorConfig::from_le_bytes(bytes)),
             CompressionScheme::DeltaSprintz => {
                 Self::DeltaSprintz(sprintz::DeltaSprintzCompressorConfig::from_le_bytes(bytes))
+            }
+            CompressionScheme::Zstd => Self::Zstd(zstd::ZstdCompressorConfig::from_le_bytes(bytes)),
+            CompressionScheme::Gzip => Self::Gzip(gzip::GzipCompressorConfig::from_le_bytes(bytes)),
+            CompressionScheme::Snappy => {
+                Self::Snappy(snappy::SnappyCompressorConfig::from_le_bytes(bytes))
             }
         }
     }
@@ -321,6 +343,18 @@ impl CompressorConfig {
     pub fn delta_sprintz() -> sprintz::DeltaSprintzCompressorConfigBuilder {
         sprintz::DeltaSprintzCompressorConfigBuilder::default()
     }
+
+    pub fn zstd() -> zstd::ZstdCompressorConfigBuilder {
+        zstd::ZstdCompressorConfigBuilder::default()
+    }
+
+    pub fn gzip() -> gzip::GzipCompressorConfigBuilder {
+        gzip::GzipCompressorConfigBuilder::default()
+    }
+
+    pub fn snappy() -> snappy::SnappyCompressorConfigBuilder {
+        snappy::SnappyCompressorConfigBuilder::default()
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -361,7 +395,7 @@ mod tests {
             "total_bytes_in() should be 0 before compressing"
         );
 
-        compressor.compress(&floats);
+        compressor.compress(&floats).unwrap();
 
         assert_eq!(
             compressor.total_bytes_in(),
@@ -373,10 +407,10 @@ mod tests {
     fn test_total_bytes_buffered(compressor: &mut GenericCompressor) {
         let mut floats: Vec<f64> = (0..10).map(|x| (x / 2) as f64).collect();
 
-        compressor.compress(&floats);
+        compressor.compress(&floats).unwrap();
 
         floats.reverse();
-        compressor.compress(&floats[..3]);
+        compressor.compress(&floats[..3]).unwrap();
 
         let total_bytes_buffered = compressor.total_bytes_buffered();
 
@@ -459,4 +493,8 @@ mod tests {
     declare_test_compressor!(elf);
     declare_test_compressor!(delta_sprintz);
     declare_test_compressor!(buff, super::CompressorConfig::buff().scale(100).build());
+    #[cfg(not(miri))]
+    declare_test_compressor!(zstd);
+    declare_test_compressor!(gzip);
+    declare_test_compressor!(snappy);
 }

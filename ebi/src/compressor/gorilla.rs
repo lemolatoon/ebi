@@ -3,6 +3,7 @@ use derive_builder::Builder;
 use serde::{Deserialize, Serialize};
 
 use crate::{
+    encoder,
     format::{deserialize, serialize},
     io::bit_write::BufferedBitWriter,
 };
@@ -37,11 +38,13 @@ impl Default for GorillaCompressor {
 }
 
 impl Compressor for GorillaCompressor {
-    fn compress(&mut self, input: &[f64]) {
+    fn compress(&mut self, input: &[f64]) -> encoder::Result<()> {
         self.reset();
         for value in input {
             self.encoder.encode(*value);
         }
+
+        Ok(())
     }
 
     fn total_bytes_in(&self) -> usize {

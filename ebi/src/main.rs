@@ -60,9 +60,10 @@ fn main() {
     // let compressor_config = CompressorConfig::elf_on_chimp().build();
     // let compressor_config = CompressorConfig::elf().build();
     // let compressor_config = CompressorConfig::chimp().build();
-    let compressor_config = CompressorConfig::delta_sprintz()
-        .scale(scale as u32)
-        .build();
+    // let compressor_config = CompressorConfig::delta_sprintz()
+    //     .scale(scale as u32)
+    //     .build();
+    let compressor_config = CompressorConfig::zstd().build();
     let chunk_option = ChunkOption::RecordCount(RECORD_COUNT * 10 + 3);
     // let chunk_option = ChunkOption::ByteSizeBestEffort(1024 * 8);
     dbg!(chunk_option);
@@ -96,6 +97,7 @@ fn main() {
     // let binding = &[24903104499507892000.0];
     // let binding = vec![0.4, 100000000.5, 0.5, 0.6, 0.7, 0.8, 0.9, 0.9, 1.0];
     let binding = &[(i64::MAX / (2 * scale) as i64) as f64];
+    // let binding = &[0.3];
     println!("binding: {}", binding[0]);
     let mut encoder = Encoder::new(
         // EncoderInput::from_file_with_capacity("uncompressed.bin", 1024 * 16).unwrap(),
@@ -113,8 +115,6 @@ fn main() {
     let mut decoder = Decoder::new(input).unwrap();
 
     let reader = decoder.chunk_reader(ChunkId::new(0)).unwrap();
-    dbg!(reader.footer().number_of_records() as usize * size_of::<f64>());
-    dbg!(reader.footer().number_of_chunks());
     let chunk_footers = reader.footer().chunk_footers();
     println!("{:X?}", &chunk_footers[0..chunk_footers.len().min(10)]);
 

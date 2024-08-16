@@ -3,6 +3,7 @@ use std::marker::PhantomData;
 use derive_builder::Builder;
 
 use crate::{
+    encoder,
     format::serialize,
     io::bit_write::{BitWrite, BufferedBitWriter},
 };
@@ -125,13 +126,15 @@ impl<T: XorEncoder> From<GeneralXorCompressorConfig<T>> for GeneralXorCompressor
 }
 
 impl<W: BitWrite, T: XorEncoder> Compressor for GeneralXorCompressor<W, T> {
-    fn compress(&mut self, input: &[f64]) {
+    fn compress(&mut self, input: &[f64]) -> encoder::Result<()> {
         self.reset();
         self.total_bytes_in += size_of_val(input);
 
         for value in input {
             self.encoder.compress_float(&mut self.w, value.to_bits());
         }
+
+        Ok(())
     }
 
     fn total_bytes_in(&self) -> usize {
