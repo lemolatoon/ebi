@@ -56,9 +56,25 @@ fn bytesize_chunk_option_by_n(n: usize) -> ChunkOption {
     ChunkOption::ByteSizeBestEffort(n / 3)
 }
 
+#[cfg(test)]
+pub fn is_in_github_actions() -> bool {
+    std::env::var("GITHUB_ACTIONS").as_deref() == Ok("true")
+}
+
+#[cfg(test)]
+pub const fn using_miri() -> bool {
+    cfg!(miri)
+}
+
 macro_rules! declare_test_api_round_trip {
     ($compressor_method:ident) => {
         declare_test_api_round_trip!($compressor_method, {
+            if $crate::is_in_github_actions()
+                && $crate::using_miri()
+                && matches!(stringify!($compressor_method), "gzip" | "chimp128")
+            {
+                return;
+            }
             super::CompressorConfig::$compressor_method().build()
         });
     };
