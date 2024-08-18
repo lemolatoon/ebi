@@ -51,8 +51,6 @@ mod helper {
             decoder.filter(predicate, bitmask, chunk_id).unwrap()
         };
 
-        // println!("bitmap: {:?}", bitmap.iter().collect::<Vec<_>>());
-        // println!("expected: {:?}", expected.iter().collect::<Vec<_>>());
         assert_eq!(bitmap, expected, "[{test_name}]: Filter result mismatch");
     }
 

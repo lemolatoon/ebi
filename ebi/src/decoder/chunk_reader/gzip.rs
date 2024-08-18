@@ -43,11 +43,6 @@ impl<R: Read> Reader for GzipReader<R> {
 
         let buf_ptr = self.decompressed.as_mut_ptr().cast::<u8>();
         let buf_len = size_of_val(self.decompressed.as_slice());
-        println!(
-            "self.decompressed.len(): {}, buf_len: {}",
-            self.decompressed.len(),
-            buf_len
-        );
         let buf = unsafe { slice::from_raw_parts_mut(buf_ptr, buf_len) };
 
         // TODO: If underlying reader is in-memory, we can avoid copying

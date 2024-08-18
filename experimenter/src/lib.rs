@@ -57,15 +57,15 @@ pub struct OutputWrapper<T> {
 
 #[derive(Debug, Clone, Serialize, Deserialize, QuickImpl)]
 pub struct FilterFamilyOutput {
-    pub filter: OutputWrapper<FilterConfig>,
-    pub filter_materialize: OutputWrapper<FilterMaterializeConfig>,
+    pub filter: Vec<OutputWrapper<FilterConfig>>,
+    pub filter_materialize: Vec<OutputWrapper<FilterMaterializeConfig>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, QuickImpl)]
 pub struct AllOutputInner {
-    pub compress: OutputWrapper<CompressStatistics>,
+    pub compress: Vec<OutputWrapper<CompressStatistics>>,
     pub filters: HashMap<String, FilterFamilyOutput>,
-    pub materialize: OutputWrapper<MaterializeConfig>,
+    pub materialize: Vec<OutputWrapper<MaterializeConfig>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, QuickImpl)]
@@ -120,7 +120,15 @@ impl AllOutput {
     pub fn average_compression_ratio(dataset_to_output: HashMap<String, AllOutputInner>) -> f64 {
         let total_compression_ratio = dataset_to_output
             .values()
-            .map(|output| output.compress.command_specific.compression_ratio)
+            .map(|output| {
+                let n = output.compress.len() as f64;
+                output
+                    .compress
+                    .iter()
+                    .map(|c| c.command_specific.compression_ratio)
+                    .sum::<f64>()
+                    / n
+            })
             .sum::<f64>();
         total_compression_ratio / dataset_to_output.len() as f64
     }
@@ -131,9 +139,18 @@ impl AllOutput {
         let total_compression_throughput = dataset_to_output
             .values()
             .map(|output| {
-                let elapsed_time = output.compress.elapsed_time_nanos as f64;
-                let uncompressed_size = output.compress.command_specific.uncompressed_size as f64;
-                uncompressed_size / elapsed_time
+                let n = output.compress.len() as f64;
+                let elapsed_time = output
+                    .compress
+                    .iter()
+                    .map(|c| c.elapsed_time_nanos as f64)
+                    .sum::<f64>();
+                let uncompressed_size = output
+                    .compress
+                    .iter()
+                    .map(|c| c.command_specific.uncompressed_size as f64)
+                    .sum::<f64>();
+                (uncompressed_size / elapsed_time) / n
             })
             .sum::<f64>();
 
@@ -146,9 +163,18 @@ impl AllOutput {
         let total_decompression_throughput = dataset_to_output
             .values()
             .map(|output| {
-                let elapsed_time = output.materialize.elapsed_time_nanos as f64;
-                let uncompressed_size = output.compress.command_specific.uncompressed_size as f64;
-                uncompressed_size / elapsed_time
+                let n = output.compress.len() as f64;
+                let elapsed_time = output
+                    .materialize
+                    .iter()
+                    .map(|c| c.elapsed_time_nanos as f64)
+                    .sum::<f64>();
+                let uncompressed_size = output
+                    .compress
+                    .iter()
+                    .map(|c| c.command_specific.uncompressed_size as f64)
+                    .sum::<f64>();
+                (uncompressed_size / elapsed_time) / n
             })
             .sum::<f64>();
 
