@@ -1135,18 +1135,49 @@ macro_rules! declare_query_tests {
             #[test]
             fn test_filter() {
                 let config = $config;
+                if $crate::is_in_github_actions()
+                    && $crate::using_miri()
+                    && matches!(
+                        stringify!($method),
+                        "gzip" | "chimp128" | "elf" | "elf_on_chimp"
+                    )
+                {
+                    // Skip slow test in CI if using miri
+                    return;
+                }
                 super::helper::test_query_filter(config, None, None, None, stringify!($method));
             }
 
             #[test]
             fn test_materialize() {
                 let config = $config;
+                if $crate::is_in_github_actions()
+                    && $crate::using_miri()
+                    && matches!(
+                        stringify!($method),
+                        "gzip" | "chimp128" | "elf" | "elf_on_chimp"
+                    )
+                {
+                    // Skip slow test in CI if using miri
+                    return;
+                }
                 super::helper::test_query_materialize(config, None, stringify!($method));
             }
 
             #[test]
             fn test_filter_materialize() {
                 let config = $config;
+
+                if $crate::is_in_github_actions()
+                    && $crate::using_miri()
+                    && matches!(
+                        stringify!($method),
+                        "gzip" | "chimp128" | "elf" | "elf_on_chimp"
+                    )
+                {
+                    // Skip slow test in CI if using miri
+                    return;
+                }
                 super::helper::test_query_filter_materialize(
                     config,
                     None,
