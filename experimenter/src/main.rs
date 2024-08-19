@@ -618,6 +618,7 @@ fn create_default_compressor_config(
         ("zstd", CompressorConfig::zstd().build().into()),
         ("gzip", CompressorConfig::gzip().build().into()),
         ("snappy", CompressorConfig::snappy().build().into()),
+        ("ffi_alp", CompressorConfig::ffi_alp().build().into()),
     ];
     if let Some(scale) = scale {
         configs.push((
