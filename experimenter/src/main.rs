@@ -289,6 +289,29 @@ fn all_command(args: AllArgs) -> anyhow::Result<AllOutput> {
         })
         .collect::<Vec<_>>();
 
+    let csv_dir = binary_dir.parent().unwrap();
+    let stem_to_csv_entry = fs::read_dir(csv_dir)
+        .context(format!("Failed to read directory: {}", csv_dir.display()))?
+        .filter_map(|e| {
+            let e = e.ok()?;
+            let path = e.path();
+            if path.is_file()
+                && matches!(
+                    path.extension().and_then(|s| s.to_str()),
+                    Some("csv" | "txt") | None
+                )
+            {
+                Some(path)
+            } else {
+                None
+            }
+        })
+        .map(|path| {
+            let stem = path.file_stem().unwrap().to_owned();
+            (stem, path)
+        })
+        .collect::<HashMap<_, _>>();
+
     let mut skip_files = HashSet::new();
     // Create Config!
     if create_config {
@@ -308,23 +331,10 @@ fn all_command(args: AllArgs) -> anyhow::Result<AllOutput> {
                 skip_files.insert(binary_file_stem.to_string_lossy().to_string());
                 continue;
             }
-            let parent_dir = binary_file.parent().unwrap().parent().unwrap();
-            let csv_path = fs::read_dir(parent_dir)?
-                .find_map(|entry| {
-                    let entry = entry.ok()?;
-                    let path = entry.path();
-                    if path.is_file()
-                        && matches!(
-                            path.extension().and_then(|s| s.to_str()),
-                            Some("csv" | "txt") | None
-                        )
-                    {
-                        Some(path)
-                    } else {
-                        None
-                    }
-                })
-                .context("Failed to find csv file")?;
+            let csv_path = stem_to_csv_entry.get(binary_file_stem).context(format!(
+                "Failed to get csv path, stem: {}",
+                binary_file_stem.to_string_lossy()
+            ))?;
             if let Err(e) =
                 create_default_compressor_config(csv_path.as_path(), Some(compressor_config_dir))
             {
@@ -336,6 +346,7 @@ fn all_command(args: AllArgs) -> anyhow::Result<AllOutput> {
             }
         }
     }
+    drop(stem_to_csv_entry);
 
     fn check_result_already_exist(
         save_dir: impl AsRef<Path>,
