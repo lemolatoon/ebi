@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["ebi", "tools", "experimenter"]
+members = ["ebi", "tools", "experimenter", "alp-binding"]
 
 [profile.release]
 debug = true

@@ -1,0 +1,3 @@
+[submodule "alp-binding/ALP"]
+	path = alp-binding/ALP
+	url = https://github.com/cwida/ALP.git

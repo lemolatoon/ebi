@@ -19,12 +19,15 @@ serde = { version = "1", features = ["derive"], optional = true }
 zstd = "0.13.2"
 flate2 = "1.0"
 snap = "1"
+alp-binding = { path = "../alp-binding", optional = true }
 
 [dev-dependencies]
 criterion = "0.5"
 rand_chacha = "0.3"
 
 [features]
+ffi_alp = ["dep:alp-binding"]
+ffi = ["ffi_alp"]
 serde = ["dep:serde"]
 
 [[bench]]
