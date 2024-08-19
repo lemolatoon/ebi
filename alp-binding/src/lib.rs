@@ -1,3 +1,5 @@
+#![allow(clippy::upper_case_acronyms)]
+#![allow(clippy::missing_safety_doc)]
 use autocxx::prelude::*; // use all the main autocxx functions
 
 include_cpp! {

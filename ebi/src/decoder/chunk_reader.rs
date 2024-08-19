@@ -209,6 +209,8 @@ impl<R: Read> GeneralChunkReaderInner<R> {
             CompressionScheme::Snappy => {
                 GeneralChunkReaderInner::Snappy(snappy::SnappyReader::new(handle, reader))
             }
+            #[cfg(feature = "ffi_alp")]
+            CompressionScheme::FFIAlp => todo!(),
         })
     }
 }

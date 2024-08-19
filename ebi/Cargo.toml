@@ -29,6 +29,7 @@ rand_chacha = "0.3"
 ffi_alp = ["dep:alp-binding"]
 ffi = ["ffi_alp"]
 serde = ["dep:serde"]
+default = ["ffi"]
 
 [[bench]]
 name = "bench"

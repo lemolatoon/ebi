@@ -25,6 +25,8 @@ pub mod buff;
 pub mod chimp;
 pub mod chimp_n;
 pub mod elf;
+// #[cfg(feature = "ffi_alp")]
+pub mod ffi_alp;
 pub mod general_xor;
 pub mod gorilla;
 pub mod gzip;
@@ -85,44 +87,64 @@ pub enum GenericCompressor {
     Zstd(zstd::ZstdCompressor),
     Gzip(gzip::GzipCompressor),
     Snappy(snappy::SnappyCompressor),
+    #[cfg(feature = "ffi_alp")]
+    FFIAlp(ffi_alp::FFIAlpCompressor),
 }
 
 macro_rules! impl_generic_compressor {
-    ($enum_name:ident, $($variant:ident),*) => {
+    ($enum_name:ident, $($variant:ident $(#[$meta:meta])?),*) => {
         impl Compressor for $enum_name {
             fn compress(&mut self, input: &[f64]) -> encoder::Result<()> {
                 match self {
-                    $( $enum_name::$variant(c) => c.compress(input), )*
+                    $(
+                        $(#[$meta])?
+                        $enum_name::$variant(c) => c.compress(input),
+                    )*
                 }
             }
 
             fn total_bytes_in(&self) -> usize {
                 match self {
-                    $( $enum_name::$variant(c) => c.total_bytes_in(), )*
+                    $(
+                        $(#[$meta])?
+                        $enum_name::$variant(c) => c.total_bytes_in(),
+                    )*
                 }
             }
 
             fn total_bytes_buffered(&self) -> usize {
                 match self {
-                    $( $enum_name::$variant(c) => c.total_bytes_buffered(), )*
+                    $(
+                        $(#[$meta])?
+                        $enum_name::$variant(c) => c.total_bytes_buffered(),
+                    )*
                 }
             }
 
             fn prepare(&mut self) {
                 match self {
-                    $( $enum_name::$variant(c) => c.prepare(), )*
+                    $(
+                        $(#[$meta])?
+                        $enum_name::$variant(c) => c.prepare(),
+                    )*
                 }
             }
 
             fn buffers(&self) -> [&[u8]; MAX_BUFFERS] {
                 match self {
-                    $( $enum_name::$variant(c) => c.buffers(), )*
+                    $(
+                        $(#[$meta])?
+                        $enum_name::$variant(c) => c.buffers(),
+                    )*
                 }
             }
 
             fn reset(&mut self) {
                 match self {
-                    $( $enum_name::$variant(c) => c.reset(), )*
+                    $(
+                        $(#[$meta])?
+                        $enum_name::$variant(c) => c.reset(),
+                    )*
                 }
             }
         }
@@ -130,7 +152,10 @@ macro_rules! impl_generic_compressor {
         impl $enum_name {
             pub fn compression_scheme(&self) -> format::CompressionScheme {
                 match self {
-                    $( $enum_name::$variant(_c) => format::CompressionScheme::$variant, )*
+                    $(
+                        $(#[$meta])?
+                        $enum_name::$variant(_c) => format::CompressionScheme::$variant,
+                    )*
                 }
             }
         }
@@ -151,7 +176,9 @@ impl_generic_compressor!(
     DeltaSprintz,
     Zstd,
     Gzip,
-    Snappy
+    Snappy,
+    FFIAlp
+    #[cfg(feature = "ffi_alp")]
 );
 
 #[derive(QuickImpl, Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -182,14 +209,20 @@ pub enum CompressorConfig {
     Gzip(gzip::GzipCompressorConfig),
     #[quick_impl(impl From)]
     Snappy(snappy::SnappyCompressorConfig),
+    #[cfg(feature = "ffi_alp")]
+    #[quick_impl(impl From)]
+    FFIAlp(ffi_alp::FFIAlpCompressorConfig),
 }
 
 macro_rules! impl_compressor_config {
-    ($enum_name:ident, $($variant:ident),*) => {
+    ($enum_name:ident, $($variant:ident $(#[$meta:meta])?),*) => {
         impl $enum_name {
             pub fn build(self) -> GenericCompressor {
                 match self {
-                    $( $enum_name::$variant(c) => GenericCompressor::$variant(c.into()), )*
+                    $(
+                        $(#[$meta])?
+                        $enum_name::$variant(c) => GenericCompressor::$variant(c.into()),
+                    )*
                 }
             }
 
@@ -198,7 +231,10 @@ macro_rules! impl_compressor_config {
             pub fn serialized_size(&self) -> usize {
                 // 1 byte for the size of the config
                 1 + match self {
-                    $( $enum_name::$variant(c) => c.serialized_size(), )*
+                    $(
+                        $(#[$meta])?
+                        $enum_name::$variant(c) => c.serialized_size(),
+                    )*
                 }
             }
 
@@ -207,7 +243,10 @@ macro_rules! impl_compressor_config {
         impl From<&$enum_name> for CompressionScheme {
             fn from(value: &$enum_name) -> Self {
                 match value {
-                    $( $enum_name::$variant(_) => CompressionScheme::$variant, )*
+                    $(
+                        $(#[$meta])?
+                        $enum_name::$variant(_) => CompressionScheme::$variant,
+                    )*
                 }
             }
         }
@@ -227,7 +266,9 @@ impl_compressor_config!(
     DeltaSprintz,
     Zstd,
     Gzip,
-    Snappy
+    Snappy,
+    FFIAlp
+    #[cfg(feature = "ffi_alp")]
 );
 
 impl CompressorConfig {
@@ -268,6 +309,7 @@ impl CompressorConfig {
             CompressorConfig::Zstd(mut c) => just_write!(c, w),
             CompressorConfig::Gzip(mut c) => just_write!(c, w),
             CompressorConfig::Snappy(mut c) => just_write!(c, w),
+            CompressorConfig::FFIAlp(mut c) => just_write!(c, w),
         }
 
         Ok(())
@@ -302,6 +344,10 @@ impl CompressorConfig {
             CompressionScheme::Gzip => Self::Gzip(gzip::GzipCompressorConfig::from_le_bytes(bytes)),
             CompressionScheme::Snappy => {
                 Self::Snappy(snappy::SnappyCompressorConfig::from_le_bytes(bytes))
+            }
+            #[cfg(feature = "ffi_alp")]
+            CompressionScheme::FFIAlp => {
+                Self::FFIAlp(ffi_alp::FFIAlpCompressorConfig::from_le_bytes(bytes))
             }
         }
     }
@@ -354,6 +400,11 @@ impl CompressorConfig {
 
     pub fn snappy() -> snappy::SnappyCompressorConfigBuilder {
         snappy::SnappyCompressorConfigBuilder::default()
+    }
+
+    #[cfg(feature = "ffi_alp")]
+    pub fn ffi_alp() -> ffi_alp::FFIAlpCompressorConfigBuilder {
+        ffi_alp::FFIAlpCompressorConfigBuilder::default()
     }
 }
 
@@ -497,4 +548,6 @@ mod tests {
     declare_test_compressor!(zstd);
     declare_test_compressor!(gzip);
     declare_test_compressor!(snappy);
+    #[cfg(all(feature = "ffi_alp", not(miri)))]
+    declare_test_compressor!(ffi_alp);
 }
