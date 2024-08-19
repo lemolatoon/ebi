@@ -189,6 +189,7 @@ pub enum CompressionScheme {
     Zstd = 9,
     Gzip = 10,
     Snappy = 11,
+    FFIAlp = 12,
 }
 
 // =============== Chunk ===================

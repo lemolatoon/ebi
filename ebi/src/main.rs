@@ -49,9 +49,9 @@ fn generate_and_write_random_f64(path: impl AsRef<Path>, n: usize, scale: usize)
 }
 
 fn main() {
-    const RECORD_COUNT: usize = 3;
+    const RECORD_COUNT: usize = 300;
     let scale = 100;
-    // generate_and_write_random_f64("uncompressed.bin", RECORD_COUNT * 3 + 3, scale).unwrap();
+    generate_and_write_random_f64("uncompressed.bin", RECORD_COUNT * 3 + 3, scale).unwrap();
     // let compressor = GenericCompressor::Uncompressed(UncompressedCompressor::new(100));
     // let compressor_config = CompressorConfig::rle().build();
     // let compressor_config = CompressorConfig::gorilla().build();
@@ -63,7 +63,8 @@ fn main() {
     // let compressor_config = CompressorConfig::delta_sprintz()
     //     .scale(scale as u32)
     //     .build();
-    let compressor_config = CompressorConfig::zstd().build();
+    // let compressor_config = CompressorConfig::zstd().build();
+    let compressor_config = CompressorConfig::ffi_alp().build();
     let chunk_option = ChunkOption::RecordCount(RECORD_COUNT * 10 + 3);
     // let chunk_option = ChunkOption::ByteSizeBestEffort(1024 * 8);
     dbg!(chunk_option);
@@ -100,8 +101,8 @@ fn main() {
     // let binding = &[0.3];
     println!("binding: {}", binding[0]);
     let mut encoder = Encoder::new(
-        // EncoderInput::from_file_with_capacity("uncompressed.bin", 1024 * 16).unwrap(),
-        EncoderInput::from_f64_slice(binding),
+        EncoderInput::from_file("uncompressed.bin").unwrap(),
+        // EncoderInput::from_f64_slice(binding),
         EncoderOutput::from_file("compressed.bin").unwrap(),
         chunk_option,
         compressor_config,

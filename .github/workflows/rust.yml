@@ -16,6 +16,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          submodules: true
       - name: Cache cargo registry
         uses: actions/cache@v4
         with:
@@ -38,6 +40,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          submodules: true
       - name: Cache cargo registry
         uses: actions/cache@v4
         with:
@@ -64,6 +68,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          submodules: true
       - name: Cache cargo registry
         uses: actions/cache@v4
         with:
@@ -98,6 +104,8 @@ jobs:
         partition: [1, 2, 3]
     steps:
       - uses: actions/checkout@v4
+        with:
+          submodules: true
       # Create ~/.cargo/bin as required by the install action.
       - run: mkdir -p ~/.cargo/bin
       - name: Install nextest

@@ -2,6 +2,8 @@ pub mod buff;
 pub mod chimp;
 pub mod chimp_n;
 pub mod elf;
+#[cfg(feature = "ffi_alp")]
+pub mod ffi_alp;
 pub mod general_xor;
 pub mod gorilla;
 pub mod gzip;
@@ -164,6 +166,8 @@ pub enum GeneralChunkReaderInner<R: Read> {
     Zstd(zstd::ZstdReader<R>),
     Gzip(gzip::GzipReader<R>),
     Snappy(snappy::SnappyReader<R>),
+    #[cfg(feature = "ffi_alp")]
+    FFIAlp(ffi_alp::FFIAlpReader<R>),
 }
 
 impl<R: Read> GeneralChunkReaderInner<R> {
@@ -208,6 +212,10 @@ impl<R: Read> GeneralChunkReaderInner<R> {
             }
             CompressionScheme::Snappy => {
                 GeneralChunkReaderInner::Snappy(snappy::SnappyReader::new(handle, reader))
+            }
+            #[cfg(feature = "ffi_alp")]
+            CompressionScheme::FFIAlp => {
+                GeneralChunkReaderInner::FFIAlp(ffi_alp::FFIAlpReader::new(handle, reader))
             }
         })
     }
@@ -271,37 +279,52 @@ pub enum GeneralDecompressIterator<'a> {
 }
 
 macro_rules! impl_generic_reader {
-    ($enum_name:ident, $($variant:ident),*) => {
+    ($enum_name:ident, $($variant:ident $(#[$meta:meta])?),*) => {
         impl<R: Read> $enum_name<R> {
             /// Decompress the whole chunk and return the slice of the decompressed values.
             pub fn decompress(&mut self) -> decoder::Result<&[f64]> {
                 match self {
-                    $( $enum_name::$variant(c) => c.decompress(), )*
+                    $(
+                        $(#[$meta])?
+                        $enum_name::$variant(c) => c.decompress(),
+                    )*
                 }
             }
 
             /// Returns `impl Iterator<Item = io::Result<f64>>`, which decompresses the chunk iteratively.
             pub fn decompress_iter(&mut self) -> decoder::Result<GeneralDecompressIterator<'_>> {
                 match self {
-                    $( $enum_name::$variant(c) => c.decompress_iter().map(|c| c.into()), )*
+                    $(
+                        $(#[$meta])?
+                        $enum_name::$variant(c) => c.decompress_iter().map(|c| c.into()),
+                    )*
                 }
             }
 
             pub fn set_decompress_result(&mut self, data: Vec<f64>) -> &[f64] {
                 match self {
-                    $( $enum_name::$variant(c) => c.set_decompress_result(data), )*
+                    $(
+                        $(#[$meta])?
+                        $enum_name::$variant(c) => c.set_decompress_result(data),
+                    )*
                 }
             }
 
             pub fn decompress_result(&mut self) -> Option<&[f64]> {
                 match self {
-                    $( $enum_name::$variant(c) => c.decompress_result(), )*
+                    $(
+                        $(#[$meta])?
+                        $enum_name::$variant(c) => c.decompress_result(),
+                    )*
                 }
             }
 
             pub fn header_size(&self) -> usize {
                 match self {
-                    $( $enum_name::$variant(c) => c.header_size(), )*
+                    $(
+                        $(#[$meta])?
+                        $enum_name::$variant(c) => c.header_size(),
+                    )*
                 }
             }
 
@@ -318,7 +341,10 @@ macro_rules! impl_generic_reader {
                 logical_offset: usize,
             ) -> Result<()> {
                 match self {
-                    $( $enum_name::$variant(c) => c.materialize(output, bitmask, logical_offset), )*
+                    $(
+                        $(#[$meta])?
+                        $enum_name::$variant(c) => c.materialize(output, bitmask, logical_offset),
+                    )*
                 }
             }
 
@@ -337,7 +363,10 @@ macro_rules! impl_generic_reader {
                 logical_offset: usize,
             ) -> Result<RoaringBitmap> {
                 match self {
-                    $( $enum_name::$variant(c) => c.filter(predicate, bitmask, logical_offset), )*
+                    $(
+                        $(#[$meta])?
+                        $enum_name::$variant(c) => c.filter(predicate, bitmask, logical_offset),
+                    )*
                 }
             }
 
@@ -355,7 +384,10 @@ macro_rules! impl_generic_reader {
                 logical_offset: usize,
             ) -> Result<()> {
                 match self {
-                    $( $enum_name::$variant(c) => c.filter_materialize(output, predicate, bitmask, logical_offset), )*
+                    $(
+                        $(#[$meta])?
+                        $enum_name::$variant(c) => c.filter_materialize(output, predicate, bitmask, logical_offset),
+                    )*
                 }
             }
 
@@ -370,7 +402,10 @@ macro_rules! impl_generic_reader {
                 logical_offset: usize,
             ) -> Result<f64> {
                 match self {
-                    $( $enum_name::$variant(c) => c.sum(bitmask, logical_offset), )*
+                    $(
+                        $(#[$meta])?
+                        $enum_name::$variant(c) => c.sum(bitmask, logical_offset),
+                    )*
                 }
             }
 
@@ -385,7 +420,10 @@ macro_rules! impl_generic_reader {
                 logical_offset: usize,
             ) -> Result<f64> {
                 match self {
-                    $( $enum_name::$variant(c) => c.min(bitmask, logical_offset), )*
+                    $(
+                        $(#[$meta])?
+                        $enum_name::$variant(c) => c.min(bitmask, logical_offset),
+                    )*
                 }
             }
 
@@ -400,7 +438,10 @@ macro_rules! impl_generic_reader {
                 logical_offset: usize,
             ) -> Result<f64> {
                 match self {
-                    $( $enum_name::$variant(c) => c.max(bitmask, logical_offset), )*
+                    $(
+                        $(#[$meta])?
+                        $enum_name::$variant(c) => c.max(bitmask, logical_offset),
+                    )*
                 }
             }
         }
@@ -408,7 +449,10 @@ macro_rules! impl_generic_reader {
         impl<R: Read> From<&$enum_name<R>> for CompressionScheme {
             fn from(value: &$enum_name<R>) -> Self {
                 match value {
-                    $( $enum_name::$variant(_) => CompressionScheme::$variant, )*
+                    $(
+                        $(#[$meta])?
+                        $enum_name::$variant(_) => CompressionScheme::$variant,
+                    )*
                 }
             }
         }
@@ -428,7 +472,9 @@ impl_generic_reader!(
     DeltaSprintz,
     Zstd,
     Gzip,
-    Snappy
+    Snappy,
+    FFIAlp
+    #[cfg(feature = "ffi_alp")]
 );
 
 #[cfg(test)]
@@ -604,6 +650,8 @@ mod tests {
     declare_test_reader!(zstd);
     declare_test_reader!(gzip);
     declare_test_reader!(snappy);
+    #[cfg(all(feature = "ffi_alp", not(miri)))]
+    declare_test_reader!(ffi_alp);
 
     #[test]
     fn test_buff() {

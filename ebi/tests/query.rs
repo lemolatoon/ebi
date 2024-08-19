@@ -1201,6 +1201,8 @@ declare_query_tests!(elf);
 declare_query_tests!(zstd);
 declare_query_tests!(gzip);
 declare_query_tests!(snappy);
+#[cfg(all(feature = "ffi_alp", not(miri)))]
+declare_query_tests!(ffi_alp);
 
 #[test]
 fn test_delta_sprintz_filter() {
