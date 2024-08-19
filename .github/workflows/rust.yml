@@ -58,7 +58,7 @@ jobs:
         uses: taiki-e/install-action@nextest
 
       - name: Run Miri test
-        run: cargo +nightly miri nextest run --verbose
+        run: MIRIFLAGS="-Zmiri-disable-isolation" cargo +nightly miri nextest run --verbose
   
   upload-test-artifacts:
     runs-on: ubuntu-latest

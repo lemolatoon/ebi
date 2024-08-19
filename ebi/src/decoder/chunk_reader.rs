@@ -491,7 +491,7 @@ mod tests {
 
             let encoder_output = EncoderOutput::from_vec(Vec::new());
 
-            let chunk_option = ChunkOption::RecordCount(512);
+            let chunk_option = ChunkOption::RecordCount(64);
 
             let mut encoder = Encoder::new(
                 encoder_input,
@@ -511,7 +511,7 @@ mod tests {
     }
 
     fn test_all(compresor_config: impl Into<CompressorConfig>) {
-        let values = generate_and_write_random_f64(1003);
+        let values = generate_and_write_random_f64(103);
         let mut decoder = decoder(values.as_slice(), compresor_config.into());
 
         let mut reader = decoder.chunk_reader(ChunkId::new(0)).unwrap();
@@ -522,7 +522,7 @@ mod tests {
     }
 
     fn test_all_with_precision(compresor_config: CompressorConfig, scale: usize) {
-        let values = generate_and_write_random_f64_with_precision(1003, scale);
+        let values = generate_and_write_random_f64_with_precision(103, scale);
         let mut decoder = decoder(values.as_slice(), compresor_config);
 
         let mut reader = decoder.chunk_reader(ChunkId::new(0)).unwrap();

@@ -1,6 +1,16 @@
 use ebi::compressor::CompressorConfig;
 
 #[cfg(test)]
+pub fn is_in_github_actions() -> bool {
+    std::env::var("GITHUB_ACTIONS").as_deref() == Ok("true")
+}
+
+#[cfg(test)]
+pub const fn using_miri() -> bool {
+    cfg!(miri)
+}
+
+#[cfg(test)]
 mod helper {
     use ebi::api::decoder::ChunkId;
     use ebi::compressor::CompressorConfig;
@@ -23,6 +33,8 @@ mod helper {
         encoder::ChunkOption,
     };
     use roaring::RoaringBitmap;
+
+    use super::{is_in_github_actions, using_miri};
 
     #[allow(clippy::too_many_arguments)]
     fn test_query_filter_inner(
@@ -930,6 +942,10 @@ mod helper {
     ) {
         let config = config.into();
         test_query_filter_optionally_materialize(config, test_name.clone(), false, round_scale);
+        if is_in_github_actions() && using_miri() {
+            // Skip random test in CI if using miri
+            return;
+        }
         test_query_filter_optionally_materialize_random(
             config,
             test_name,
@@ -951,6 +967,10 @@ mod helper {
     ) {
         let config = config.into();
         test_query_filter_optionally_materialize(config, test_name.clone(), true, round_scale);
+        if is_in_github_actions() && using_miri() {
+            // Skip random test in CI if using miri
+            return;
+        }
         test_query_filter_optionally_materialize_random(
             config,
             test_name,
@@ -1115,18 +1135,49 @@ macro_rules! declare_query_tests {
             #[test]
             fn test_filter() {
                 let config = $config;
+                if $crate::is_in_github_actions()
+                    && $crate::using_miri()
+                    && matches!(
+                        stringify!($method),
+                        "gzip" | "chimp128" | "elf" | "elf_on_chimp"
+                    )
+                {
+                    // Skip slow test in CI if using miri
+                    return;
+                }
                 super::helper::test_query_filter(config, None, None, None, stringify!($method));
             }
 
             #[test]
             fn test_materialize() {
                 let config = $config;
+                if $crate::is_in_github_actions()
+                    && $crate::using_miri()
+                    && matches!(
+                        stringify!($method),
+                        "gzip" | "chimp128" | "elf" | "elf_on_chimp"
+                    )
+                {
+                    // Skip slow test in CI if using miri
+                    return;
+                }
                 super::helper::test_query_materialize(config, None, stringify!($method));
             }
 
             #[test]
             fn test_filter_materialize() {
                 let config = $config;
+
+                if $crate::is_in_github_actions()
+                    && $crate::using_miri()
+                    && matches!(
+                        stringify!($method),
+                        "gzip" | "chimp128" | "elf" | "elf_on_chimp"
+                    )
+                {
+                    // Skip slow test in CI if using miri
+                    return;
+                }
                 super::helper::test_query_filter_materialize(
                     config,
                     None,
