@@ -1,13 +1,14 @@
 use experimenter::{
-    AllOutput, AllOutputInner, CompressStatistics, CompressionConfig, FilterConfig,
-    FilterFamilyOutput, FilterMaterializeConfig, MaterializeConfig, Output, OutputWrapper,
+    get_appropriate_scale, AllOutput, AllOutputInner, CompressStatistics, CompressionConfig,
+    FilterConfig, FilterFamilyOutput, FilterMaterializeConfig, MaterializeConfig, Output,
+    OutputWrapper,
 };
 use glob::glob;
 use std::{
     collections::{HashMap, HashSet},
     ffi::OsStr,
     fs::{self, File},
-    io::{self, BufRead as _, BufReader, Read, Seek, Write as _},
+    io::{self, BufReader, Read, Seek, Write as _},
     iter::{self},
     path::{Path, PathBuf},
 };
@@ -289,6 +290,29 @@ fn all_command(args: AllArgs) -> anyhow::Result<AllOutput> {
         })
         .collect::<Vec<_>>();
 
+    let csv_dir = binary_dir.parent().unwrap();
+    let stem_to_csv_entry = fs::read_dir(csv_dir)
+        .context(format!("Failed to read directory: {}", csv_dir.display()))?
+        .filter_map(|e| {
+            let e = e.ok()?;
+            let path = e.path();
+            if path.is_file()
+                && matches!(
+                    path.extension().and_then(|s| s.to_str()),
+                    Some("csv" | "txt") | None
+                )
+            {
+                Some(path)
+            } else {
+                None
+            }
+        })
+        .map(|path| {
+            let stem = path.file_stem().unwrap().to_owned();
+            (stem, path)
+        })
+        .collect::<HashMap<_, _>>();
+
     let mut skip_files = HashSet::new();
     // Create Config!
     if create_config {
@@ -308,23 +332,10 @@ fn all_command(args: AllArgs) -> anyhow::Result<AllOutput> {
                 skip_files.insert(binary_file_stem.to_string_lossy().to_string());
                 continue;
             }
-            let parent_dir = binary_file.parent().unwrap().parent().unwrap();
-            let csv_path = fs::read_dir(parent_dir)?
-                .find_map(|entry| {
-                    let entry = entry.ok()?;
-                    let path = entry.path();
-                    if path.is_file()
-                        && matches!(
-                            path.extension().and_then(|s| s.to_str()),
-                            Some("csv" | "txt") | None
-                        )
-                    {
-                        Some(path)
-                    } else {
-                        None
-                    }
-                })
-                .context("Failed to find csv file")?;
+            let csv_path = stem_to_csv_entry.get(binary_file_stem).context(format!(
+                "Failed to get csv path, stem: {}",
+                binary_file_stem.to_string_lossy()
+            ))?;
             if let Err(e) =
                 create_default_compressor_config(csv_path.as_path(), Some(compressor_config_dir))
             {
@@ -336,6 +347,7 @@ fn all_command(args: AllArgs) -> anyhow::Result<AllOutput> {
             }
         }
     }
+    drop(stem_to_csv_entry);
 
     fn check_result_already_exist(
         save_dir: impl AsRef<Path>,
@@ -538,69 +550,15 @@ fn get_compress_statistics<R: Read + Seek>(
     })
 }
 
-/// # Examples
-/// ```rust
-/// assert_eq!(decimal_places("1.0"), 1);
-/// assert_eq!(decimal_places("1.0e-1"), 2);
-/// assert_eq!(decimal_places("3.33", 2));
-/// assert_eq!(decimal_places("100", 0));
-/// assert_eq!(decimal_places("10e-18", 18));
-/// assert_eq!(decimal_places("1.234e-3", 6));
-/// assert_eq!(decimal_places("1e3", 0));
-/// ```
-fn decimal_places(s: &str) -> usize {
-    if let Some(e_pos) = s.find('e') {
-        let (base, exponent) = s.split_at(e_pos);
-        let exponent_value: i32 = exponent[1..].parse().unwrap_or(0);
-
-        if let Some(dot_pos) = base.find('.') {
-            let decimal_length = base.len() - dot_pos - 1;
-            (decimal_length as i32 - exponent_value).max(0) as usize
-        } else if exponent_value < 0 {
-            (-exponent_value) as usize
-        } else {
-            0
-        }
-    } else if let Some(dot_pos) = s.find('.') {
-        s.len() - dot_pos - 1
-    } else {
-        0
-    }
-}
-
-fn get_appropriate_scale(filename: impl AsRef<Path>) -> anyhow::Result<Option<u32>> {
-    let reader = BufReader::new(File::open(filename.as_ref()).context(format!(
-        "Failed to open file.: {}",
-        filename.as_ref().display()
-    ))?);
-    let mut decimal_position = 0;
-    for line in reader.lines() {
-        let line = line.context("Failed to read line")?;
-        let max_decimal_position = line
-            .split(',')
-            .filter_map(|s| {
-                if s.is_empty() {
-                    None
-                } else {
-                    let s = s.trim();
-                    Some(decimal_places(s))
-                }
-            })
-            .max();
-
-        if let Some(max_scale) = max_decimal_position {
-            decimal_position = decimal_position.max(max_scale);
-        }
-    }
-
-    Ok(10u32.checked_pow(decimal_position as u32))
-}
-
 fn create_default_compressor_config(
     filename: impl AsRef<Path>,
     output_dir: Option<PathBuf>,
 ) -> anyhow::Result<()> {
-    let scale = get_appropriate_scale(filename.as_ref())?;
+    let reader = BufReader::new(File::open(filename.as_ref()).context(format!(
+        "Failed to open file.: {}",
+        filename.as_ref().display()
+    ))?);
+    let scale = get_appropriate_scale(reader);
     let mut configs: Vec<(&'static str, CompressorConfig)> = vec![
         (
             "uncompressed",
@@ -620,20 +578,24 @@ fn create_default_compressor_config(
         ("snappy", CompressorConfig::snappy().build().into()),
         ("ffi_alp", CompressorConfig::ffi_alp().build().into()),
     ];
-    if let Some(scale) = scale {
-        configs.push((
-            "delta_sprintz",
-            CompressorConfig::delta_sprintz()
-                .scale(scale)
-                .build()
-                .into(),
-        ));
-        configs.push(("buff", CompressorConfig::buff().scale(scale).build().into()));
-    } else {
-        println!(
-            "Failed to get appropriate scale for {}",
-            filename.as_ref().display()
-        );
+    match scale {
+        Ok(scale) => {
+            configs.push((
+                "delta_sprintz",
+                CompressorConfig::delta_sprintz()
+                    .scale(scale)
+                    .build()
+                    .into(),
+            ));
+            configs.push(("buff", CompressorConfig::buff().scale(scale).build().into()));
+        }
+        Err(e) => {
+            println!(
+                "Failed to get appropriate scale for {}\n{}",
+                filename.as_ref().display(),
+                e
+            );
+        }
     }
     let configs = configs.into_iter().map(|(name, config)| {
         (
