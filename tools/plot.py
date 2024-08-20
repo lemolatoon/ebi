@@ -87,8 +87,16 @@ def plot_comparison(
     output_path,
     max_value=None,
 ):
+    # Remove None values
+    filtered_labels_data = [
+        (label, value) for label, value in zip(labels, data) if value is not None
+    ]
+
+    # Unzip the filtered list back into labels and data
+    filtered_labels, filtered_data = zip(*filtered_labels_data)
+
     plt.figure(figsize=(12, 8))
-    plt.bar(x=labels, height=data, color="blue")
+    plt.bar(x=filtered_labels, height=filtered_data, color="blue")
     plt.ylim(0, max_value)
     plt.title(title)
     plt.xlabel("Compression Method")
@@ -130,6 +138,7 @@ compression_methods = [
     "Zstd",
     "Gzip",
     "Snappy",
+    "FFIAlp",
 ]
 
 
@@ -236,6 +245,91 @@ def main():
         for key in ["eq", "ne", "greater"]
     }
 
+    # dataset-wise plot_comparison
+
+    for dataset_index, dataset_name in enumerate(tqdm(dataset_names)):
+        dataset_out_dir = os.path.join(out_dir, dataset_name)
+        os.makedirs(dataset_out_dir, exist_ok=True)
+        plot_comparison(
+            compression_ratios_df.columns,
+            compression_ratios_df.row(dataset_index),
+            f"{dataset_name}: Compression Ratio",
+            "Compression Ratio (smaller, better)",
+            os.path.join(
+                dataset_out_dir,
+                f"compression_ratios.png",
+            ),
+            max_value=1.1,
+        )
+        plot_comparison(
+            compression_throughput_df.columns,
+            compression_throughput_df.row(dataset_index),
+            f"{dataset_name}: Compression Throughput",
+            "Throughput (GB/s)",
+            os.path.join(
+                dataset_out_dir,
+                f"compression_throughputs.png",
+            ),
+        )
+        dataset_filter_dir = os.path.join(dataset_out_dir, "filter")
+        os.makedirs(dataset_filter_dir, exist_ok=True)
+        for filter_name in ["eq", "ne", "greater"]:
+            plot_comparison(
+                filter_throughput_dfs[filter_name].columns,
+                filter_throughput_dfs[filter_name].row(dataset_index),
+                f"{dataset_name}: {
+                    filter_name} Filter Throughput (bigger, better)",
+                "Throughput (GB/s)",
+                os.path.join(
+                    dataset_filter_dir,
+                    f"{filter_name}_filter_elapsed_seconds.png",
+                ),
+            )
+            plot_comparison(
+                filter_materialize_throughput_dfs[filter_name].columns,
+                filter_materialize_throughput_dfs[filter_name].row(dataset_index),
+                f"{dataset_name}: {
+                    filter_name} Filter Materialize Throughput (bigger, better)",
+                "Throughput (GB/s)",
+                os.path.join(
+                    dataset_filter_dir,
+                    f"{
+                        filter_name}_filter_materialize_elapsed_seconds.png",
+                ),
+            )
+
+        plot_comparison(
+            decompression_throughput_df.columns,
+            decompression_throughput_df.row(dataset_index),
+            f"{dataset_name}: Decompression(Materialize) Throughput (bigger, better)",
+            "Throughput (GB/s)",
+            os.path.join(
+                dataset_out_dir,
+                f"materialize_elapsed_seconds.png",
+            ),
+        )
+
+    # filter for all rows making sure there are no null values
+    # as preparing the average plots
+    compression_ratios_df = compression_ratios_df.filter(
+        pl.all_horizontal(pl.col("*").is_not_null())
+    )
+    compression_throughput_df = compression_throughput_df.filter(
+        pl.all_horizontal(pl.col("*").is_not_null())
+    )
+    decompression_throughput_df = decompression_throughput_df.filter(
+        pl.all_horizontal(pl.col("*").is_not_null())
+    )
+    for filter_name in ["eq", "ne", "greater"]:
+        filter_throughput_dfs[filter_name] = filter_throughput_dfs[filter_name].filter(
+            pl.all_horizontal(pl.col("*").is_not_null())
+        )
+        filter_materialize_throughput_dfs[filter_name] = (
+            filter_materialize_throughput_dfs[
+                filter_name
+            ].filter(pl.all_horizontal(pl.col("*").is_not_null()))
+        )
+
     barchart_dir = os.path.join(out_dir, "barchart")
     boxplot_dir = os.path.join(out_dir, "boxplot")
     os.makedirs(barchart_dir, exist_ok=True)
@@ -300,70 +394,6 @@ def main():
             os.path.join(
                 os.path.join(barchart_dir, "filter"),
                 f"average_{filter_name}_filter_materialize_throughput.png",
-            ),
-        )
-
-    # dataset-wise plot_comparison
-    for dataset_index, dataset_name in enumerate(tqdm(dataset_names)):
-        dataset_out_dir = os.path.join(out_dir, dataset_name)
-        os.makedirs(dataset_out_dir, exist_ok=True)
-        plot_comparison(
-            compression_ratios_df.columns,
-            compression_ratios_df.row(dataset_index),
-            f"{dataset_name}: Compression Ratio",
-            "Compression Ratio (smaller, better)",
-            os.path.join(
-                dataset_out_dir,
-                f"compression_ratios.png",
-            ),
-            max_value=1.1,
-        )
-        plot_comparison(
-            compression_throughput_df.columns,
-            compression_throughput_df.row(dataset_index),
-            f"{dataset_name}: Compression Throughput",
-            "Throughput (GB/s)",
-            os.path.join(
-                dataset_out_dir,
-                f"compression_throughputs.png",
-            ),
-        )
-        dataset_filter_dir = os.path.join(dataset_out_dir, "filter")
-        os.makedirs(dataset_filter_dir, exist_ok=True)
-        for filter_name in ["eq", "ne", "greater"]:
-            plot_comparison(
-                filter_throughput_dfs[filter_name].columns,
-                filter_throughput_dfs[filter_name].row(dataset_index),
-                f"{dataset_name}: {
-                    filter_name} Filter Throughput (bigger, better)",
-                "Throughput (GB/s)",
-                os.path.join(
-                    dataset_filter_dir,
-                    f"{filter_name}_filter_elapsed_seconds.png",
-                ),
-            )
-            plot_comparison(
-                filter_materialize_throughput_dfs[filter_name].columns,
-                filter_materialize_throughput_dfs[filter_name].row(
-                    dataset_index),
-                f"{dataset_name}: {
-                    filter_name} Filter Materialize Throughput (bigger, better)",
-                "Throughput (GB/s)",
-                os.path.join(
-                    dataset_filter_dir,
-                    f"{
-                        filter_name}_filter_materialize_elapsed_seconds.png",
-                ),
-            )
-
-        plot_comparison(
-            decompression_throughput_df.columns,
-            decompression_throughput_df.row(dataset_index),
-            f"{dataset_name}: Decompression(Materialize) Throughput (bigger, better)",
-            "Throughput (GB/s)",
-            os.path.join(
-                dataset_out_dir,
-                f"materialize_elapsed_seconds.png",
             ),
         )
 
