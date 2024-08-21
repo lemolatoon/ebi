@@ -381,7 +381,7 @@ mod internal {
             qualified_bitmask: &mut RoaringBitmap,
         ) -> RoaringBitmap {
             if simd_chunk.is_empty() {
-                return to_check_bitmask.clone();
+                return RoaringBitmap::new();
             }
             debug_assert_eq!(simd_chunk.len() % 32, 0);
             debug_assert_eq!(logical_offset % 8, 0);

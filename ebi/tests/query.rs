@@ -622,6 +622,27 @@ mod helper {
                     "{query_name} Random failure Eq simd (low selectivity, 2 chunks)"
                 )),
             );
+
+            // Test 5: Random Failure Range
+            let values = [
+                5714.14, 5710.09, 5718.45, 5712.45, 5714.98, 5715.13, 5717.12, 5714.03, 5712.14,
+                5714.21, 5716.51,
+            ];
+            let predicate =
+                Predicate::Range(Range::new(RangeValue::Inclusive(5715.88), RangeValue::None));
+            let expected = RoaringBitmap::from_iter(vec![10]);
+            let bitmask = RoaringBitmap::from_iter(vec![0, 3, 5, 8, 9, 10]);
+            let chunk_option = ChunkOption::ByteSizeBestEffort(5274);
+            test_fn(
+                config,
+                values.to_vec(),
+                chunk_option,
+                predicate,
+                Some(&bitmask),
+                None,
+                expected,
+                t_name(format!("Test 5: {query_name} Random failure Range")),
+            );
         }
 
         // Filter Arguments
