@@ -282,6 +282,22 @@ mod helper {
 
         // Range filter
         {
+            // Test 1.0: Range filter (Inclusive, None)
+            let values = vec![-300.3, -5.6, -3.8, -699.7, 2.1, 9.9, 100.1];
+            let predicate =
+                Predicate::Range(Range::new(RangeValue::Inclusive(-3.8), RangeValue::None));
+            let expected = RoaringBitmap::from_iter(vec![2, 4, 5, 6]);
+            test_fn(
+                config,
+                values,
+                ChunkOption::RecordCount(5),
+                predicate,
+                None,
+                None,
+                expected,
+                t_name(format!("Test 1.0: Range {query_name} (Inclusive, None)")),
+            );
+
             // Test 1: Range filter (Inclusive, Inclusive)
             let values = vec![-300.3, -5.6, -3.8, -699.7, 2.1, 9.9, 100.1];
             let predicate = Predicate::Range(Range::new(
