@@ -199,6 +199,7 @@ mod internal {
     pub(crate) mod query {
 
         use roaring::RoaringBitmap;
+        #[cfg(all(target_arch = "x86_64", not(miri)))]
         use simd_x86_64::{equal_simd, greater_simd, less_simd};
 
         use crate::compression_common::buff::{
@@ -211,6 +212,7 @@ mod internal {
         #[cfg(all(target_arch = "x86_64", not(miri)))]
         const SIMD_THRESHOLD: f64 = 0.06;
 
+        #[cfg(all(target_arch = "x86_64", not(miri)))]
         #[inline]
         fn split_for_simd_processing(chunk: &[u8], logical_offset: u32) -> (&[u8], &[u8], &[u8]) {
             let offset = logical_offset as usize;
@@ -282,6 +284,7 @@ mod internal {
         }
 
         /// Modify `to_check_bitmask` and `qualified_bitmask`
+        #[cfg(all(target_arch = "x86_64", not(miri)))]
         #[inline]
         fn buff_simd256_cmp_filter_subcolumn_without_bitmask_simd<
             const IS_GREATER: bool,
@@ -331,46 +334,48 @@ mod internal {
             qualified_bitmask: &mut RoaringBitmap,
         ) -> RoaringBitmap {
             let mut to_check_bitmask = RoaringBitmap::new();
-            if cfg!(any(not(target_arch = "x86_64"), miri)) {
-                // simd
-                let (initial_part, simd_part, remaining_part) =
-                    split_for_simd_processing(chunk, logical_offset);
-                let mut to_check_bitmask = RoaringBitmap::new();
-                buff_simd256_cmp_filter_subcolumn_without_bitmask_nonsimd::<IS_GREATER, INCLUSIVE>(
-                    initial_part,
-                    logical_offset,
-                    delta_fixed_pred_subcolumn,
-                    &mut to_check_bitmask,
-                    qualified_bitmask,
-                );
-                buff_simd256_cmp_filter_subcolumn_without_bitmask_simd::<IS_GREATER, INCLUSIVE>(
-                    simd_part,
-                    logical_offset + initial_part.len() as u32,
-                    delta_fixed_pred_subcolumn,
-                    &mut to_check_bitmask,
-                    qualified_bitmask,
-                );
-                buff_simd256_cmp_filter_subcolumn_without_bitmask_nonsimd::<IS_GREATER, INCLUSIVE>(
-                    remaining_part,
-                    logical_offset + initial_part.len() as u32 + simd_part.len() as u32,
-                    delta_fixed_pred_subcolumn,
-                    &mut to_check_bitmask,
-                    qualified_bitmask,
-                );
-            } else {
-                // nonsimd
-                buff_simd256_cmp_filter_subcolumn_without_bitmask_nonsimd::<IS_GREATER, INCLUSIVE>(
-                    chunk,
-                    logical_offset,
-                    delta_fixed_pred_subcolumn,
-                    &mut to_check_bitmask,
-                    qualified_bitmask,
-                );
+            cfg_if! {
+                if #[cfg(all(target_arch = "x86_64", not(miri)))] {
+                    // simd
+                    let (initial_part, simd_part, remaining_part) =
+                        split_for_simd_processing(chunk, logical_offset);
+                    buff_simd256_cmp_filter_subcolumn_without_bitmask_nonsimd::<IS_GREATER, INCLUSIVE>(
+                        initial_part,
+                        logical_offset,
+                        delta_fixed_pred_subcolumn,
+                        &mut to_check_bitmask,
+                        qualified_bitmask,
+                    );
+                    buff_simd256_cmp_filter_subcolumn_without_bitmask_simd::<IS_GREATER, INCLUSIVE>(
+                        simd_part,
+                        logical_offset + initial_part.len() as u32,
+                        delta_fixed_pred_subcolumn,
+                        &mut to_check_bitmask,
+                        qualified_bitmask,
+                    );
+                    buff_simd256_cmp_filter_subcolumn_without_bitmask_nonsimd::<IS_GREATER, INCLUSIVE>(
+                        remaining_part,
+                        logical_offset + initial_part.len() as u32 + simd_part.len() as u32,
+                        delta_fixed_pred_subcolumn,
+                        &mut to_check_bitmask,
+                        qualified_bitmask,
+                    );
+                } else {
+                    // nonsimd
+                    buff_simd256_cmp_filter_subcolumn_without_bitmask_nonsimd::<IS_GREATER, INCLUSIVE>(
+                        chunk,
+                        logical_offset,
+                        delta_fixed_pred_subcolumn,
+                        &mut to_check_bitmask,
+                        qualified_bitmask,
+                    );
+                }
             }
 
             to_check_bitmask
         }
 
+        #[cfg(all(target_arch = "x86_64", not(miri)))]
         #[inline]
         fn buff_simd256_cmp_filter_subcolumn_with_bitmask_simd<
             const IS_GREATER: bool,
@@ -458,62 +463,73 @@ mod internal {
             const INCLUSIVE: bool,
         >(
             chunk: &[u8],
-            number_of_records: u32,
+            #[allow(unused_variables)] number_of_records: u32,
             logical_offset: u32,
             delta_fixed_pred_subcolumn: u8,
             to_check_bitmask: &RoaringBitmap,
             qualified_bitmask: &mut RoaringBitmap,
         ) -> RoaringBitmap {
-            let cardinality = to_check_bitmask.len() as f64 / number_of_records as f64;
-            let use_simd =
-                cfg!(all(target_arch = "x86_64", not(miri))) && cardinality > SIMD_THRESHOLD;
-            if use_simd {
-                let (initial_part, simd_part, remaining_part) =
-                    split_for_simd_processing(chunk, logical_offset);
-                let next_to_check_bitmask0 = buff_simd256_cmp_filter_subcolumn_with_bitmask_nonsimd::<
-                    IS_GREATER,
-                    INCLUSIVE,
-                >(
-                    initial_part,
-                    logical_offset,
-                    delta_fixed_pred_subcolumn,
-                    to_check_bitmask
-                        .iter()
-                        .take_while(|&x| x < logical_offset + initial_part.len() as u32),
-                    qualified_bitmask,
-                );
-                let next_to_check_bitmask1 =
-                    buff_simd256_cmp_filter_subcolumn_with_bitmask_simd::<IS_GREATER, INCLUSIVE>(
-                        simd_part,
-                        logical_offset + initial_part.len() as u32,
-                        delta_fixed_pred_subcolumn,
-                        to_check_bitmask,
-                        qualified_bitmask,
-                    );
-                let remaining_logical_offset =
-                    logical_offset + initial_part.len() as u32 + simd_part.len() as u32;
-                let next_to_check_bitmask2 = buff_simd256_cmp_filter_subcolumn_with_bitmask_nonsimd::<
-                    IS_GREATER,
-                    INCLUSIVE,
-                >(
-                    remaining_part,
-                    remaining_logical_offset,
-                    delta_fixed_pred_subcolumn,
-                    to_check_bitmask
-                        .iter()
-                        .skip_while(|&x| x < remaining_logical_offset),
-                    qualified_bitmask,
-                );
+            cfg_if! {
+                if #[cfg(all(target_arch = "x86_64", not(miri)))] {
+                    let cardinality = to_check_bitmask.len() as f64 / number_of_records as f64;
+                    let use_simd = cardinality > SIMD_THRESHOLD;
+                    if use_simd {
+                        let (initial_part, simd_part, remaining_part) =
+                            split_for_simd_processing(chunk, logical_offset);
+                        let next_to_check_bitmask0 = buff_simd256_cmp_filter_subcolumn_with_bitmask_nonsimd::<
+                            IS_GREATER,
+                            INCLUSIVE,
+                        >(
+                            initial_part,
+                            logical_offset,
+                            delta_fixed_pred_subcolumn,
+                            to_check_bitmask
+                                .iter()
+                                .take_while(|&x| x < logical_offset + initial_part.len() as u32),
+                            qualified_bitmask,
+                        );
+                        let next_to_check_bitmask1 =
+                            buff_simd256_cmp_filter_subcolumn_with_bitmask_simd::<IS_GREATER, INCLUSIVE>(
+                                simd_part,
+                                logical_offset + initial_part.len() as u32,
+                                delta_fixed_pred_subcolumn,
+                                to_check_bitmask,
+                                qualified_bitmask,
+                            );
+                        let remaining_logical_offset =
+                            logical_offset + initial_part.len() as u32 + simd_part.len() as u32;
+                        let next_to_check_bitmask2 = buff_simd256_cmp_filter_subcolumn_with_bitmask_nonsimd::<
+                            IS_GREATER,
+                            INCLUSIVE,
+                        >(
+                            remaining_part,
+                            remaining_logical_offset,
+                            delta_fixed_pred_subcolumn,
+                            to_check_bitmask
+                                .iter()
+                                .skip_while(|&x| x < remaining_logical_offset),
+                            qualified_bitmask,
+                        );
 
-                next_to_check_bitmask0 | next_to_check_bitmask1 | next_to_check_bitmask2
-            } else {
-                buff_simd256_cmp_filter_subcolumn_with_bitmask_nonsimd::<IS_GREATER, INCLUSIVE>(
-                    chunk,
-                    logical_offset,
-                    delta_fixed_pred_subcolumn,
-                    to_check_bitmask.iter(),
-                    qualified_bitmask,
-                )
+                        next_to_check_bitmask0 | next_to_check_bitmask1 | next_to_check_bitmask2
+                    } else {
+                        buff_simd256_cmp_filter_subcolumn_with_bitmask_nonsimd::<IS_GREATER, INCLUSIVE>(
+                            chunk,
+                            logical_offset,
+                            delta_fixed_pred_subcolumn,
+                            to_check_bitmask.iter(),
+                            qualified_bitmask,
+                        )
+                    }
+                } else {
+                    buff_simd256_cmp_filter_subcolumn_with_bitmask_nonsimd::<IS_GREATER, INCLUSIVE>(
+                        chunk,
+                        logical_offset,
+                        delta_fixed_pred_subcolumn,
+                        to_check_bitmask.iter(),
+                        qualified_bitmask,
+                    )
+                }
             }
         }
 
@@ -871,7 +887,7 @@ mod internal {
             }
         }
 
-        #[cfg(target_arch = "x86_64")]
+        #[cfg(all(target_arch = "x86_64", not(miri)))]
         mod simd_x86_64 {
             use std::arch::x86_64::{
                 __m256i, _mm256_cmpeq_epi8, _mm256_cmpgt_epi8, _mm256_lddqu_si256,
@@ -962,7 +978,7 @@ mod internal {
                 RoaringBitmap::from_bitmap_bytes(logical_offset, to_check_bitmasks_bytes)
             }
 
-            #[allow(dead_code)]
+            #[cfg(all(target_arch = "x86_64", not(miri)))]
             #[inline]
             pub unsafe fn equal_simd(x: &[u8], pred: u8, logical_offset: u32) -> RoaringBitmap {
                 if x.is_empty() {
