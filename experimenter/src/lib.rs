@@ -31,6 +31,21 @@ pub struct FilterMaterializeConfig {
     pub bitmask: Option<Vec<u32>>,
 }
 
+impl From<FilterConfig> for FilterMaterializeConfig {
+    fn from(value: FilterConfig) -> Self {
+        let FilterConfig {
+            predicate,
+            chunk_id,
+            bitmask,
+        } = value;
+        Self {
+            predicate,
+            chunk_id,
+            bitmask,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MaterializeConfig {
     pub chunk_id: Option<ChunkId>,
@@ -39,7 +54,7 @@ pub struct MaterializeConfig {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CompressStatistics {
-    pub compression_elapsed_time_nano_secs: u128,
+    pub compression_elapsed_time_nano_secs: u64,
     pub uncompressed_size: u64,
     pub compressed_size: u64,
     pub compressed_size_chunk_only: u64,
@@ -53,7 +68,7 @@ pub struct OutputWrapper<T> {
     pub config_path: String,
     pub compression_config: CompressionConfig,
     pub command_specific: T,
-    pub elapsed_time_nanos: u128,
+    pub elapsed_time_nanos: u64,
     pub input_filename: String,
     pub datetime: chrono::DateTime<chrono::Utc>,
     pub result_string: String,
@@ -72,6 +87,15 @@ pub struct AllOutputInner {
     pub materialize: Vec<OutputWrapper<MaterializeConfig>>,
 }
 
+impl AllOutputInner {
+    pub fn clear(&mut self) {
+        self.compress.clear();
+        self.filters.clear();
+        self.materialize.clear();
+    }
+}
+
+/// dataset_name -> compression_method -> AllOutputInner
 #[derive(Debug, Clone, Serialize, Deserialize, QuickImpl)]
 pub struct AllOutput(pub HashMap<String, HashMap<String, AllOutputInner>>);
 
