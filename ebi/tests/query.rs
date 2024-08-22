@@ -643,6 +643,41 @@ mod helper {
                 expected,
                 t_name(format!("Test 5: {query_name} Random failure Range")),
             );
+
+            // Test 6: Random Failure Range 2
+            // BUFF: Checking initial Part of SIMD filter is processed properly
+            let values = [
+                14.22, 5.57, 6.61, 9.25, 2.72, 8.23, 13.2, -0.68, 12.95, 13.85, 12.21, 10.36, 2.33,
+                8.5, 18.13, 19.54, 16.42, 19.12, 11.68, 1.78, 7.73, -2.19, 17.43, 21.88, 3.01,
+                10.76, 25.08, 4.01, 8.84, 23.35, -4.32, 12.5, 5.72, -7.0, 14.02, -1.23, 19.57,
+                6.73, 8.4, 11.27, 15.61, -3.01, -15.35, 14.38, -3.09, 19.94, 23.16, 10.28, 1.46,
+                9.2, 20.33, 8.93, 2.18, 1.54, -0.48, -4.13, 16.71, 3.71, 9.09, -10.67, 13.75,
+                14.24, 10.93, 8.0, 23.34, 8.92, 1.81, 5.89, 13.97, -7.69, 18.02, 4.85, 4.21, 17.07,
+                -0.65, 11.39, 10.36, 17.98, 4.27, 2.95, 18.71, 0.72, 1.85, -5.6, 6.43, 12.12,
+                -2.33, -0.91, 14.51, 5.36, 5.49, 5.11, 10.65, 0.39, -1.55, 10.05, -2.89, 21.09,
+                -3.97, 7.83, 22.17, 20.66, 7.24, 15.89, 1.96, 13.53, 10.87, 9.67, 12.27, 12.62,
+                3.52, 24.96, 13.25, 25.06,
+            ];
+            let predicate =
+                Predicate::Range(Range::new(RangeValue::Inclusive(0.37), RangeValue::None));
+            let expected = RoaringBitmap::from_iter(vec![
+                0, 1, 2, 3, 4, 5, 6, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 22, 23, 24,
+                25, 26, 27, 28, 29, 31, 32, 34, 36, 37, 38, 39, 40, 43, 45, 46, 47, 48, 49, 50, 51,
+                52, 53, 56, 57, 58, 60, 61, 62, 63, 64, 65, 66, 67, 68, 70, 71, 72, 73, 75, 76, 77,
+                78, 79, 80, 81, 82, 84, 85, 88, 89, 90, 91, 92, 93, 95, 97, 99, 100, 101, 102, 103,
+                104, 105, 106, 107, 108, 109, 110, 111, 112, 113,
+            ]);
+            let chunk_option = ChunkOption::RecordCount(50);
+            test_fn(
+                config,
+                values.to_vec(),
+                chunk_option,
+                predicate,
+                None,
+                None,
+                expected,
+                t_name(format!("Test 6: {query_name} Random failure Range 2")),
+            );
         }
 
         // Filter Arguments
@@ -1311,7 +1346,7 @@ fn test_buff_materialize() {
 
 #[test]
 fn test_buff_filter_materialize() {
-    let scale = 10;
+    let scale = 100;
     let fractional_part_bits_length = 8;
     let integer_part_max_bits_length = 32 - fractional_part_bits_length;
 
