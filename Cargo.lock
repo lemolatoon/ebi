@@ -687,7 +687,7 @@ dependencies = [
 
 [[package]]
 name = "ebi"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "alp-binding",
  "anyhow",
@@ -746,7 +746,7 @@ dependencies = [
 
 [[package]]
 name = "experimenter"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "anyhow",
  "chrono",
@@ -1716,7 +1716,7 @@ dependencies = [
 
 [[package]]
 name = "tools"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "anyhow",
  "experimenter",
