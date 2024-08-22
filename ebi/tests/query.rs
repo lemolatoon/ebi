@@ -282,6 +282,22 @@ mod helper {
 
         // Range filter
         {
+            // Test 1.0: Range filter (Inclusive, None)
+            let values = vec![-300.3, -5.6, -3.8, -699.7, 2.1, 9.9, 100.1];
+            let predicate =
+                Predicate::Range(Range::new(RangeValue::Inclusive(-3.8), RangeValue::None));
+            let expected = RoaringBitmap::from_iter(vec![2, 4, 5, 6]);
+            test_fn(
+                config,
+                values,
+                ChunkOption::RecordCount(5),
+                predicate,
+                None,
+                None,
+                expected,
+                t_name(format!("Test 1.0: Range {query_name} (Inclusive, None)")),
+            );
+
             // Test 1: Range filter (Inclusive, Inclusive)
             let values = vec![-300.3, -5.6, -3.8, -699.7, 2.1, 9.9, 100.1];
             let predicate = Predicate::Range(Range::new(
@@ -605,6 +621,27 @@ mod helper {
                 t_name(format!(
                     "{query_name} Random failure Eq simd (low selectivity, 2 chunks)"
                 )),
+            );
+
+            // Test 5: Random Failure Range
+            let values = [
+                5714.14, 5710.09, 5718.45, 5712.45, 5714.98, 5715.13, 5717.12, 5714.03, 5712.14,
+                5714.21, 5716.51,
+            ];
+            let predicate =
+                Predicate::Range(Range::new(RangeValue::Inclusive(5715.88), RangeValue::None));
+            let expected = RoaringBitmap::from_iter(vec![10]);
+            let bitmask = RoaringBitmap::from_iter(vec![0, 3, 5, 8, 9, 10]);
+            let chunk_option = ChunkOption::ByteSizeBestEffort(5274);
+            test_fn(
+                config,
+                values.to_vec(),
+                chunk_option,
+                predicate,
+                Some(&bitmask),
+                None,
+                expected,
+                t_name(format!("Test 5: {query_name} Random failure Range")),
             );
         }
 

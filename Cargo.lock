@@ -687,7 +687,7 @@ dependencies = [
 
 [[package]]
 name = "ebi"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "alp-binding",
  "anyhow",
@@ -746,7 +746,7 @@ dependencies = [
 
 [[package]]
 name = "experimenter"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "anyhow",
  "chrono",
@@ -1424,8 +1424,7 @@ checksum = "7a66a03ae7c801facd77a29370b4faec201768915ac14a721ba36f20bc9c209b"
 [[package]]
 name = "roaring"
 version = "0.10.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8f4b84ba6e838ceb47b41de5194a60244fac43d9fe03b71dbe8c5a201081d6d1"
+source = "git+https://github.com/lemolatoon/roaring-rs?rev=af5ea01#af5ea01a5af2d4bf1bec1bf54cbaa8e0cf6631a4"
 dependencies = [
  "bytemuck",
  "byteorder",
@@ -1717,7 +1716,7 @@ dependencies = [
 
 [[package]]
 name = "tools"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "anyhow",
  "experimenter",
