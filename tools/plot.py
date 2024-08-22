@@ -125,6 +125,41 @@ def plot_boxplot(data, title, y_label, output_path):
     plt.close()
 
 
+def plot_combined_radar_chart(data_dict, title, labels, output_path):
+    metrics = list(data_dict.keys())
+    num_metrics = len(metrics)
+    angles = np.linspace(0, 2 * np.pi, num_metrics, endpoint=False).tolist()
+    angles += angles[:1]
+
+    # Normalize each metric's data by dividing by the maximum value for that metric
+    normalized_data_dict = {}
+    for metric, values in data_dict.items():
+        max_value = max(values)
+        normalized_data_dict[metric] = [v / max_value for v in values]
+
+    fig, ax = plt.subplots(figsize=(8, 8), subplot_kw=dict(polar=True))
+
+    # Plot each label's data
+    for i, label in enumerate(labels):
+        values = [normalized_data_dict[metric][i] for metric in metrics]
+        values += values[:1]  # Repeat the first value to close the polygon
+        ax.plot(angles, values, label=label, linewidth=2)
+
+    ax.set_xticks(angles[:-1])
+    ax.set_xticklabels(metrics)
+
+    plt.title(title, size=15, color="black", y=1.1)
+
+    # Adjust legend to be split into two rows if there are many labels
+    ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.15), ncol=2)
+
+    # Add padding around the chart to prevent clipping
+    plt.subplots_adjust(left=0.2, right=0.8, top=0.8, bottom=0.3)
+
+    plt.savefig(output_path, format="png", dpi=300)
+    plt.close()
+
+
 compression_methods = [
     "Uncompressed",
     "RLE",
@@ -248,6 +283,7 @@ def main():
     # dataset-wise plot_comparison
 
     for dataset_index, dataset_name in enumerate(tqdm(dataset_names)):
+        break
         dataset_out_dir = os.path.join(out_dir, dataset_name)
         os.makedirs(dataset_out_dir, exist_ok=True)
         plot_comparison(
@@ -440,6 +476,68 @@ def main():
                     filter_name}_filter_materialize_throughput.png",
             ),
         )
+
+    # Combined Radar Chart
+    combined_radar_chart_dir = os.path.join(out_dir, "radar_chart")
+    os.makedirs(combined_radar_chart_dir, exist_ok=True)
+
+    compression_ratios_avg = compression_ratios_df.mean()
+    compression_throughput_avg = compression_throughput_df.mean()
+    decompression_throughput_avg = decompression_throughput_df.mean()
+
+    filter_throughput_avg = {
+        key: df.mean() for key, df in filter_throughput_dfs.items()
+    }
+
+    filter_materialize_throughput_avg = {
+        key: df.mean() for key, df in filter_materialize_throughput_dfs.items()
+    }
+
+    def plot_radar_chart(pred: pl.Expr | List[str], title: str, output_path: str):
+        data_dict = {
+            "Compression Ratios": np.array(
+                compression_ratios_df.select(pred).mean().row(0)
+            )
+            ** -1,
+            "Compression Throughput": np.array(
+                compression_throughput_df.select(pred).mean().row(0)
+            ),
+            "Decompression Throughput": np.array(
+                decompression_throughput_df.select(pred).mean().row(0)
+            ),
+        }
+
+        for key in filter_throughput_avg:
+            data_dict[f"Filter Throughput ({key})"] = np.array(
+                filter_throughput_avg[key].select(pred).mean().row(0)
+            )
+
+        for key in filter_materialize_throughput_avg:
+            data_dict[f"Filter Materialize Throughput ({key})"] = np.array(
+                filter_materialize_throughput_avg[key].select(pred).mean().row(0)
+            )
+
+        labels = compression_ratios_df.select(pred).columns
+
+        plot_combined_radar_chart(data_dict, title, labels, output_path)
+
+    plot_radar_chart(
+        pl.all(),
+        "Average Performance Radar Chart All",
+        os.path.join(combined_radar_chart_dir, "all_radar_chart.png"),
+    )
+    # Xor Family
+    plot_radar_chart(
+        ["Gorilla", "Chimp", "Chimp128", "ElfOnChimp", "Elf"],
+        "Average Performance Radar Chart Xor Family",
+        os.path.join(combined_radar_chart_dir, "xor_family_radar_chart.png"),
+    )
+    # Top 5
+    plot_radar_chart(
+        ["BUFF", "DeltaSprintz", "Snappy", "FFIAlp", "Elf"],
+        "Average Performance Radar Chart Top 5",
+        os.path.join(combined_radar_chart_dir, "top_5_radar_chart.png"),
+    )
 
 
 if __name__ == "__main__":
