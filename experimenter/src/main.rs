@@ -1138,6 +1138,7 @@ fn compress_command(
     };
 
     let output = OutputWrapper {
+        in_memory,
         version: env!("CARGO_PKG_VERSION").to_string(),
         config_path: path.config,
         compression_config: config,
@@ -1216,6 +1217,7 @@ fn filter_command(
     let result_string = format!("{:?}", bitmask);
 
     let output = OutputWrapper {
+        in_memory,
         version: env!("CARGO_PKG_VERSION").to_string(),
         config_path: path.config.clone(),
         compression_config,
@@ -1304,6 +1306,7 @@ fn filter_materialize_command(
     };
 
     let output = OutputWrapper {
+        in_memory,
         version: env!("CARGO_PKG_VERSION").to_string(),
         config_path: path.config.clone(),
         compression_config,
@@ -1390,6 +1393,7 @@ fn materialize_command(
     };
 
     let output = OutputWrapper {
+        in_memory,
         version: env!("CARGO_PKG_VERSION").to_string(),
         config_path: path.config.clone(),
         compression_config,

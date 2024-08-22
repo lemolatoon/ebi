@@ -64,6 +64,7 @@ pub struct CompressStatistics {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OutputWrapper<T> {
+    pub in_memory: bool,
     pub version: String,
     pub config_path: String,
     pub compression_config: CompressionConfig,
