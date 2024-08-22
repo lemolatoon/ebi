@@ -966,7 +966,7 @@ mod internal {
                         size_of_val(qualified_bitmasks.as_slice()),
                     )
                 };
-                *qualified_bitmask =
+                *qualified_bitmask |=
                     RoaringBitmap::from_bitmap_bytes(logical_offset, qualified_bitmasks_bytes);
 
                 let to_check_bitmasks_bytes = unsafe {
