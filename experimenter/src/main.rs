@@ -8,7 +8,7 @@ use std::{
     collections::{HashMap, HashSet},
     ffi::OsStr,
     fs::{self, File},
-    io::{self, BufReader, Read, Seek, Write as _},
+    io::{self, BufReader, Cursor, Read, Seek, Write as _},
     iter::{self},
     path::{Path, PathBuf},
 };
@@ -39,6 +39,8 @@ struct Cli {
 struct ConfigPath {
     #[arg(long, short)]
     config: String,
+    #[arg(long, short)]
+    in_memory: Option<bool>,
 }
 
 impl ConfigPath {
@@ -54,6 +56,7 @@ impl ConfigPath {
     fn empty() -> Self {
         Self {
             config: String::from("<in-memory>"),
+            in_memory: None,
         }
     }
 }
@@ -62,6 +65,8 @@ impl ConfigPath {
 struct AllPatchArgs {
     #[arg(long)]
     create_config: bool,
+    #[arg(long)]
+    in_memory: bool,
     #[arg(long, short('c'))]
     compressor_config_dir: PathBuf,
     #[arg(long, short('f'))]
@@ -136,6 +141,7 @@ impl AllPatchArgs {
     ) -> Self {
         Self {
             create_config: args.create_config,
+            in_memory: args.in_memory,
             compressor_config_dir: args.compressor_config_dir,
             filter_config_dir: args.filter_config_dir,
             binary_dir: args.binary_dir,
@@ -151,6 +157,8 @@ impl AllPatchArgs {
 struct AllArgs {
     #[arg(long)]
     create_config: bool,
+    #[arg(long)]
+    in_memory: bool,
     #[arg(long, short('c'))]
     compressor_config_dir: PathBuf,
     #[arg(long, short('f'))]
@@ -339,13 +347,18 @@ fn process_file(filename: impl AsRef<Path>, cli: Cli) -> anyhow::Result<()> {
     let filename2 = filename.as_ref().to_string_lossy().to_string();
     let cli2 = cli.clone();
 
+    let in_memory = false;
     let output: Output = match cli.command {
-        Commands::Compress(args) => compress_command(filename, args.read()?, args)?.into(),
-        Commands::Filter(args) => filter_command(filename, args.read()?, args)?.into(),
-        Commands::FilterMaterialize(args) => {
-            filter_materialize_command(filename, args.read()?, args)?.into()
+        Commands::Compress(args) => {
+            compress_command(in_memory, filename, args.read()?, args)?.into()
         }
-        Commands::Materialize(args) => materialize_command(filename, args.read()?, args)?.into(),
+        Commands::Filter(args) => filter_command(in_memory, filename, args.read()?, args)?.into(),
+        Commands::FilterMaterialize(args) => {
+            filter_materialize_command(in_memory, filename, args.read()?, args)?.into()
+        }
+        Commands::Materialize(args) => {
+            materialize_command(in_memory, filename, args.read()?, args)?.into()
+        }
         Commands::CreateFilterConfig { output_dir } => {
             return create_config_command(filename, output_dir);
         }
@@ -442,7 +455,9 @@ fn create_saved_file_at(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 fn process_experiment_for_compressor(
+    in_memory: bool,
     binary_file: impl AsRef<Path>,
     compression_config: CompressionConfig,
     compressor_config: ConfigPath,
@@ -459,6 +474,7 @@ fn process_experiment_for_compressor(
     // Compress
     for _i in tqdm(0..n).desc(Some("Compress")) {
         let compress_result = compress_command(
+            in_memory,
             binary_file.as_ref(),
             compression_config.clone(),
             compressor_config.clone(),
@@ -486,6 +502,7 @@ fn process_experiment_for_compressor(
 
         let filter_config = ConfigPath {
             config: filter_config_file.to_string_lossy().to_string(),
+            in_memory: None,
         };
 
         let filter_config_content: FilterConfig = filter_config.read()?;
@@ -494,6 +511,7 @@ fn process_experiment_for_compressor(
             filter_config_stem.to_str().unwrap_or("")
         ))) {
             let filter_result = filter_command(
+                in_memory,
                 compressed_file.as_path(),
                 filter_config_content.clone(),
                 filter_config.clone(),
@@ -509,6 +527,7 @@ fn process_experiment_for_compressor(
             filter_config_stem.to_str().unwrap_or("")
         ))) {
             let filter_materialize_result = filter_materialize_command(
+                in_memory,
                 compressed_file.as_path(),
                 filter_materialize_config_content.clone(),
                 filter_config.clone(),
@@ -521,6 +540,7 @@ fn process_experiment_for_compressor(
 
     for _i in tqdm(0..n).desc(Some("Materialize")) {
         let materialize_result = materialize_command(
+            in_memory,
             compressed_file.as_path(),
             MaterializeConfig {
                 chunk_id: None,
@@ -536,6 +556,7 @@ fn process_experiment_for_compressor(
 }
 
 fn process_experiment_for_dataset(
+    in_memory: bool,
     binary_file: impl AsRef<Path>,
     compressor_config_entries: impl IntoIterator<Item = PathBuf>,
     filter_config_dir: impl AsRef<Path>,
@@ -546,6 +567,7 @@ fn process_experiment_for_dataset(
     for compressor_config_file in tqdm(compressor_config_entries).desc(Some("Compressor Configs")) {
         let compressor_config = ConfigPath {
             config: compressor_config_file.to_string_lossy().to_string(),
+            in_memory: None,
         };
         let compression_config: CompressionConfig = compressor_config.read()?;
         let compression_scheme = compression_config.compressor_config.compression_scheme();
@@ -562,6 +584,7 @@ fn process_experiment_for_dataset(
             });
 
         process_experiment_for_compressor(
+            in_memory,
             &binary_file,
             compression_config,
             compressor_config,
@@ -579,6 +602,7 @@ fn all_patch_command(args: AllPatchArgs, mut patched: AllOutput) -> anyhow::Resu
     args.verify()?;
     let AllPatchArgs {
         create_config,
+        in_memory,
         compressor_config_dir,
         filter_config_dir,
         binary_dir,
@@ -709,6 +733,7 @@ fn all_patch_command(args: AllPatchArgs, mut patched: AllOutput) -> anyhow::Resu
         let outputs = patched.0.entry(binary_file_stem_str.clone()).or_default();
 
         process_experiment_for_dataset(
+            in_memory,
             binary_file,
             compressor_config_entries_patching.clone(),
             filter_config_dir,
@@ -749,6 +774,7 @@ fn all_patch_command(args: AllPatchArgs, mut patched: AllOutput) -> anyhow::Resu
             .context("Failed to read compressor config directory")?
             .collect::<Vec<_>>();
         process_experiment_for_dataset(
+            in_memory,
             binary_file,
             compressor_config_entries_all.clone().into_iter(),
             filter_config_dir,
@@ -1016,6 +1042,7 @@ fn create_config_command(
 }
 
 fn compress_command(
+    in_memory: bool,
     filename: impl AsRef<Path>,
     config: CompressionConfig,
     path: ConfigPath,
@@ -1026,43 +1053,95 @@ fn compress_command(
     } = config.clone();
     let now = chrono::Utc::now();
 
-    let encoded_filename = filename.as_ref().with_extension("ebi");
-    let encoder_input = EncoderInput::from_file(filename.as_ref()).context(format!(
-        "Failed to create encoder input from input file.: {}",
-        filename.as_ref().display()
-    ))?;
-    let encoder_output = EncoderOutput::from_file(encoded_filename.as_path()).context(format!(
-        "Failed to create encoder output from output file.: {}",
-        encoded_filename.as_path().display()
-    ))?;
+    let (statistics, elapsed_time_nanos, result_string) = if in_memory {
+        let mut content = Vec::new();
+        File::open(filename.as_ref())
+            .context(format!(
+                "Failed to open file.: {}",
+                filename.as_ref().display()
+            ))?
+            .read_to_end(&mut content)
+            .context(format!(
+                "Failed to read file.: {}",
+                filename.as_ref().display()
+            ))?;
+        let encoder_input = EncoderInput::from_reader(&content[..]);
+        let encoder_output = EncoderOutput::from_vec(Vec::new());
+        let mut encoder = Encoder::new(
+            encoder_input,
+            encoder_output,
+            chunk_option,
+            compressor_config,
+        );
 
-    let mut encoder = Encoder::new(
-        encoder_input,
-        encoder_output,
-        chunk_option,
-        compressor_config,
-    );
+        let start = std::time::Instant::now();
+        encoder.encode().context("Failed to encode")?;
+        let elapsed_time_nanos = start.elapsed().as_nanos().try_into().unwrap_or(u64::MAX);
 
-    let start = std::time::Instant::now();
-    encoder.encode().context("Failed to encode")?;
-    let elapsed_time_nanos = start.elapsed().as_nanos().try_into().unwrap_or(u64::MAX);
+        let mut encoder_output = encoder.into_output().into_inner();
+        encoder_output.seek(io::SeekFrom::Start(0))?;
 
-    drop(encoder);
+        File::create(filename.as_ref().with_extension("ebi"))
+            .context("Failed to create output file")?
+            .write_all(encoder_output.get_ref())
+            .context("Failed to write encoded memory to file")?;
 
-    let decoder = Decoder::new(DecoderInput::from_file(encoded_filename.as_path())?)
-        .context("Failed to create decoder from encoded file")?;
+        let decoder = Decoder::new(DecoderInput::from_reader(encoder_output))
+            .context("Failed to create decoder from encoded memory")?;
+        let result_string = format!(
+            "number_of_records: {}",
+            decoder.footer().number_of_records()
+        );
 
-    let statistics = get_compress_statistics(&decoder)?;
-    let result_string = format!(
-        "number_of_records: {}",
-        decoder.footer().number_of_records()
-    );
+        (
+            get_compress_statistics(&decoder),
+            elapsed_time_nanos,
+            result_string,
+        )
+    } else {
+        let encoded_filename = filename.as_ref().with_extension("ebi");
+        let encoder_input = EncoderInput::from_file(filename.as_ref()).context(format!(
+            "Failed to create encoder input from input file.: {}",
+            filename.as_ref().display()
+        ))?;
+        let encoder_output =
+            EncoderOutput::from_file(encoded_filename.as_path()).context(format!(
+                "Failed to create encoder output from output file.: {}",
+                encoded_filename.as_path().display()
+            ))?;
+
+        let mut encoder = Encoder::new(
+            encoder_input,
+            encoder_output,
+            chunk_option,
+            compressor_config,
+        );
+
+        let start = std::time::Instant::now();
+        encoder.encode().context("Failed to encode")?;
+        let elapsed_time_nanos = start.elapsed().as_nanos().try_into().unwrap_or(u64::MAX);
+
+        drop(encoder);
+
+        let decoder = Decoder::new(DecoderInput::from_file(encoded_filename.as_path())?)
+            .context("Failed to create decoder from encoded file")?;
+        let result_string = format!(
+            "number_of_records: {}",
+            decoder.footer().number_of_records()
+        );
+
+        (
+            get_compress_statistics(&decoder),
+            elapsed_time_nanos,
+            result_string,
+        )
+    };
 
     let output = OutputWrapper {
         version: env!("CARGO_PKG_VERSION").to_string(),
         config_path: path.config,
         compression_config: config,
-        command_specific: statistics,
+        command_specific: statistics?,
         elapsed_time_nanos,
         input_filename: filename.as_ref().to_string_lossy().to_string(),
         datetime: now,
@@ -1073,6 +1152,7 @@ fn compress_command(
 }
 
 fn filter_command(
+    in_memory: bool,
     filename: impl AsRef<Path>,
     config: FilterConfig,
     path: ConfigPath,
@@ -1085,21 +1165,52 @@ fn filter_command(
     let bitmask = bitmask.map(ebi::decoder::query::RoaringBitmap::from_iter);
     let now = chrono::Utc::now();
 
-    let mut decoder =
-        Decoder::new(DecoderInput::from_file(filename.as_ref())?).context(format!(
-            "Failed to create decoder from input file.: {}",
-            filename.as_ref().display()
-        ))?;
+    let (bitmask, elapsed_time_nanos, compression_config) = if in_memory {
+        let mut content = Vec::new();
+        File::open(filename.as_ref())
+            .context(format!(
+                "Failed to open file.: {}",
+                filename.as_ref().display()
+            ))?
+            .read_to_end(&mut content)
+            .context(format!(
+                "Failed to read file.: {}",
+                filename.as_ref().display()
+            ))?;
+        let mut decoder = Decoder::new(DecoderInput::from_reader(Cursor::new(&content[..])))
+            .context("Failed to create decoder from input memory")?;
 
-    let start = std::time::Instant::now();
-    let bitmask = decoder
-        .filter(predicate, bitmask.as_ref(), chunk_id)
-        .context("Failed to perform filter")?;
-    let elapsed_time_nanos = start.elapsed().as_nanos().try_into().unwrap_or(u64::MAX);
+        let start = std::time::Instant::now();
+        let bitmask = decoder
+            .filter(predicate, bitmask.as_ref(), chunk_id)
+            .context("Failed to perform filter")?;
+        let elapsed_time_nanos = start.elapsed().as_nanos().try_into().unwrap_or(u64::MAX);
 
-    let compression_config = CompressionConfig {
-        chunk_option: *decoder.header().config().chunk_option(),
-        compressor_config: *decoder.footer().compressor_config(),
+        let compression_config = CompressionConfig {
+            chunk_option: *decoder.header().config().chunk_option(),
+            compressor_config: *decoder.footer().compressor_config(),
+        };
+
+        (bitmask, elapsed_time_nanos, compression_config)
+    } else {
+        let mut decoder =
+            Decoder::new(DecoderInput::from_file(filename.as_ref())?).context(format!(
+                "Failed to create decoder from input file.: {}",
+                filename.as_ref().display()
+            ))?;
+
+        let start = std::time::Instant::now();
+        let bitmask = decoder
+            .filter(predicate, bitmask.as_ref(), chunk_id)
+            .context("Failed to perform filter")?;
+        let elapsed_time_nanos = start.elapsed().as_nanos().try_into().unwrap_or(u64::MAX);
+
+        let compression_config = CompressionConfig {
+            chunk_option: *decoder.header().config().chunk_option(),
+            compressor_config: *decoder.footer().compressor_config(),
+        };
+
+        (bitmask, elapsed_time_nanos, compression_config)
     };
 
     let result_string = format!("{:?}", bitmask);
@@ -1119,6 +1230,7 @@ fn filter_command(
 }
 
 fn filter_materialize_command(
+    in_memory: bool,
     filename: impl AsRef<Path>,
     config: FilterMaterializeConfig,
     path: ConfigPath,
@@ -1131,31 +1243,65 @@ fn filter_materialize_command(
     let bitmask = bitmask.map(ebi::decoder::query::RoaringBitmap::from_iter);
     let now = chrono::Utc::now();
 
-    let mut decoder =
-        Decoder::new(DecoderInput::from_file(filename.as_ref())?).context(format!(
-            "Failed to create decoder from input file.: {}",
-            filename.as_ref().display()
-        ))?;
-    let decoded_filename = filename.as_ref().with_extension("filter_materialized");
-    let mut decoder_output = DecoderOutput::from_file(decoded_filename.as_path())
-        .context(format!(
-            "Failed to create decoder output from output file.: {}",
-            decoded_filename.as_path().display()
-        ))?
-        .into_buffered();
+    let (compression_config, elapsed_time_nanos, result_string) = if in_memory {
+        let mut content = Vec::new();
+        File::open(filename.as_ref())
+            .context(format!(
+                "Failed to open file.: {}",
+                filename.as_ref().display()
+            ))?
+            .read_to_end(&mut content)
+            .context(format!(
+                "Failed to read file.: {}",
+                filename.as_ref().display()
+            ))?;
+        let mut decoder = Decoder::new(DecoderInput::from_reader(Cursor::new(&content[..])))
+            .context("Failed to create decoder from input memory")?;
 
-    let start = std::time::Instant::now();
-    decoder
-        .filter_materialize(&mut decoder_output, predicate, bitmask.as_ref(), chunk_id)
-        .context("Failed to perform filter materialize")?;
-    let elapsed_time_nanos = start.elapsed().as_nanos().try_into().unwrap_or(u64::MAX);
+        let start = std::time::Instant::now();
+        let mut decoder_output = DecoderOutput::from_writer(Cursor::new(Vec::new()));
+        decoder
+            .filter_materialize(&mut decoder_output, predicate, bitmask.as_ref(), chunk_id)
+            .context("Failed to perform filter materialize")?;
+        let elapsed_time_nanos = start.elapsed().as_nanos().try_into().unwrap_or(u64::MAX);
 
-    let compression_config = CompressionConfig {
-        chunk_option: *decoder.header().config().chunk_option(),
-        compressor_config: *decoder.footer().compressor_config(),
+        let compression_config = CompressionConfig {
+            chunk_option: *decoder.header().config().chunk_option(),
+            compressor_config: *decoder.footer().compressor_config(),
+        };
+        let output = decoder_output.into_writer().into_inner();
+        let result_string = format!("bytes: {:?}", output.len());
+
+        (compression_config, elapsed_time_nanos, result_string)
+    } else {
+        let mut decoder =
+            Decoder::new(DecoderInput::from_file(filename.as_ref())?).context(format!(
+                "Failed to create decoder from input file.: {}",
+                filename.as_ref().display()
+            ))?;
+        let decoded_filename = filename.as_ref().with_extension("filter_materialized");
+        let mut decoder_output = DecoderOutput::from_file(decoded_filename.as_path())
+            .context(format!(
+                "Failed to create decoder output from output file.: {}",
+                decoded_filename.as_path().display()
+            ))?
+            .into_buffered();
+
+        let start = std::time::Instant::now();
+        decoder
+            .filter_materialize(&mut decoder_output, predicate, bitmask.as_ref(), chunk_id)
+            .context("Failed to perform filter materialize")?;
+        let elapsed_time_nanos = start.elapsed().as_nanos().try_into().unwrap_or(u64::MAX);
+
+        let compression_config = CompressionConfig {
+            chunk_option: *decoder.header().config().chunk_option(),
+            compressor_config: *decoder.footer().compressor_config(),
+        };
+        let metadata = decoder_output.into_writer().into_inner()?.metadata()?;
+        let result_string = format!("{:?}", metadata);
+
+        (compression_config, elapsed_time_nanos, result_string)
     };
-    let metadata = decoder_output.into_writer().into_inner()?.metadata()?;
-    let result_string = format!("{:?}", metadata);
 
     let output = OutputWrapper {
         version: env!("CARGO_PKG_VERSION").to_string(),
@@ -1172,6 +1318,7 @@ fn filter_materialize_command(
 }
 
 fn materialize_command(
+    in_memory: bool,
     filename: impl AsRef<Path>,
     config: MaterializeConfig,
     path: ConfigPath,
@@ -1180,32 +1327,67 @@ fn materialize_command(
     let bitmask = bitmask.map(ebi::decoder::query::RoaringBitmap::from_iter);
     let now = chrono::Utc::now();
 
-    let mut decoder =
-        Decoder::new(DecoderInput::from_file(filename.as_ref())?).context(format!(
-            "Failed to create decoder from input file.: {}",
-            filename.as_ref().display()
-        ))?;
-    let decoded_filename = filename.as_ref().with_extension("materialized");
-    let mut decoder_output = DecoderOutput::from_file(decoded_filename.as_path())
-        .context(format!(
-            "Failed to create decoder output from output file.: {}",
-            decoded_filename.as_path().display()
-        ))?
-        .into_buffered();
+    let (compression_config, elapsed_time_nanos, result_string) = if in_memory {
+        let mut content = Vec::new();
+        File::open(filename.as_ref())
+            .context(format!(
+                "Failed to open file.: {}",
+                filename.as_ref().display()
+            ))?
+            .read_to_end(&mut content)
+            .context(format!(
+                "Failed to read file.: {}",
+                filename.as_ref().display()
+            ))?;
+        let mut decoder = Decoder::new(DecoderInput::from_reader(Cursor::new(&content[..])))
+            .context("Failed to create decoder from input memory")?;
 
-    let start = std::time::Instant::now();
-    decoder
-        .materialize(&mut decoder_output, bitmask.as_ref(), chunk_id)
-        .context("Failed to perform filter materialize")?;
-    let elapsed_time_nanos = start.elapsed().as_nanos().try_into().unwrap_or(u64::MAX);
+        let start = std::time::Instant::now();
+        let mut decoder_output = DecoderOutput::from_writer(Cursor::new(Vec::new()));
+        decoder
+            .materialize(&mut decoder_output, bitmask.as_ref(), chunk_id)
+            .context("Failed to perform filter materialize")?;
+        let elapsed_time_nanos = start.elapsed().as_nanos().try_into().unwrap_or(u64::MAX);
 
-    let compression_config = CompressionConfig {
-        chunk_option: *decoder.header().config().chunk_option(),
-        compressor_config: *decoder.footer().compressor_config(),
+        let compression_config = CompressionConfig {
+            chunk_option: *decoder.header().config().chunk_option(),
+            compressor_config: *decoder.footer().compressor_config(),
+        };
+
+        let bytes = decoder_output.into_writer().into_inner();
+        let result_string = format!("bytes: {:?}", bytes.len());
+
+        (compression_config, elapsed_time_nanos, result_string)
+    } else {
+        let mut decoder =
+            Decoder::new(DecoderInput::from_file(filename.as_ref())?).context(format!(
+                "Failed to create decoder from input file.: {}",
+                filename.as_ref().display()
+            ))?;
+        let decoded_filename = filename.as_ref().with_extension("materialized");
+        let mut decoder_output = DecoderOutput::from_file(decoded_filename.as_path())
+            .context(format!(
+                "Failed to create decoder output from output file.: {}",
+                decoded_filename.as_path().display()
+            ))?
+            .into_buffered();
+
+        let start = std::time::Instant::now();
+        decoder
+            .materialize(&mut decoder_output, bitmask.as_ref(), chunk_id)
+            .context("Failed to perform filter materialize")?;
+        let elapsed_time_nanos = start.elapsed().as_nanos().try_into().unwrap_or(u64::MAX);
+
+        let compression_config = CompressionConfig {
+            chunk_option: *decoder.header().config().chunk_option(),
+            compressor_config: *decoder.footer().compressor_config(),
+        };
+
+        let metadata = decoder_output.into_writer().into_inner()?.metadata()?;
+        let result_string = format!("{:?}", metadata);
+
+        (compression_config, elapsed_time_nanos, result_string)
     };
-
-    let metadata = decoder_output.into_writer().into_inner()?.metadata()?;
-    let result_string = format!("{:?}", metadata);
 
     let output = OutputWrapper {
         version: env!("CARGO_PKG_VERSION").to_string(),
