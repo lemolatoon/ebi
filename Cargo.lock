@@ -1424,7 +1424,7 @@ checksum = "7a66a03ae7c801facd77a29370b4faec201768915ac14a721ba36f20bc9c209b"
 [[package]]
 name = "roaring"
 version = "0.10.6"
-source = "git+https://github.com/lemolatoon/roaring-rs?rev=af5ea01#af5ea01a5af2d4bf1bec1bf54cbaa8e0cf6631a4"
+source = "git+https://github.com/lemolatoon/roaring-rs?rev=03a61ad#03a61ad14bb744392ca3812e0ea19024a71472a9"
 dependencies = [
  "bytemuck",
  "byteorder",
