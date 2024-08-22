@@ -1,10 +1,11 @@
-from collections import defaultdict
 import json
 import os
+from pathlib import Path
 import sys
 import numpy as np
 import polars as pl
 import matplotlib.pyplot as plt
+import matplotlib
 from statistics import fmean
 from tqdm import tqdm
 
@@ -125,6 +126,19 @@ def plot_boxplot(data, title, y_label, output_path):
     plt.close()
 
 
+color_map: dict[str, tuple[float, float, float, float]] = {}
+
+
+def get_color(label: str) -> tuple[float, float, float, float]:
+    global color_map
+    if label in color_map:
+        return color_map[label]
+    next_index = len(color_map)
+    color_map[label] = matplotlib.colormaps["tab20"](next_index)
+
+    return color_map[label]
+
+
 def plot_combined_radar_chart(data_dict, title, labels, output_path):
     metrics = list(data_dict.keys())
     num_metrics = len(metrics)
@@ -137,24 +151,28 @@ def plot_combined_radar_chart(data_dict, title, labels, output_path):
         max_value = max(values)
         normalized_data_dict[metric] = [v / max_value for v in values]
 
-    fig, ax = plt.subplots(figsize=(8, 8), subplot_kw=dict(polar=True))
+    fig, ax = plt.subplots(figsize=(12, 12), subplot_kw=dict(polar=True))
 
     # Plot each label's data
     for i, label in enumerate(labels):
         values = [normalized_data_dict[metric][i] for metric in metrics]
         values += values[:1]  # Repeat the first value to close the polygon
-        ax.plot(angles, values, label=label, linewidth=2)
+        ax.plot(angles, values, color=get_color(label), label=label, linewidth=2)
 
     ax.set_xticks(angles[:-1])
-    ax.set_xticklabels(metrics)
+    # ax.set_xticklabels(metrics)
+    ax.set_xticklabels(
+        metrics, fontsize=12, fontweight="bold", horizontalalignment="center"
+    )
 
     plt.title(title, size=15, color="black", y=1.1)
 
     # Adjust legend to be split into two rows if there are many labels
-    ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.15), ncol=2)
+    ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.1), ncol=4)
 
     # Add padding around the chart to prevent clipping
-    plt.subplots_adjust(left=0.2, right=0.8, top=0.8, bottom=0.3)
+    # plt.subplots_adjust(left=0.2, right=0.8, top=0.8, bottom=0.3)
+    plt.subplots_adjust(left=0.15, right=0.85, top=0.85, bottom=0.15)
 
     plt.savefig(output_path, format="png", dpi=300)
     plt.close()
@@ -191,6 +209,7 @@ def main():
     dataset_names.remove("command_type")
 
     out_dir = "results"
+    out_dir = os.path.join(out_dir, Path(path).stem)
     os.makedirs(out_dir, exist_ok=True)
 
     compression_ratios_data: dict[str, List[Optional[float]]] = {
@@ -283,7 +302,6 @@ def main():
     # dataset-wise plot_comparison
 
     for dataset_index, dataset_name in enumerate(tqdm(dataset_names)):
-        break
         dataset_out_dir = os.path.join(out_dir, dataset_name)
         os.makedirs(dataset_out_dir, exist_ok=True)
         plot_comparison(
@@ -495,26 +513,24 @@ def main():
 
     def plot_radar_chart(pred: pl.Expr | List[str], title: str, output_path: str):
         data_dict = {
-            "Compression Ratios": np.array(
-                compression_ratios_df.select(pred).mean().row(0)
-            )
+            "Compression Ratios": np.array(compression_ratios_avg.select(pred).row(0))
             ** -1,
             "Compression Throughput": np.array(
-                compression_throughput_df.select(pred).mean().row(0)
+                compression_throughput_avg.select(pred).row(0)
             ),
             "Decompression Throughput": np.array(
-                decompression_throughput_df.select(pred).mean().row(0)
+                decompression_throughput_avg.select(pred).row(0)
             ),
         }
 
         for key in filter_throughput_avg:
             data_dict[f"Filter Throughput ({key})"] = np.array(
-                filter_throughput_avg[key].select(pred).mean().row(0)
+                filter_throughput_avg[key].select(pred).row(0)
             )
 
         for key in filter_materialize_throughput_avg:
             data_dict[f"Filter Materialize Throughput ({key})"] = np.array(
-                filter_materialize_throughput_avg[key].select(pred).mean().row(0)
+                filter_materialize_throughput_avg[key].select(pred).row(0)
             )
 
         labels = compression_ratios_df.select(pred).columns
@@ -522,7 +538,7 @@ def main():
         plot_combined_radar_chart(data_dict, title, labels, output_path)
 
     plot_radar_chart(
-        pl.all(),
+        pl.all().exclude("Uncompressed", "RLE"),
         "Average Performance Radar Chart All",
         os.path.join(combined_radar_chart_dir, "all_radar_chart.png"),
     )
@@ -532,11 +548,82 @@ def main():
         "Average Performance Radar Chart Xor Family",
         os.path.join(combined_radar_chart_dir, "xor_family_radar_chart.png"),
     )
-    # Top 5
+    labels = compression_ratios_df.columns
+    # Top 5 Compression Ratios
+    compression_ratios_sorted_labels = list(
+        map(
+            lambda x: x[0],
+            sorted(
+                zip(labels, np.array(compression_ratios_df.mean().row(0))),
+                key=lambda x: x[1],
+            ),
+        )
+    )
+    # Top 5 Compression Throughput
+    compression_throughput_sorted_labels = list(
+        map(
+            lambda x: x[0],
+            sorted(
+                zip(labels, np.array(compression_throughput_df.mean().row(0))),
+                key=lambda x: x[1],
+                reverse=True,
+            ),
+        )
+    )
+    # Top 5 Decompression Throughput
+    decompressin_throughput_sorted_labels = list(
+        map(
+            lambda x: x[0],
+            sorted(
+                zip(labels, np.array(decompression_throughput_df.mean().row(0))),
+                key=lambda x: x[1],
+                reverse=True,
+            ),
+        )
+    )
+    # Top 5 Filter GREATER Throughput
+    filter_greater_throughput_sorted_labels = list(
+        map(
+            lambda x: x[0],
+            sorted(
+                zip(labels, np.array(filter_throughput_dfs["greater"].mean().row(0))),
+                key=lambda x: x[1],
+                reverse=True,
+            ),
+        )
+    )
+    for unnecessary_label in ["Uncompressed", "RLE"]:
+        compression_ratios_sorted_labels.remove(unnecessary_label)
+        compression_throughput_sorted_labels.remove(unnecessary_label)
+        filter_greater_throughput_sorted_labels.remove(unnecessary_label)
+
     plot_radar_chart(
-        ["BUFF", "DeltaSprintz", "Snappy", "FFIAlp", "Elf"],
-        "Average Performance Radar Chart Top 5",
-        os.path.join(combined_radar_chart_dir, "top_5_radar_chart.png"),
+        compression_ratios_sorted_labels[:5],
+        "Top 5 Compression Ratios",
+        os.path.join(
+            combined_radar_chart_dir, "top_5_compression_ratios_radar_chart.png"
+        ),
+    )
+    plot_radar_chart(
+        compression_throughput_sorted_labels[:5],
+        "Top 5 Compression Throughput",
+        os.path.join(
+            combined_radar_chart_dir, "top_5_compression_throughput_radar_chart.png"
+        ),
+    )
+    plot_radar_chart(
+        decompressin_throughput_sorted_labels[:5],
+        "Top 5 Decompression Throughput",
+        os.path.join(
+            combined_radar_chart_dir, "top_5_decompression_throughput_radar_chart.png"
+        ),
+    )
+    plot_radar_chart(
+        filter_greater_throughput_sorted_labels[:5],
+        "Top 5 Filter GREATER Throughput",
+        os.path.join(
+            combined_radar_chart_dir, "top_5_filter_greater_throughput_radar_chart.png"
+        ),
     )
 
 
