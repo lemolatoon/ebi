@@ -1,5 +1,5 @@
 use std::{
-    collections::{HashMap, HashSet},
+    collections::{BTreeMap, HashMap, HashSet},
     io::BufRead,
 };
 
@@ -279,33 +279,55 @@ pub fn get_decimal_precision(s: &str) -> usize {
 ///
 pub fn get_appropriate_scale<R: BufRead>(reader: R) -> anyhow::Result<u32> {
     let mut max_decimal_precision = 0;
-    let mut decimal_repr = String::new();
+    let mut float_strs = BTreeMap::new();
     for line in reader.lines() {
         let line = line.context("Failed to read line")?;
-        let max_decimal_precision_and_repr = line
-            .split(',')
-            .filter_map(|s| {
-                if s.is_empty() {
-                    None
-                } else {
-                    let s = s.trim();
-                    Some((get_decimal_precision(s), s.to_string()))
-                }
-            })
-            .max_by_key(|(precision, _)| *precision);
-
-        if let Some((max_decimal_precision_in_line, s)) = max_decimal_precision_and_repr {
-            if max_decimal_precision < max_decimal_precision_in_line {
-                decimal_repr = s;
+        let strs = line.split(',').filter_map(|s| {
+            if s.is_empty() {
+                None
+            } else {
+                Some(s.trim().to_string())
             }
-            max_decimal_precision = max_decimal_precision.max(max_decimal_precision_in_line);
+        });
+
+        for (precision, s) in strs.map(|s| (get_decimal_precision(&s), s)) {
+            max_decimal_precision = max_decimal_precision.max(precision);
+            float_strs.entry(precision).or_insert_with(Vec::new).push(s);
         }
     }
 
-    10u32
-        .checked_pow(max_decimal_precision as u32)
-        .context(format!(
-            "Failed to calculate appropriate scale. decimal_precision: {}, decimal_repr: {}",
-            max_decimal_precision, decimal_repr
-        ))
+    let number_of_records = float_strs.values().map(|v| v.len()).sum::<usize>();
+    let mut scale = None;
+    const IGNORE_THRESHOLD: f64 = 0.01;
+    for (&precision, strs) in float_strs.iter().rev() {
+        let number_of_records_of_precision = strs.len();
+        if (number_of_records_of_precision as f64 / number_of_records as f64) < IGNORE_THRESHOLD {
+            println!(
+                "Skipping precision: {}, {} / {} ({}) < THRESHOLD ({})",
+                precision,
+                number_of_records_of_precision,
+                number_of_records,
+                number_of_records_of_precision as f64 / number_of_records as f64,
+                IGNORE_THRESHOLD
+            );
+            continue;
+        }
+        scale = Some(10u32.checked_pow(precision as u32).context(format!(
+            "Failed to calculate appropriate scale. decimal_precision: {}, decimal_repr: {:?}",
+            max_decimal_precision, strs
+        ))?);
+        println!(
+            "Use precision: {}, {} / {} ({})",
+            precision,
+            number_of_records_of_precision,
+            number_of_records,
+            number_of_records_of_precision as f64 / number_of_records as f64,
+        );
+        break;
+    }
+
+    scale.context(format!(
+        "Failed to calculate appropriate scale from {:?}",
+        float_strs
+    ))
 }
