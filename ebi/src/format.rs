@@ -112,6 +112,7 @@
 //! pub struct FileFooter3 {
 //!     /// Compression Elapsed Time (nano seconds)
 //!     pub compression_elapsed_time_nano_secs: u128,
+//!     pub execution_elapsed_times_nano_secs: SerializableSegmentedExecutionTimes,
 //!     pub crc: u32,
 //! }
 //!
@@ -127,6 +128,8 @@
 //! ```
 
 use num_enum::TryFromPrimitive;
+
+use crate::time::SerializableSegmentedExecutionTimes;
 pub mod deserialize;
 pub mod native;
 pub mod serialize;
@@ -237,6 +240,7 @@ pub struct FileFooter2 {
 pub struct FileFooter3 {
     /// Compression Elapsed Time (nano seconds)
     pub compression_elapsed_time_nano_secs: u128,
+    pub execution_elapsed_times_nano_secs: SerializableSegmentedExecutionTimes,
     pub crc: u32,
 }
 

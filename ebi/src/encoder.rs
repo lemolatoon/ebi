@@ -12,6 +12,7 @@ use crate::{
         ChunkFooter, FieldType, FileConfig, FileFooter0, FileFooter3, FileHeader,
         GeneralChunkHeader,
     },
+    time::{SegmentKind, SegmentedExecutionTimes},
 };
 use core::slice;
 #[cfg(feature = "serde")]
@@ -188,7 +189,11 @@ impl<R: Read> FileWriter<R> {
         f.write_all(header.to_le().as_bytes())
     }
 
-    pub fn write_footer<W: Write + std::io::Seek>(&mut self, mut f: W) -> io::Result<()> {
+    pub fn write_footer<W: Write + std::io::Seek>(
+        &mut self,
+        mut f: W,
+        timer: SegmentedExecutionTimes,
+    ) -> io::Result<()> {
         let number_of_chunks = self.n_chunks() as u64;
         let number_of_records = self
             .chunk_footers_with_next_chunk_footer()
@@ -220,6 +225,7 @@ impl<R: Read> FileWriter<R> {
 
         let mut footer3 = FileFooter3 {
             compression_elapsed_time_nano_secs: 0, // must be written later
+            execution_elapsed_times_nano_secs: timer.into(),
             crc,
         };
 
@@ -260,6 +266,7 @@ impl<R: Read> FileWriter<R> {
 pub struct ChunkWriter<'a, R: Read> {
     file_writer: &'a mut FileWriter<R>,
     compressor: GenericCompressor,
+    timer: SegmentedExecutionTimes,
 }
 
 fn read_less_or_equal<R: Read>(mut f: R, n_bytes: usize) -> Result<Vec<f64>> {
@@ -295,6 +302,7 @@ impl<'a, R: Read> ChunkWriter<'a, R> {
         Self {
             file_writer,
             compressor,
+            timer: SegmentedExecutionTimes::new(),
         }
     }
 
@@ -302,11 +310,16 @@ impl<'a, R: Read> ChunkWriter<'a, R> {
         self.compressor
     }
 
+    pub fn timer(&self) -> &SegmentedExecutionTimes {
+        &self.timer
+    }
+
     pub fn write<W: Write>(&mut self, mut f: W) -> Result<()> {
         let chunk_option = *self.file_writer.chunk_option();
 
         match chunk_option {
             opt @ (ChunkOption::RecordCount(_) | ChunkOption::Full) => {
+                let io_read_timer = self.timer.start_addition_measurement(SegmentKind::IORead);
                 let mut buf = if let ChunkOption::RecordCount(count) = opt {
                     read_less_or_equal(self.file_writer.input_mut(), count * size_of::<f64>())?
                 } else {
@@ -317,6 +330,7 @@ impl<'a, R: Read> ChunkWriter<'a, R> {
                         .map(|chunk| f64::from_le_bytes(chunk.try_into().unwrap()))
                         .collect::<Vec<f64>>()
                 };
+                io_read_timer.stop();
                 if buf.is_empty() {
                     self.file_writer.set_reaches_eof();
                     return Ok(());
@@ -328,10 +342,12 @@ impl<'a, R: Read> ChunkWriter<'a, R> {
                 // TODO: implement good estimation
                 // Simple heuristic to estimate the number of records to read.
                 let record_count = ((n as f64 / size_of::<f64>() as f64) * 1.5).ceil() as usize;
+                let io_read_timer = self.timer.start_addition_measurement(SegmentKind::IORead);
                 let mut buf = read_less_or_equal(
                     self.file_writer.input_mut(),
                     record_count * size_of::<f64>(),
                 )?;
+                io_read_timer.stop();
                 if buf.is_empty() {
                     self.file_writer.set_reaches_eof();
                     return Ok(());
@@ -354,10 +370,16 @@ impl<'a, R: Read> ChunkWriter<'a, R> {
 
         self.compressor.prepare();
 
+        if let Some(compression_timer) = self.compressor.execution_times() {
+            self.timer += *compression_timer;
+        }
+
+        let io_write_timer = self.timer.start_addition_measurement(SegmentKind::IOWrite);
         for bytes in self.compressor.buffers() {
             total_bytes_out += bytes.len();
             f.write_all(bytes)?;
         }
+        io_write_timer.stop();
 
         self.file_writer
             .increment_total_bytes_in_by(self.compressor.total_bytes_in());
@@ -422,7 +444,7 @@ mod tests {
             out_f.flush()?;
         }
 
-        file_writer.write_footer(&mut out_f)?;
+        file_writer.write_footer(&mut out_f, /* dummy */ SegmentedExecutionTimes::new())?;
         let footer_offset_slot_offset = file_writer.footer_offset_slot_offset();
         let mut dest_vec = out_f.into_inner();
         file_writer.write_footer_offset(&mut dest_vec[footer_offset_slot_offset..])?;

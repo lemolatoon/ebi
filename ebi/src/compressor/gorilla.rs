@@ -6,28 +6,31 @@ use crate::{
     encoder,
     format::{deserialize, serialize},
     io::bit_write::BufferedBitWriter,
+    time::{SegmentKind, SegmentedExecutionTimes},
 };
 
 use super::{AppendableCompressor, Capacity, Compressor};
 
-#[derive(Debug, Clone, PartialEq, PartialOrd)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct GorillaCompressor {
     encoder: modified_tsz::GorillaFloatEncoder,
+    timer: SegmentedExecutionTimes,
 }
 
 const DEFAULT_BUF_SIZE: usize = 1024 * 8;
 
 impl GorillaCompressor {
     pub fn new() -> Self {
-        let w = BufferedBitWriter::with_capacity(DEFAULT_BUF_SIZE);
-        let encoder = modified_tsz::GorillaFloatEncoder::new(w);
-        Self { encoder }
+        Self::with_capacity(DEFAULT_BUF_SIZE)
     }
 
     pub fn with_capacity(capacity: usize) -> Self {
         let w = BufferedBitWriter::with_capacity(capacity);
         let encoder = modified_tsz::GorillaFloatEncoder::new(w);
-        Self { encoder }
+        Self {
+            encoder,
+            timer: SegmentedExecutionTimes::new(),
+        }
     }
 }
 
@@ -40,9 +43,11 @@ impl Default for GorillaCompressor {
 impl Compressor for GorillaCompressor {
     fn compress(&mut self, input: &[f64]) -> encoder::Result<()> {
         self.reset();
+        let xor_encode_timer = self.timer.start_measurement(SegmentKind::Xor);
         for value in input {
             self.encoder.encode(*value);
         }
+        xor_encode_timer.stop();
 
         Ok(())
     }
@@ -67,6 +72,10 @@ impl Compressor for GorillaCompressor {
 
     fn reset(&mut self) {
         self.encoder.reset();
+    }
+
+    fn execution_times(&self) -> Option<&SegmentedExecutionTimes> {
+        Some(&self.timer)
     }
 }
 
@@ -176,10 +185,9 @@ pub(crate) mod modified_tsz {
     /// StdEncoder
     ///
     /// StdEncoder is used to encode `DataPoint`s
-    #[derive(Debug, Clone, PartialEq, PartialOrd)]
+    #[derive(Debug, Clone, PartialEq)]
     pub struct GorillaFloatEncoder {
         state: GorillaFloatEncoderState,
-
         w: BufferedBitWriter,
     }
 

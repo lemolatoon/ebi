@@ -6,16 +6,18 @@ use crate::{
     encoder,
     format::{deserialize, serialize},
     io::bit_write::{BitWrite as _, BufferedBitWriter},
+    time::{SegmentKind, SegmentedExecutionTimes},
 };
 
 use super::{Capacity, Compressor};
 
 pub type Chimp128Compressor = ChimpNCompressor<128>;
 
-#[derive(Debug, Clone, PartialEq, PartialOrd)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct ChimpNCompressor<const N: usize> {
     encoder: ChimpNEncoder<N>,
     total_bytes_in: usize,
+    timer: SegmentedExecutionTimes,
 }
 
 impl<const N: usize> ChimpNCompressor<N> {
@@ -23,6 +25,7 @@ impl<const N: usize> ChimpNCompressor<N> {
         Self {
             encoder: ChimpNEncoder::new(),
             total_bytes_in: 0,
+            timer: SegmentedExecutionTimes::new(),
         }
     }
 
@@ -30,6 +33,7 @@ impl<const N: usize> ChimpNCompressor<N> {
         Self {
             encoder: ChimpNEncoder::with_capacity(capacity),
             total_bytes_in: 0,
+            timer: SegmentedExecutionTimes::new(),
         }
     }
 }
@@ -69,9 +73,11 @@ impl<const N: usize> Compressor for ChimpNCompressor<N> {
         self.reset();
         self.total_bytes_in += size_of_val(input);
 
+        let xor_timer = self.timer.start_measurement(SegmentKind::Xor);
         for &value in input {
             self.encoder.add_value(value);
         }
+        xor_timer.stop();
 
         Ok(())
     }
@@ -103,6 +109,10 @@ impl<const N: usize> Compressor for ChimpNCompressor<N> {
     fn reset(&mut self) {
         self.encoder.reset();
         self.total_bytes_in = 0;
+    }
+
+    fn execution_times(&self) -> Option<&SegmentedExecutionTimes> {
+        Some(&self.timer)
     }
 }
 

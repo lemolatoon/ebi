@@ -64,6 +64,10 @@ impl Compressor for UncompressedCompressor {
         self.total_bytes_in = 0;
         self.buffer.clear();
     }
+
+    fn execution_times(&self) -> Option<&crate::time::SegmentedExecutionTimes> {
+        None
+    }
 }
 
 impl AppendableCompressor for UncompressedCompressor {

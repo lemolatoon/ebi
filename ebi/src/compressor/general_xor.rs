@@ -6,6 +6,7 @@ use crate::{
     encoder,
     format::serialize,
     io::bit_write::{BitWrite, BufferedBitWriter},
+    time::{SegmentKind, SegmentedExecutionTimes},
 };
 
 use super::{Capacity, Compressor};
@@ -28,11 +29,12 @@ pub trait XorEncoder: Default {
     fn reset(&mut self);
 }
 
-#[derive(Debug, Clone, PartialEq, PartialOrd)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct GeneralXorCompressor<W: BitWrite, T: XorEncoder + Default> {
     w: W,
     encoder: T,
     total_bytes_in: usize,
+    timer: SegmentedExecutionTimes,
 }
 
 type BitWriter = BufferedBitWriter;
@@ -47,6 +49,7 @@ impl<T: XorEncoder> GeneralXorCompressor<BitWriter, T> {
             w: BitWriter::with_capacity(capacity),
             encoder: T::default(),
             total_bytes_in: 0,
+            timer: SegmentedExecutionTimes::new(),
         }
     }
 }
@@ -130,9 +133,11 @@ impl<W: BitWrite, T: XorEncoder> Compressor for GeneralXorCompressor<W, T> {
         self.reset();
         self.total_bytes_in += size_of_val(input);
 
+        let xor_encode_timer = self.timer.start_measurement(SegmentKind::Xor);
         for value in input {
             self.encoder.compress_float(&mut self.w, value.to_bits());
         }
+        xor_encode_timer.stop();
 
         Ok(())
     }
@@ -161,5 +166,9 @@ impl<W: BitWrite, T: XorEncoder> Compressor for GeneralXorCompressor<W, T> {
         self.w.reset();
         self.encoder.reset();
         self.total_bytes_in = 0;
+    }
+
+    fn execution_times(&self) -> Option<&SegmentedExecutionTimes> {
+        Some(&self.timer)
     }
 }

@@ -60,11 +60,11 @@ fn main() {
     // let compressor_config = CompressorConfig::elf_on_chimp().build();
     // let compressor_config = CompressorConfig::elf().build();
     // let compressor_config = CompressorConfig::chimp().build();
-    // let compressor_config = CompressorConfig::delta_sprintz()
-    //     .scale(scale as u32)
-    //     .build();
+    let compressor_config = CompressorConfig::delta_sprintz()
+        .scale(scale as u32)
+        .build();
     // let compressor_config = CompressorConfig::zstd().build();
-    let compressor_config = CompressorConfig::ffi_alp().build();
+    // let compressor_config = CompressorConfig::ffi_alp().build();
     let chunk_option = ChunkOption::RecordCount(RECORD_COUNT * 10 + 3);
     // let chunk_option = ChunkOption::ByteSizeBestEffort(1024 * 8);
     dbg!(chunk_option);
@@ -114,6 +114,11 @@ fn main() {
         .unwrap()
         .into_buffered();
     let mut decoder = Decoder::new(input).unwrap();
+    println!("{:?}", decoder.footer().segmented_execution_times());
+    println!(
+        "elapsed time: {:?}",
+        decoder.footer().compression_elapsed_time()
+    );
 
     let reader = decoder.chunk_reader(ChunkId::new(0)).unwrap();
     let chunk_footers = reader.footer().chunk_footers();
@@ -121,20 +126,21 @@ fn main() {
 
     let mut output = DecoderOutput::from_vec(Vec::new());
     decoder.materialize(&mut output, None, None).unwrap();
+    decoder.footer();
 
     let mut input_bytes = Vec::new();
     File::open("uncompressed.bin")
         .unwrap()
         .read_to_end(&mut input_bytes)
         .unwrap();
-    let _input_floats: Vec<f64> = input_bytes
+    let input_floats: Vec<f64> = input_bytes
         .chunks_exact(8)
         .map(|b| {
             let fp = f64::from_le_bytes(b.try_into().unwrap());
             (fp * scale as f64).round() / scale as f64
         })
         .collect();
-    let input_floats = binding;
+    // let input_floats = binding;
 
     let output_bytes = output.into_writer().into_inner();
     let output_floats: Vec<f64> = output_bytes

@@ -78,4 +78,8 @@ impl Compressor for SnappyCompressor {
         self.compressed = None;
         self.total_bytes_in = 0;
     }
+
+    fn execution_times(&self) -> Option<&crate::time::SegmentedExecutionTimes> {
+        None
+    }
 }

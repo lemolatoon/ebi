@@ -8,6 +8,7 @@ use crate::{
     encoder,
     format::{deserialize, serialize},
     io::bit_write::{BitWrite, BufferedBitWriter},
+    time::SegmentedExecutionTimes,
 };
 
 use super::{Capacity, Compressor};
@@ -16,13 +17,14 @@ type BitWriter = BufferedBitWriter;
 
 pub type DeltaSprintzCompressor = DeltaSprintzCompressorImpl<BitWriter>;
 
-#[derive(Debug, Clone, PartialEq, PartialOrd)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct DeltaSprintzCompressorImpl<W: BitWrite> {
     w: W,
     /// Used for temporarily store delta_zigzag_encoded quantized floats
     buffer: Vec<u64>,
     scale: u32,
     total_bytes_in: usize,
+    timer: SegmentedExecutionTimes,
 }
 
 #[derive(Builder, Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -67,6 +69,7 @@ impl<W: BitWrite> DeltaSprintzCompressorImpl<W> {
             buffer: Vec::new(),
             total_bytes_in: 0,
             scale,
+            timer: SegmentedExecutionTimes::new(),
         }
     }
 }
@@ -77,7 +80,12 @@ impl<W: BitWrite> Compressor for DeltaSprintzCompressorImpl<W> {
         // quantize
         self.total_bytes_in += size_of_val(input);
         // TODO: return quantize error here
-        delta_impl::delta_sprintz_compress_impl(input, self.scale, &mut self.buffer, &mut self.w);
+        self.timer = delta_impl::delta_sprintz_compress_impl(
+            input,
+            self.scale,
+            &mut self.buffer,
+            &mut self.w,
+        );
 
         Ok(())
     }
@@ -103,10 +111,16 @@ impl<W: BitWrite> Compressor for DeltaSprintzCompressorImpl<W> {
         self.buffer.clear();
         self.total_bytes_in = 0;
     }
+
+    fn execution_times(&self) -> Option<&SegmentedExecutionTimes> {
+        Some(&self.timer)
+    }
 }
 
 mod delta_impl {
     use std::{iter, mem};
+
+    use crate::time::{SegmentKind, SegmentedExecutionTimes};
 
     use super::{zigzag, BitWrite};
 
@@ -119,14 +133,20 @@ mod delta_impl {
         scale: u32,
         buffer: &mut Vec<u64>,
         mut w: W,
-    ) {
+    ) -> SegmentedExecutionTimes {
         debug_assert!(buffer.is_empty());
+        let mut timer = SegmentedExecutionTimes::new();
+        let quantization_timer = timer.start_measurement(SegmentKind::Quantization);
         let quantized = input
             .iter()
             .copied()
             .map(|fp| (fp * scale as f64).round() as i64);
+        quantization_timer.stop();
+        let delta_encode_timer = timer.start_measurement(SegmentKind::Delta);
         let (initial_number, number_of_bits_needed) = zigzag_delta_num_bits(quantized, buffer);
+        delta_encode_timer.stop();
 
+        let bit_packing_timer = timer.start_measurement(SegmentKind::BitPacking);
         // write header
         let initial_number_bits = unsafe { mem::transmute::<i64, u64>(initial_number) };
         w.write_bits(initial_number_bits, 64);
@@ -134,11 +154,15 @@ mod delta_impl {
         w.write_byte(number_of_bits_needed);
 
         if number_of_bits_needed == 0 {
-            return;
+            return timer;
         }
+
         for v in buffer.iter().copied() {
             w.write_bits(v, number_of_bits_needed as u32);
         }
+        bit_packing_timer.stop();
+
+        timer
     }
     /// zigzag_delta encode `quantized_input` and store them into buffer.
     /// Also returns the initial_number of quantized_input and number_of_bits_needed for

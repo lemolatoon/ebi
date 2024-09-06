@@ -6,7 +6,7 @@ use std::{
 use num_enum::TryFromPrimitive;
 use thiserror::Error;
 
-use crate::{compressor::Capacity, decoder};
+use crate::{compressor::Capacity, decoder, time::SerializableSegmentedExecutionTimes};
 
 use super::{
     ChunkFooter, ChunkOption, ChunkOptionKind, CompressionScheme, FieldType, FileConfig,
@@ -271,15 +271,20 @@ impl FromLeBytes for FileFooter0 {
 }
 
 impl FromLeBytes for FileFooter3 {
-    fn from_le_bytes(bytes: &[u8]) -> Self {
+    fn from_le_bytes(mut bytes: &[u8]) -> Self {
         let compression_elapsed_time_nano_secs = u128::from_le_bytes([
             bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5], bytes[6], bytes[7],
             bytes[8], bytes[9], bytes[10], bytes[11], bytes[12], bytes[13], bytes[14], bytes[15],
         ]);
+        bytes = &bytes[size_of::<u128>()..];
+        let execution_elapsed_times_nano_secs =
+            SerializableSegmentedExecutionTimes::from_le_bytes(bytes);
+        bytes = &bytes[size_of::<SerializableSegmentedExecutionTimes>()..];
         let crc = u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]);
 
         Self {
             compression_elapsed_time_nano_secs,
+            execution_elapsed_times_nano_secs,
             crc,
         }
     }

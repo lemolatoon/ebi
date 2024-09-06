@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 use crate::{
     encoder,
     format::{deserialize, serialize},
+    time::SegmentedExecutionTimes,
 };
 
 use super::Compressor;
@@ -74,5 +75,9 @@ impl Compressor for FFIAlpCompressor {
         self.compressed.clear();
         self.is_compressed = false;
         self.total_bytes_in = 0;
+    }
+
+    fn execution_times(&self) -> Option<&SegmentedExecutionTimes> {
+        None
     }
 }

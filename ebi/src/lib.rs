@@ -6,6 +6,7 @@ pub mod decoder;
 pub mod encoder;
 pub mod format;
 pub mod io;
+pub mod time;
 
 #[cfg(test)]
 mod tests {
@@ -20,6 +21,7 @@ mod tests {
         compressor::CompressorConfig,
         decoder::FileReader,
         encoder::{self, ChunkOption, FileWriter},
+        time::SegmentedExecutionTimes,
     };
 
     fn generate_and_write_random_f64(n: usize) -> Vec<f64> {
@@ -55,7 +57,7 @@ mod tests {
             compressor = Some(chunk_writer.into_compressor());
         }
 
-        file_writer.write_footer(&mut out_f)?;
+        file_writer.write_footer(&mut out_f, /* dummy */ SegmentedExecutionTimes::new())?;
         let footer_offset_slot_offset = file_writer.footer_offset_slot_offset();
         out_f.seek(SeekFrom::Start(footer_offset_slot_offset as u64))?;
         file_writer.write_footer_offset(&mut out_f)?;
