@@ -165,6 +165,7 @@ impl<W: BitWrite, T: XorEncoder> Compressor for GeneralXorCompressor<W, T> {
     fn reset(&mut self) {
         self.w.reset();
         self.encoder.reset();
+        self.timer = SegmentedExecutionTimes::new();
         self.total_bytes_in = 0;
     }
 

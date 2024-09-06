@@ -10,9 +10,10 @@ use crate::{
         FileMetadataLike, GeneralChunkHandle,
     },
     io::bit_read::{self, BitRead2, BufferedBitReader},
+    time::{SegmentKind, SegmentedExecutionTimes},
 };
 
-use super::Reader;
+use super::{default_decompress, Reader};
 
 pub type BitReader = bit_read::BufferedBitReader<Vec<u8>>;
 
@@ -27,11 +28,14 @@ impl DeltaSprintzReader {
     pub fn new<F: FileMetadataLike, R: Read>(
         handle: &GeneralChunkHandle<F>,
         mut r: R,
+        timer: &mut SegmentedExecutionTimes,
     ) -> decoder::Result<Self> {
         let number_of_records = handle.number_of_records();
         let chunk_size = handle.chunk_size() as usize;
         let mut chunk_in_memory = vec![0; chunk_size];
+        let io_read_timer = timer.start_addition_measurement(SegmentKind::IORead);
         r.read_exact(&mut chunk_in_memory)?;
+        io_read_timer.stop();
         let bit_reader = BufferedBitReader::new(chunk_in_memory);
         Ok(Self {
             bit_reader,
@@ -52,6 +56,14 @@ impl Reader for DeltaSprintzReader {
 
     fn decompress_iter(&mut self) -> decoder::Result<Self::DecompressIterator<'_>> {
         Self::DecompressIterator::new(&mut self.bit_reader, self.number_of_records)
+    }
+
+    fn decompress(&mut self, timer: &mut SegmentedExecutionTimes) -> decoder::Result<&[f64]> {
+        let decompression_timer = timer.start_addition_measurement(SegmentKind::Decompression);
+        let decompressed = default_decompress(self)?;
+        decompression_timer.stop();
+
+        Ok(decompressed)
     }
 
     fn set_decompress_result(&mut self, data: Vec<f64>) -> &[f64] {
@@ -78,10 +90,11 @@ impl QueryExecutor for DeltaSprintzReader {
         predicate: Predicate,
         bitmask: Option<&RoaringBitmap>,
         logical_offset: usize,
+        timer: &mut SegmentedExecutionTimes,
     ) -> decoder::Result<RoaringBitmap> {
         self.bit_reader.reset();
         if self.decompressed.is_some() {
-            return default_filter(self, predicate, bitmask, logical_offset);
+            return default_filter(self, predicate, bitmask, logical_offset, timer);
         }
 
         let initial_value_bits = self
@@ -120,6 +133,8 @@ impl QueryExecutor for DeltaSprintzReader {
 
         let mut bm = RoaringBitmap::new();
         let mut previous_value_quantized = initial_value;
+
+        let comparison_timer = timer.start_addition_measurement(SegmentKind::CompareInsert);
         for i in 0..self.number_of_records {
             let zigzag_delta = self
                 .bit_reader
@@ -134,6 +149,7 @@ impl QueryExecutor for DeltaSprintzReader {
                 bm.insert(record_offset);
             }
         }
+        comparison_timer.stop();
 
         if let Some(bitmask) = bitmask {
             bm &= bitmask;
@@ -147,10 +163,11 @@ impl QueryExecutor for DeltaSprintzReader {
         output: &mut W,
         bitmask: Option<&RoaringBitmap>,
         logical_offset: usize,
+        timer: &mut SegmentedExecutionTimes,
     ) -> decoder::Result<()> {
         self.bit_reader.reset();
 
-        default_materialize(self, output, bitmask, logical_offset)
+        default_materialize(self, output, bitmask, logical_offset, timer)
     }
 }
 

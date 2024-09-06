@@ -23,6 +23,7 @@ use crate::decoder;
 
 use crate::format::native::{NativeChunkFooter, NativeFileFooter, NativeFileHeader};
 use crate::format::CompressionScheme;
+use crate::time::SegmentedExecutionTimes;
 
 use super::query::{Predicate, QueryExecutor};
 use super::GeneralChunkHandle;
@@ -32,6 +33,7 @@ use super::{FileMetadataLike, Result};
 pub struct GeneralChunkReader<'handle, T: FileMetadataLike, R: Read> {
     handle: &'handle GeneralChunkHandle<T>,
     reader: GeneralChunkReaderInner<R>,
+    timer: SegmentedExecutionTimes,
 }
 
 impl<'handle, T: FileMetadataLike, R: Read> GeneralChunkReader<'handle, T, R> {
@@ -47,12 +49,20 @@ impl<'handle, T: FileMetadataLike, R: Read> GeneralChunkReader<'handle, T, R> {
     pub fn new(handle: &'handle GeneralChunkHandle<T>, reader: R) -> Result<Self> {
         let compression_scheme = handle.header().config().compression_scheme();
 
-        let reader_inner = GeneralChunkReaderInner::new(handle, reader, *compression_scheme)?;
+        let mut timer = SegmentedExecutionTimes::new();
+        let reader_inner =
+            GeneralChunkReaderInner::new(handle, reader, *compression_scheme, &mut timer)?;
 
         Ok(Self {
             handle,
             reader: reader_inner,
+            timer,
         })
+    }
+
+    /// Returns the execution times of the method, which is measured by the previous operation.
+    pub fn segmented_execution_times(&self) -> SegmentedExecutionTimes {
+        self.timer
     }
 
     pub fn header(&self) -> &NativeFileHeader {
@@ -86,7 +96,10 @@ impl<'handle, T: FileMetadataLike, R: Read> GeneralChunkReader<'handle, T, R> {
         bitmask: Option<&RoaringBitmap>,
     ) -> Result<()> {
         let logical_offset = self.handle.chunk_footer().logical_offset() as usize;
-        self.reader.materialize(output, bitmask, logical_offset)
+        self.reader
+            .materialize(output, bitmask, logical_offset, &mut self.timer)?;
+
+        Ok(())
     }
 
     /// Filter the values by the predicate and return the result as a bitmask.
@@ -102,7 +115,11 @@ impl<'handle, T: FileMetadataLike, R: Read> GeneralChunkReader<'handle, T, R> {
         bitmask: Option<&RoaringBitmap>,
     ) -> Result<RoaringBitmap> {
         let logical_offset = self.handle.chunk_footer().logical_offset() as usize;
-        self.reader.filter(predicate, bitmask, logical_offset)
+        let bm = self
+            .reader
+            .filter(predicate, bitmask, logical_offset, &mut self.timer)?;
+
+        Ok(bm)
     }
 
     /// Filter the values by the predicate and write the results as IEEE754 double array to the output.
@@ -117,8 +134,15 @@ impl<'handle, T: FileMetadataLike, R: Read> GeneralChunkReader<'handle, T, R> {
         bitmask: Option<&RoaringBitmap>,
     ) -> Result<()> {
         let logical_offset = self.handle.chunk_footer().logical_offset() as usize;
-        self.reader
-            .filter_materialize(output, predicate, bitmask, logical_offset)
+        self.reader.filter_materialize(
+            output,
+            predicate,
+            bitmask,
+            logical_offset,
+            &mut self.timer,
+        )?;
+
+        Ok(())
     }
 
     /// Calculate the sum of the values filtered by the bitmask.
@@ -128,7 +152,9 @@ impl<'handle, T: FileMetadataLike, R: Read> GeneralChunkReader<'handle, T, R> {
     /// That is why `logical_offset` is necessary to access bitmask.
     pub fn sum(&mut self, bitmask: Option<&RoaringBitmap>) -> Result<f64> {
         let logical_offset = self.handle.chunk_footer().logical_offset() as usize;
-        self.reader.sum(bitmask, logical_offset)
+        let v = self.reader.sum(bitmask, logical_offset, &mut self.timer)?;
+
+        Ok(v)
     }
 
     /// Calculate the minimum of the values filtered by the bitmask.
@@ -138,7 +164,9 @@ impl<'handle, T: FileMetadataLike, R: Read> GeneralChunkReader<'handle, T, R> {
     /// That is why `logical_offset` is necessary to access bitmask.
     pub fn min(&mut self, bitmask: Option<&RoaringBitmap>) -> Result<f64> {
         let logical_offset = self.handle.chunk_footer().logical_offset() as usize;
-        self.reader.min(bitmask, logical_offset)
+        let v = self.reader.min(bitmask, logical_offset, &mut self.timer)?;
+
+        Ok(v)
     }
 
     /// Calculate the maximum of the values filtered by the bitmask.
@@ -148,7 +176,9 @@ impl<'handle, T: FileMetadataLike, R: Read> GeneralChunkReader<'handle, T, R> {
     /// That is why `logical_offset` is necessary to access bitmask.
     pub fn max(&mut self, bitmask: Option<&RoaringBitmap>) -> Result<f64> {
         let logical_offset = self.handle.chunk_footer().logical_offset() as usize;
-        self.reader.max(bitmask, logical_offset)
+        let v = self.reader.max(bitmask, logical_offset, &mut self.timer)?;
+
+        Ok(v)
     }
 }
 
@@ -175,34 +205,35 @@ impl<R: Read> GeneralChunkReaderInner<R> {
         handle: &GeneralChunkHandle<T>,
         reader: R,
         compression_scheme: CompressionScheme,
+        timer: &mut SegmentedExecutionTimes,
     ) -> decoder::Result<Self> {
         Ok(match compression_scheme {
             CompressionScheme::Uncompressed => GeneralChunkReaderInner::Uncompressed(
-                uncompressed::UncompressedReader::new(handle, reader)?,
+                uncompressed::UncompressedReader::new(handle, reader, timer)?,
             ),
-            CompressionScheme::RLE => {
-                GeneralChunkReaderInner::RLE(run_length::RunLengthReader::new(handle, reader)?)
-            }
-            CompressionScheme::Gorilla => {
-                GeneralChunkReaderInner::Gorilla(gorilla::GorillaReader::new(handle, reader))
-            }
+            CompressionScheme::RLE => GeneralChunkReaderInner::RLE(
+                run_length::RunLengthReader::new(handle, reader, timer)?,
+            ),
+            CompressionScheme::Gorilla => GeneralChunkReaderInner::Gorilla(
+                gorilla::GorillaReader::new(handle, reader, timer)?,
+            ),
             CompressionScheme::BUFF => {
-                GeneralChunkReaderInner::BUFF(buff::BUFFReader::new(handle, reader))
+                GeneralChunkReaderInner::BUFF(buff::BUFFReader::new(handle, reader, timer))
             }
             CompressionScheme::Chimp => {
-                GeneralChunkReaderInner::Chimp(chimp::ChimpReader::new(handle, reader)?)
+                GeneralChunkReaderInner::Chimp(chimp::ChimpReader::new(handle, reader, timer)?)
             }
-            CompressionScheme::Chimp128 => {
-                GeneralChunkReaderInner::Chimp128(chimp_n::Chimp128Reader::new(handle, reader))
-            }
-            CompressionScheme::ElfOnChimp => {
-                GeneralChunkReaderInner::ElfOnChimp(elf::on_chimp::ElfReader::new(handle, reader)?)
-            }
+            CompressionScheme::Chimp128 => GeneralChunkReaderInner::Chimp128(
+                chimp_n::Chimp128Reader::new(handle, reader, timer),
+            ),
+            CompressionScheme::ElfOnChimp => GeneralChunkReaderInner::ElfOnChimp(
+                elf::on_chimp::ElfReader::new(handle, reader, timer)?,
+            ),
             CompressionScheme::Elf => {
-                GeneralChunkReaderInner::Elf(elf::ElfReader::new(handle, reader)?)
+                GeneralChunkReaderInner::Elf(elf::ElfReader::new(handle, reader, timer)?)
             }
             CompressionScheme::DeltaSprintz => GeneralChunkReaderInner::DeltaSprintz(
-                sprintz::DeltaSprintzReader::new(handle, reader)?,
+                sprintz::DeltaSprintzReader::new(handle, reader, timer)?,
             ),
             CompressionScheme::Zstd => {
                 GeneralChunkReaderInner::Zstd(zstd::ZstdReader::new(handle, reader))
@@ -221,6 +252,19 @@ impl<R: Read> GeneralChunkReaderInner<R> {
     }
 }
 
+pub fn default_decompress(r: &mut impl Reader) -> decoder::Result<&[f64]> {
+    if r.decompress_result().is_some() {
+        return Ok(r.decompress_result().unwrap());
+    }
+
+    let data = r
+        .decompress_iter()?
+        .collect::<decoder::Result<Vec<f64>>>()?;
+    let result = r.set_decompress_result(data);
+
+    Ok(result)
+}
+
 pub trait Reader {
     type NativeHeader;
     type DecompressIterator<'a>: Iterator<Item = decoder::Result<f64>>
@@ -231,18 +275,7 @@ pub trait Reader {
     fn decompress_iter(&mut self) -> decoder::Result<Self::DecompressIterator<'_>>;
 
     /// Decompress the whole chunk and return the slice of the decompressed values.
-    fn decompress(&mut self) -> decoder::Result<&[f64]> {
-        if self.decompress_result().is_some() {
-            return Ok(self.decompress_result().unwrap());
-        }
-
-        let data = self
-            .decompress_iter()?
-            .collect::<decoder::Result<Vec<f64>>>()?;
-        let result = self.set_decompress_result(data);
-
-        Ok(result)
-    }
+    fn decompress(&mut self, timer: &mut SegmentedExecutionTimes) -> decoder::Result<&[f64]>;
 
     fn set_decompress_result(&mut self, data: Vec<f64>) -> &[f64];
 
@@ -261,7 +294,7 @@ pub enum GeneralDecompressIterator<'a> {
     #[quick_impl(impl From)]
     BUFF(buff::BUFFIterator<'a>),
     #[quick_impl(impl From)]
-    Gorilla(gorilla::GorillaIterator<'a>),
+    Gorilla(gorilla::GorillaDecompressIterator<'a>),
     #[quick_impl(impl From)]
     RLE(run_length::RunLengthIterator<'a>),
     #[quick_impl(impl From)]
@@ -282,11 +315,11 @@ macro_rules! impl_generic_reader {
     ($enum_name:ident, $($variant:ident $(#[$meta:meta])?),*) => {
         impl<R: Read> $enum_name<R> {
             /// Decompress the whole chunk and return the slice of the decompressed values.
-            pub fn decompress(&mut self) -> decoder::Result<&[f64]> {
+            pub fn decompress(&mut self, timer: &mut SegmentedExecutionTimes) -> decoder::Result<&[f64]> {
                 match self {
                     $(
                         $(#[$meta])?
-                        $enum_name::$variant(c) => c.decompress(),
+                        $enum_name::$variant(c) => c.decompress(timer),
                     )*
                 }
             }
@@ -339,11 +372,12 @@ macro_rules! impl_generic_reader {
                 output: &mut impl Write,
                 bitmask: Option<&RoaringBitmap>,
                 logical_offset: usize,
+                timer: &mut SegmentedExecutionTimes,
             ) -> Result<()> {
                 match self {
                     $(
                         $(#[$meta])?
-                        $enum_name::$variant(c) => c.materialize(output, bitmask, logical_offset),
+                        $enum_name::$variant(c) => c.materialize(output, bitmask, logical_offset, timer),
                     )*
                 }
             }
@@ -361,11 +395,12 @@ macro_rules! impl_generic_reader {
                 predicate: Predicate,
                 bitmask: Option<&RoaringBitmap>,
                 logical_offset: usize,
+                timer: &mut SegmentedExecutionTimes,
             ) -> Result<RoaringBitmap> {
                 match self {
                     $(
                         $(#[$meta])?
-                        $enum_name::$variant(c) => c.filter(predicate, bitmask, logical_offset),
+                        $enum_name::$variant(c) => c.filter(predicate, bitmask, logical_offset, timer),
                     )*
                 }
             }
@@ -382,11 +417,12 @@ macro_rules! impl_generic_reader {
                 predicate: Predicate,
                 bitmask: Option<&RoaringBitmap>,
                 logical_offset: usize,
+                timer: &mut SegmentedExecutionTimes,
             ) -> Result<()> {
                 match self {
                     $(
                         $(#[$meta])?
-                        $enum_name::$variant(c) => c.filter_materialize(output, predicate, bitmask, logical_offset),
+                        $enum_name::$variant(c) => c.filter_materialize(output, predicate, bitmask, logical_offset, timer),
                     )*
                 }
             }
@@ -400,11 +436,12 @@ macro_rules! impl_generic_reader {
                 &mut self,
                 bitmask: Option<&RoaringBitmap>,
                 logical_offset: usize,
+                timer: &mut SegmentedExecutionTimes,
             ) -> Result<f64> {
                 match self {
                     $(
                         $(#[$meta])?
-                        $enum_name::$variant(c) => c.sum(bitmask, logical_offset),
+                        $enum_name::$variant(c) => c.sum(bitmask, logical_offset, timer),
                     )*
                 }
             }
@@ -418,11 +455,12 @@ macro_rules! impl_generic_reader {
                 &mut self,
                 bitmask: Option<&RoaringBitmap>,
                 logical_offset: usize,
+                timer: &mut SegmentedExecutionTimes,
             ) -> Result<f64> {
                 match self {
                     $(
                         $(#[$meta])?
-                        $enum_name::$variant(c) => c.min(bitmask, logical_offset),
+                        $enum_name::$variant(c) => c.min(bitmask, logical_offset, timer),
                     )*
                 }
             }
@@ -436,11 +474,12 @@ macro_rules! impl_generic_reader {
                 &mut self,
                 bitmask: Option<&RoaringBitmap>,
                 logical_offset: usize,
+                timer: &mut SegmentedExecutionTimes,
             ) -> Result<f64> {
                 match self {
                     $(
                         $(#[$meta])?
-                        $enum_name::$variant(c) => c.max(bitmask, logical_offset),
+                        $enum_name::$variant(c) => c.max(bitmask, logical_offset, timer),
                     )*
                 }
             }
@@ -605,7 +644,10 @@ mod tests {
             .unwrap();
 
         let mut reader = decoder.chunk_reader(ChunkId::new(0)).unwrap();
-        let decompress_result = reader.inner_mut().decompress().unwrap();
+        let decompress_result = reader
+            .inner_mut()
+            .decompress(&mut SegmentedExecutionTimes::new())
+            .unwrap();
 
         assert_eq!(
             iter_result.len(),

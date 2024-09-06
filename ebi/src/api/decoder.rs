@@ -15,6 +15,7 @@ use crate::{
         GeneralChunkHandle, Metadata,
     },
     format::native::{NativeChunkFooter, NativeFileFooter, NativeFileHeader},
+    time::SegmentedExecutionTimes,
 };
 
 pub struct DecoderInput<R: Read + Seek> {
@@ -107,6 +108,7 @@ pub struct Decoder<R: Read + Seek> {
     input: DecoderInput<R>,
     file_metadata_ref: Arc<Metadata>,
     chunk_handles: Box<[GeneralChunkHandle<Arc<Metadata>>]>,
+    timer: SegmentedExecutionTimes,
 }
 
 impl<R: Read + Seek> Decoder<R> {
@@ -127,7 +129,13 @@ impl<R: Read + Seek> Decoder<R> {
             input,
             file_metadata_ref,
             chunk_handles,
+            timer: SegmentedExecutionTimes::new(),
         })
+    }
+
+    /// Returns the segmented execution times of the previous operation.
+    pub fn segmented_execution_times(&self) -> SegmentedExecutionTimes {
+        self.timer
     }
 
     pub fn footer_size(&self) -> u64 {
@@ -176,6 +184,8 @@ impl<R: Read + Seek> Decoder<R> {
             ..
         } = self;
 
+        self.timer = SegmentedExecutionTimes::new();
+
         for chunk_handle in chunk_handles
             .iter_mut()
             .enumerate()
@@ -191,6 +201,8 @@ impl<R: Read + Seek> Decoder<R> {
             let mut chunk_reader = Self::chunk_reader_from_handle(input, chunk_handle)?;
 
             chunk_reader.materialize(output.writer_mut(), bitmask)?;
+
+            self.timer += chunk_reader.segmented_execution_times();
         }
 
         Ok(())
@@ -211,6 +223,8 @@ impl<R: Read + Seek> Decoder<R> {
             ..
         } = self;
 
+        self.timer = SegmentedExecutionTimes::new();
+
         let mut result = RoaringBitmap::new();
 
         for chunk_handle in chunk_handles
@@ -230,6 +244,8 @@ impl<R: Read + Seek> Decoder<R> {
             let filtered = chunk_reader.filter(predicate, bitmask)?;
 
             result |= filtered;
+
+            self.timer += chunk_reader.segmented_execution_times();
         }
 
         Ok(result)
@@ -248,6 +264,8 @@ impl<R: Read + Seek> Decoder<R> {
             ..
         } = self;
 
+        self.timer = SegmentedExecutionTimes::new();
+
         for chunk_handle in chunk_handles
             .iter_mut()
             .enumerate()
@@ -263,6 +281,8 @@ impl<R: Read + Seek> Decoder<R> {
             let mut chunk_reader = Self::chunk_reader_from_handle(input, chunk_handle)?;
 
             chunk_reader.filter_materialize(output.writer_mut(), predicate, bitmask)?;
+
+            self.timer += chunk_reader.segmented_execution_times();
         }
 
         Ok(())
@@ -281,6 +301,8 @@ impl<R: Read + Seek> Decoder<R> {
             ..
         } = self;
 
+        self.timer = SegmentedExecutionTimes::new();
+
         let mut result = 0.0;
 
         for chunk_handle in chunk_handles
@@ -298,6 +320,8 @@ impl<R: Read + Seek> Decoder<R> {
             let mut chunk_reader = Self::chunk_reader_from_handle(input, chunk_handle)?;
 
             result += chunk_reader.sum(bitmask)?;
+
+            self.timer += chunk_reader.segmented_execution_times();
         }
 
         Ok(result)
@@ -316,6 +340,8 @@ impl<R: Read + Seek> Decoder<R> {
             ..
         } = self;
 
+        self.timer = SegmentedExecutionTimes::new();
+
         let mut result = f64::INFINITY;
 
         for chunk_handle in chunk_handles
@@ -333,6 +359,8 @@ impl<R: Read + Seek> Decoder<R> {
             let mut chunk_reader = Self::chunk_reader_from_handle(input, chunk_handle)?;
 
             result = result.min(chunk_reader.min(bitmask)?);
+
+            self.timer += chunk_reader.segmented_execution_times();
         }
 
         Ok(result)
@@ -351,6 +379,8 @@ impl<R: Read + Seek> Decoder<R> {
             ..
         } = self;
 
+        self.timer = SegmentedExecutionTimes::new();
+
         let mut result = f64::NEG_INFINITY;
 
         for chunk_handle in chunk_handles
@@ -368,6 +398,8 @@ impl<R: Read + Seek> Decoder<R> {
             let mut chunk_reader = Self::chunk_reader_from_handle(input, chunk_handle)?;
 
             result = result.max(chunk_reader.min(bitmask)?);
+
+            self.timer += chunk_reader.segmented_execution_times();
         }
 
         Ok(result)

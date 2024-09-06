@@ -4,7 +4,10 @@ pub use roaring::RoaringBitmap;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-use crate::decoder;
+use crate::{
+    decoder,
+    time::{SegmentKind, SegmentedExecutionTimes},
+};
 
 use super::chunk_reader::Reader;
 
@@ -14,14 +17,18 @@ pub fn default_materialize<T: Reader + ?Sized, W: Write>(
     output: &mut W,
     bitmask: Option<&RoaringBitmap>,
     logical_offset: usize,
+    timer: &mut SegmentedExecutionTimes,
 ) -> decoder::Result<()> {
-    for (i, v) in reader.decompress()?.iter().enumerate() {
+    let decompressed = reader.decompress(timer)?;
+    let io_write_timer = timer.start_addition_measurement(SegmentKind::IOWrite);
+    for (i, v) in decompressed.iter().enumerate() {
         let record_offset = logical_offset + i;
         if bitmask.is_some_and(|bm| !bm.contains(record_offset as u32)) {
             continue;
         }
         output.write_all(&v.to_ne_bytes())?;
     }
+    io_write_timer.stop();
 
     Ok(())
 }
@@ -32,9 +39,12 @@ pub fn default_filter<T: Reader + ?Sized>(
     predicate: Predicate,
     bitmask: Option<&RoaringBitmap>,
     logical_offset: usize,
+    timer: &mut SegmentedExecutionTimes,
 ) -> decoder::Result<RoaringBitmap> {
     let mut result = RoaringBitmap::new();
-    for (i, v) in reader.decompress()?.iter().enumerate() {
+    let decompressed = reader.decompress(timer)?;
+    let comparison_timer = timer.start_addition_measurement(SegmentKind::CompareInsert);
+    for (i, v) in decompressed.iter().enumerate() {
         let record_offset = logical_offset + i;
 
         if bitmask.is_some_and(|bm| !bm.contains(record_offset as u32)) {
@@ -45,6 +55,7 @@ pub fn default_filter<T: Reader + ?Sized>(
             result.insert(record_offset as u32);
         }
     }
+    comparison_timer.stop();
 
     Ok(result)
 }
@@ -56,8 +67,11 @@ pub fn default_filter_materialize<T: Reader + ?Sized, W: Write>(
     predicate: Predicate,
     bitmask: Option<&RoaringBitmap>,
     logical_offset: usize,
+    timer: &mut SegmentedExecutionTimes,
 ) -> decoder::Result<()> {
-    for (i, v) in reader.decompress()?.iter().enumerate() {
+    let decompressed = reader.decompress(timer)?;
+    let io_write_timer = timer.start_addition_measurement(SegmentKind::IOWrite);
+    for (i, v) in decompressed.iter().enumerate() {
         let record_offset = logical_offset + i;
 
         if bitmask.is_some_and(|bm| !bm.contains(record_offset as u32)) {
@@ -68,6 +82,7 @@ pub fn default_filter_materialize<T: Reader + ?Sized, W: Write>(
             output.write_all(&v.to_ne_bytes())?;
         }
     }
+    io_write_timer.stop();
 
     Ok(())
 }
@@ -77,15 +92,19 @@ pub fn default_sum<T: Reader + ?Sized>(
     reader: &mut T,
     bitmask: Option<&RoaringBitmap>,
     logical_offset: usize,
+    timer: &mut SegmentedExecutionTimes,
 ) -> decoder::Result<f64> {
     let mut sum = 0.0;
-    for (i, v) in reader.decompress()?.iter().enumerate() {
+    let decompressed = reader.decompress(timer)?;
+    let sum_timer = timer.start_addition_measurement(SegmentKind::Sum);
+    for (i, v) in decompressed.iter().enumerate() {
         let record_offset = logical_offset + i;
         if bitmask.is_some_and(|bm| !bm.contains(record_offset as u32)) {
             continue;
         }
         sum += *v;
     }
+    sum_timer.stop();
 
     Ok(sum)
 }
@@ -95,15 +114,19 @@ pub fn default_min<T: Reader + ?Sized>(
     reader: &mut T,
     bitmask: Option<&RoaringBitmap>,
     logical_offset: usize,
+    timer: &mut SegmentedExecutionTimes,
 ) -> decoder::Result<f64> {
     let mut min = f64::INFINITY;
-    for (i, v) in reader.decompress()?.iter().enumerate() {
+    let decompressed = reader.decompress(timer)?;
+    let comparison_timer = timer.start_addition_measurement(SegmentKind::CompareInsert);
+    for (i, v) in decompressed.iter().enumerate() {
         let record_offset = logical_offset + i;
         if bitmask.is_some_and(|bm| !bm.contains(record_offset as u32)) {
             continue;
         }
         min = min.min(*v);
     }
+    comparison_timer.stop();
 
     Ok(min)
 }
@@ -113,15 +136,19 @@ pub fn default_max<T: Reader + ?Sized>(
     reader: &mut T,
     bitmask: Option<&RoaringBitmap>,
     logical_offset: usize,
+    timer: &mut SegmentedExecutionTimes,
 ) -> decoder::Result<f64> {
     let mut max = f64::NEG_INFINITY;
-    for (i, v) in reader.decompress()?.iter().enumerate() {
+    let decompressed = reader.decompress(timer)?;
+    let comparison_timer = timer.start_addition_measurement(SegmentKind::CompareInsert);
+    for (i, v) in decompressed.iter().enumerate() {
         let record_offset = logical_offset + i;
         if bitmask.is_some_and(|bm| !bm.contains(record_offset as u32)) {
             continue;
         }
         max = max.max(*v);
     }
+    comparison_timer.stop();
 
     Ok(max)
 }
@@ -141,8 +168,9 @@ pub trait QueryExecutor: Reader {
         output: &mut W,
         bitmask: Option<&RoaringBitmap>,
         logical_offset: usize,
+        timer: &mut SegmentedExecutionTimes,
     ) -> decoder::Result<()> {
-        default_materialize(self, output, bitmask, logical_offset)
+        default_materialize(self, output, bitmask, logical_offset, timer)
     }
 
     /// Filter the values by the predicate and return the result as a bitmask.
@@ -158,8 +186,9 @@ pub trait QueryExecutor: Reader {
         predicate: Predicate,
         bitmask: Option<&RoaringBitmap>,
         logical_offset: usize,
+        timer: &mut SegmentedExecutionTimes,
     ) -> decoder::Result<RoaringBitmap> {
-        default_filter(self, predicate, bitmask, logical_offset)
+        default_filter(self, predicate, bitmask, logical_offset, timer)
     }
 
     /// Filter the values by the predicate and write the results as IEEE754 double array to the output.
@@ -174,8 +203,9 @@ pub trait QueryExecutor: Reader {
         predicate: Predicate,
         bitmask: Option<&RoaringBitmap>,
         logical_offset: usize,
+        timer: &mut SegmentedExecutionTimes,
     ) -> decoder::Result<()> {
-        default_filter_materialize(self, output, predicate, bitmask, logical_offset)
+        default_filter_materialize(self, output, predicate, bitmask, logical_offset, timer)
     }
 
     /// Calculate the sum of the values filtered by the bitmask.
@@ -187,8 +217,9 @@ pub trait QueryExecutor: Reader {
         &mut self,
         bitmask: Option<&RoaringBitmap>,
         logical_offset: usize,
+        timer: &mut SegmentedExecutionTimes,
     ) -> decoder::Result<f64> {
-        default_sum(self, bitmask, logical_offset)
+        default_sum(self, bitmask, logical_offset, timer)
     }
 
     /// Calculate the minimum of the values filtered by the bitmask.
@@ -200,8 +231,9 @@ pub trait QueryExecutor: Reader {
         &mut self,
         bitmask: Option<&RoaringBitmap>,
         logical_offset: usize,
+        timer: &mut SegmentedExecutionTimes,
     ) -> decoder::Result<f64> {
-        default_min(self, bitmask, logical_offset)
+        default_min(self, bitmask, logical_offset, timer)
     }
 
     /// Calculate the maximum of the values filtered by the bitmask.
@@ -213,8 +245,9 @@ pub trait QueryExecutor: Reader {
         &mut self,
         bitmask: Option<&RoaringBitmap>,
         logical_offset: usize,
+        timer: &mut SegmentedExecutionTimes,
     ) -> decoder::Result<f64> {
-        default_max(self, bitmask, logical_offset)
+        default_max(self, bitmask, logical_offset, timer)
     }
 }
 

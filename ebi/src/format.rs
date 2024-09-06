@@ -108,6 +108,7 @@
 //!     compressor_config: [u8],
 //! }
 //!
+//! use ebi::time::SerializableSegmentedExecutionTimes;
 //! #[repr(C, packed(1))]
 //! pub struct FileFooter3 {
 //!     /// Compression Elapsed Time (nano seconds)
@@ -130,6 +131,7 @@
 use num_enum::TryFromPrimitive;
 
 use crate::time::SerializableSegmentedExecutionTimes;
+
 pub mod deserialize;
 pub mod native;
 pub mod serialize;

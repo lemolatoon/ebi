@@ -16,6 +16,7 @@ use ebi::{
         encoder::{Encoder, EncoderInput, EncoderOutput},
     },
     compressor::CompressorConfig,
+    decoder::query::{Predicate, Range, RangeValue},
     encoder::ChunkOption,
 };
 use rand::Rng;
@@ -52,17 +53,17 @@ fn main() {
     const RECORD_COUNT: usize = 300;
     let scale = 100;
     generate_and_write_random_f64("uncompressed.bin", RECORD_COUNT * 3 + 3, scale).unwrap();
-    // let compressor = GenericCompressor::Uncompressed(UncompressedCompressor::new(100));
+    // let compressor_config = CompressorConfig::uncompressed().build();
     // let compressor_config = CompressorConfig::rle().build();
     // let compressor_config = CompressorConfig::gorilla().build();
-    // let compressor_config = CompressorConfig::buff().scale(scale).build();
+    // let compressor_config = CompressorConfig::buff().scale(scale as u32).build();
     // let compressor_config = CompressorConfig::chimp128().build();
     // let compressor_config = CompressorConfig::elf_on_chimp().build();
-    // let compressor_config = CompressorConfig::elf().build();
+    let compressor_config = CompressorConfig::elf().build();
     // let compressor_config = CompressorConfig::chimp().build();
-    let compressor_config = CompressorConfig::delta_sprintz()
-        .scale(scale as u32)
-        .build();
+    // let compressor_config = CompressorConfig::delta_sprintz()
+    //     .scale(scale as u32)
+    //     .build();
     // let compressor_config = CompressorConfig::zstd().build();
     // let compressor_config = CompressorConfig::ffi_alp().build();
     let chunk_option = ChunkOption::RecordCount(RECORD_COUNT * 10 + 3);
@@ -126,6 +127,15 @@ fn main() {
 
     let mut output = DecoderOutput::from_vec(Vec::new());
     decoder.materialize(&mut output, None, None).unwrap();
+    println!("materialie: {:?}", decoder.segmented_execution_times());
+    decoder
+        .filter(
+            Predicate::Range(Range::new(RangeValue::Inclusive(1.5), RangeValue::None)),
+            None,
+            None,
+        )
+        .unwrap();
+    println!("filter(>= 1.5): {:?}", decoder.segmented_execution_times());
     decoder.footer();
 
     let mut input_bytes = Vec::new();

@@ -218,7 +218,10 @@ mod tests {
                 &values[i * RECORD_COUNT_PER_CHUNK..(i + 1) * RECORD_COUNT_PER_CHUNK]
             };
 
-            let decompressed_data = chunk_reader.inner_mut().decompress().unwrap();
+            let decompressed_data = chunk_reader
+                .inner_mut()
+                .decompress(&mut SegmentedExecutionTimes::new())
+                .unwrap();
 
             assert_eq!(
                 written_data.len(),

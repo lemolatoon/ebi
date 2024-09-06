@@ -1,6 +1,9 @@
 use std::{io::Read, iter, slice};
 
-use crate::decoder::{self, query::QueryExecutor, FileMetadataLike, GeneralChunkHandle};
+use crate::{
+    decoder::{self, query::QueryExecutor, FileMetadataLike, GeneralChunkHandle},
+    time::{SegmentKind, SegmentedExecutionTimes},
+};
 
 use super::Reader;
 
@@ -36,14 +39,17 @@ impl<R: Read> Reader for FFIAlpReader<R> {
     where
         Self: 'a;
 
-    fn decompress(&mut self) -> decoder::Result<&[f64]> {
+    fn decompress(&mut self, timer: &mut SegmentedExecutionTimes) -> decoder::Result<&[f64]> {
         if self.is_decompressed {
             return Ok(self.decompressed.as_slice());
         }
 
         let mut src_buf = vec![0; self.chunk_size];
+        let io_read_timer = timer.start_addition_measurement(SegmentKind::IORead);
         self.reader.read_exact(&mut src_buf)?;
+        io_read_timer.stop();
 
+        let decompression_timer = timer.start_addition_measurement(SegmentKind::Decompression);
         unsafe {
             alp_binding::decompress_double(
                 src_buf.as_slice(),
@@ -51,6 +57,7 @@ impl<R: Read> Reader for FFIAlpReader<R> {
                 &mut self.decompressed,
             );
         }
+        decompression_timer.stop();
 
         self.is_decompressed = true;
 
@@ -59,7 +66,7 @@ impl<R: Read> Reader for FFIAlpReader<R> {
 
     fn decompress_iter(&mut self) -> decoder::Result<Self::DecompressIterator<'_>> {
         if !self.is_decompressed {
-            self.decompress()?;
+            self.decompress(&mut SegmentedExecutionTimes::new())?;
         }
 
         Ok(self.decompressed.iter().map(|&x| Ok(x)))

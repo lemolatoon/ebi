@@ -108,6 +108,7 @@ impl<const N: usize> Compressor for ChimpNCompressor<N> {
 
     fn reset(&mut self) {
         self.encoder.reset();
+        self.timer = SegmentedExecutionTimes::new();
         self.total_bytes_in = 0;
     }
 

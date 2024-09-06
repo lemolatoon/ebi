@@ -312,7 +312,7 @@ impl CompressorConfig {
         match self {
             CompressorConfig::Uncompressed(mut c) => just_write!(c, w),
             CompressorConfig::RLE(mut c) => just_write!(c, w),
-            CompressorConfig::Gorilla(mut c) => just_write!(c, w),
+            CompressorConfig::Gorilla(c) => into_packed_and_write!(c, w),
             CompressorConfig::BUFF(mut c) => just_write!(c, w),
             CompressorConfig::Chimp(c) => into_packed_and_write!(c, w),
             CompressorConfig::Chimp128(mut c) => just_write!(c, w),
