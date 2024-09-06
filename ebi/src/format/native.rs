@@ -1,9 +1,11 @@
 //! Native struct for the file format.
 //! This module contains the native structs(=[repr(Rust)]).
 
+use std::time::Duration;
+
 use derive_getters::Getters;
 
-use crate::{compressor::CompressorConfig, encoder::ChunkOption};
+use crate::{compressor::CompressorConfig, encoder::ChunkOption, time::SegmentedExecutionTimes};
 
 use super::{
     ChunkFooter, CompressionScheme, FieldType, FileConfig, FileFooter0, FileFooter3, FileHeader,
@@ -76,6 +78,7 @@ pub struct NativeFileFooter {
     compressor_config: CompressorConfig,
     #[getter(skip)]
     compression_elapsed_time_nano_secs: u128,
+    segmented_execution_times: SegmentedExecutionTimes,
     #[getter(skip)]
     crc: u32,
 }
@@ -91,6 +94,7 @@ impl NativeFileFooter {
         let number_of_chunks = footer0.number_of_chunks;
         let chunk_footers = chunk_footers.iter().map(NativeChunkFooter::from).collect();
         let compression_elapsed_time_nano_secs = footer2.compression_elapsed_time_nano_secs;
+        let segmented_execution_times = footer2.execution_elapsed_times_nano_secs.into();
         let crc = footer2.crc;
         Self {
             number_of_records,
@@ -98,6 +102,7 @@ impl NativeFileFooter {
             chunk_footers,
             compressor_config,
             compression_elapsed_time_nano_secs,
+            segmented_execution_times,
             crc,
         }
     }
@@ -115,6 +120,13 @@ impl NativeFileFooter {
 
     pub fn number_of_chunks(&self) -> u64 {
         self.number_of_chunks
+    }
+
+    pub fn compression_elapsed_time(&self) -> Duration {
+        let secs = (self.compression_elapsed_time_nano_secs / 1_000_000_000) as u64;
+        let nanos = (self.compression_elapsed_time_nano_secs % 1_000_000_000) as u32;
+
+        Duration::new(secs, nanos)
     }
 
     pub fn compression_elapsed_time_nano_secs(&self) -> u128 {

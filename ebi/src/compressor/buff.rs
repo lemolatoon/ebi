@@ -6,16 +6,18 @@ use crate::{
     compression_common::buff::precision_bound::{self, PRECISION_MAP},
     encoder,
     format::{deserialize, serialize},
+    time::{SegmentKind, SegmentedExecutionTimes},
 };
 
 use super::Compressor;
 
-#[derive(Debug, Clone, PartialEq, PartialOrd)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct BUFFCompressor {
     total_bytes_in: usize,
     data: Vec<f64>,
     scale: u32,
     compressed: Option<Vec<u8>>,
+    timer: SegmentedExecutionTimes,
 }
 
 impl BUFFCompressor {
@@ -25,12 +27,16 @@ impl BUFFCompressor {
             data: Vec::new(),
             scale,
             compressed: None,
+            timer: SegmentedExecutionTimes::new(),
         }
     }
 
     fn compress_with_precalculated(&mut self, precalculated: Precalculated) {
         let number_of_records = precalculated.number_of_records();
-        self.compressed = Some(internal::buff_simd256_encode(precalculated));
+        self.compressed = Some(internal::buff_simd256_encode(
+            precalculated,
+            &mut self.timer,
+        ));
 
         let n_bytes_compressed = number_of_records * size_of::<f64>();
         self.total_bytes_in += n_bytes_compressed;
@@ -39,7 +45,10 @@ impl BUFFCompressor {
 
 impl Compressor for BUFFCompressor {
     fn compress(&mut self, data: &[f64]) -> encoder::Result<()> {
-        self.compress_with_precalculated(Precalculated::precalculate(self.scale as usize, data));
+        let quantization_timer = self.timer.start_measurement(SegmentKind::Quantization);
+        let precalculated = Precalculated::precalculate(self.scale as usize, data);
+        quantization_timer.stop();
+        self.compress_with_precalculated(precalculated);
 
         Ok(())
     }
@@ -64,6 +73,10 @@ impl Compressor for BUFFCompressor {
         self.total_bytes_in = 0;
         self.data.clear();
         self.compressed = None;
+    }
+
+    fn execution_times(&self) -> Option<&SegmentedExecutionTimes> {
+        Some(&self.timer)
     }
 }
 
@@ -200,24 +213,33 @@ impl Precalculated {
 mod internal {
     use std::mem;
 
-    use crate::compression_common::buff::{bit_packing::BitPack, flip};
+    use crate::{
+        compression_common::buff::{bit_packing::BitPack, flip},
+        time::{SegmentKind, SegmentedExecutionTimes},
+    };
 
     use super::Precalculated;
 
-    pub fn buff_simd256_encode(precalculated: Precalculated) -> Vec<u8> {
+    pub fn buff_simd256_encode(
+        precalculated: Precalculated,
+        timer: &mut SegmentedExecutionTimes,
+    ) -> Vec<u8> {
         let fixed_representation_values = precalculated.fixed_representation_values();
         let base_fixed64 = precalculated.min_fixed().unwrap();
 
+        let delta_timer = timer.start_measurement(SegmentKind::Delta);
         let delta_fixed_representation_values = fixed_representation_values
             .iter()
             .map(|x| (x - base_fixed64) as u64)
             .collect::<Vec<u64>>();
+        delta_timer.stop();
 
         let fixed_representation_bits_length =
             precalculated.fixed_representation_bits_length().unwrap();
         let fractional_part_bits_length = precalculated.fractional_part_bits_length() as usize;
         let number_of_records = precalculated.number_of_records() as u32;
 
+        let bit_packing_timer = timer.start_measurement(SegmentKind::BitPacking);
         let mut bitpack_vec = BitPack::<Vec<u8>>::with_capacity(precalculated.compressed_size());
 
         let base_fixed64_bits: u64 = unsafe { mem::transmute(base_fixed64) };
@@ -268,6 +290,8 @@ mod internal {
                 }
             }
         }
+
+        bit_packing_timer.stop();
         bitpack_vec.into_vec()
     }
 }

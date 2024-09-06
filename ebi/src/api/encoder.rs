@@ -9,6 +9,7 @@ use std::{
 use crate::{
     compressor::CompressorConfig,
     encoder::{self, ChunkOption, FileWriter},
+    time::SegmentedExecutionTimes,
 };
 
 pub struct EncoderInput<R: Read> {
@@ -114,6 +115,7 @@ impl<R: Read> Read for EncoderInput<R> {
 pub struct Encoder<R: Read, W: Write + Seek> {
     file_writer: FileWriter<EncoderInput<R>>,
     output: EncoderOutput<W>,
+    timer: SegmentedExecutionTimes,
 }
 
 impl<R: Read, W: Write + Seek> Encoder<R, W> {
@@ -126,6 +128,7 @@ impl<R: Read, W: Write + Seek> Encoder<R, W> {
         Self {
             file_writer: FileWriter::new(input, compressor_config.into(), chunk_option),
             output,
+            timer: SegmentedExecutionTimes::new(),
         }
     }
 
@@ -138,6 +141,7 @@ impl<R: Read, W: Write + Seek> Encoder<R, W> {
         let Self {
             file_writer,
             output,
+            ..
         } = self;
         // write header leaving footer offset blank
         file_writer.write_header(output.writer_mut())?;
@@ -150,10 +154,12 @@ impl<R: Read, W: Write + Seek> Encoder<R, W> {
             chunk_writer.write(output.writer_mut())?;
             output.writer_mut().flush()?;
 
+            self.timer += *chunk_writer.timer();
+
             compressor = Some(chunk_writer.into_compressor());
         }
 
-        file_writer.write_footer(output.writer_mut())?;
+        file_writer.write_footer(output.writer_mut(), self.timer)?;
         let footer_offset_slot_offset = file_writer.footer_offset_slot_offset();
         output
             .writer_mut()

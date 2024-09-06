@@ -16,6 +16,7 @@ use crate::{
         serialize::{AsBytes, ToLe},
         CompressionScheme,
     },
+    time::SegmentedExecutionTimes,
 };
 
 #[cfg(feature = "serde")]
@@ -58,6 +59,9 @@ pub trait Compressor {
 
     /// Reset the internal state of the compressor.
     fn reset(&mut self);
+
+    /// Returns the segmented execution times of the compression.
+    fn execution_times(&self) -> Option<&SegmentedExecutionTimes>;
 }
 
 pub trait AppendableCompressor: Compressor {
@@ -73,7 +77,7 @@ pub trait RewindableCompressor: AppendableCompressor {
     fn rewind(&mut self, n: usize) -> bool;
 }
 
-#[derive(QuickImpl, Debug, Clone, PartialEq, PartialOrd)]
+#[derive(QuickImpl, Debug, Clone, PartialEq)]
 pub enum GenericCompressor {
     Uncompressed(UncompressedCompressor),
     RLE(RunLengthCompressor),
@@ -144,6 +148,15 @@ macro_rules! impl_generic_compressor {
                     $(
                         $(#[$meta])?
                         $enum_name::$variant(c) => c.reset(),
+                    )*
+                }
+            }
+
+            fn execution_times(&self) -> Option<&SegmentedExecutionTimes> {
+                match self {
+                    $(
+                        $(#[$meta])?
+                        $enum_name::$variant(c) => c.execution_times(),
                     )*
                 }
             }
