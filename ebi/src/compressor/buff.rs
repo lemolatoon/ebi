@@ -72,6 +72,7 @@ impl Compressor for BUFFCompressor {
     fn reset(&mut self) {
         self.total_bytes_in = 0;
         self.data.clear();
+        self.timer = SegmentedExecutionTimes::new();
         self.compressed = None;
     }
 

@@ -1,10 +1,13 @@
 use core::slice;
 use std::{io::Read, iter};
 
-use crate::decoder::{
-    self,
-    query::{default_materialize, Predicate, QueryExecutor, RangeValue},
-    FileMetadataLike, GeneralChunkHandle,
+use crate::{
+    decoder::{
+        self,
+        query::{default_materialize, Predicate, QueryExecutor, RangeValue},
+        FileMetadataLike, GeneralChunkHandle,
+    },
+    time::{SegmentKind, SegmentedExecutionTimes},
 };
 
 use super::Reader;
@@ -21,10 +24,13 @@ impl BUFFReader {
     pub fn new<T: FileMetadataLike, R: Read>(
         handle: &GeneralChunkHandle<T>,
         mut reader: R,
+        timer: &mut SegmentedExecutionTimes,
     ) -> Self {
         let chunk_size = handle.chunk_size();
         let mut chunk_in_memory = vec![0; chunk_size as usize];
+        let io_read_timer = timer.start_addition_measurement(SegmentKind::IORead);
         reader.read_exact(&mut chunk_in_memory).unwrap();
+        io_read_timer.stop();
         let number_of_records = handle.number_of_records();
         Self {
             chunk_size,
@@ -32,10 +38,6 @@ impl BUFFReader {
             bytes: chunk_in_memory,
             decompressed: None,
         }
-    }
-
-    fn bytes(&mut self) -> &[u8] {
-        &self.bytes
     }
 }
 
@@ -49,13 +51,14 @@ impl Reader for BUFFReader {
     where
         Self: 'a;
 
-    fn decompress(&mut self) -> decoder::Result<&[f64]> {
+    fn decompress(&mut self, timer: &mut SegmentedExecutionTimes) -> decoder::Result<&[f64]> {
         if self.decompressed.is_some() {
             return Ok(self.decompressed.as_ref().unwrap());
         }
 
-        let bytes = self.bytes();
-        let result = internal::buff_simd256_decode(bytes);
+        let bitpacking_timer = timer.start_addition_measurement(SegmentKind::BitPacking);
+        let result = internal::buff_simd256_decode(&self.bytes);
+        bitpacking_timer.stop();
 
         self.decompressed = Some(result);
 
@@ -63,7 +66,7 @@ impl Reader for BUFFReader {
     }
 
     fn decompress_iter(&mut self) -> decoder::Result<Self::DecompressIterator<'_>> {
-        let decompressed = self.decompress()?;
+        let decompressed = self.decompress(&mut SegmentedExecutionTimes::new())?;
 
         Ok(decompressed.iter().map(|f| Ok(*f)))
     }
@@ -93,6 +96,7 @@ impl QueryExecutor for BUFFReader {
         predicate: Predicate,
         bitmask: Option<&roaring::RoaringBitmap>,
         logical_offset: usize,
+        timer: &mut SegmentedExecutionTimes,
     ) -> crate::decoder::Result<roaring::RoaringBitmap> {
         use internal::query::buff_simd256_cmp_filter;
         let logical_offset = logical_offset as u32;
@@ -102,13 +106,14 @@ impl QueryExecutor for BUFFReader {
                 .filter(|&x| x >= logical_offset && x < logical_offset + number_of_records)
                 .collect()
         });
-        let bytes = self.bytes();
+        let bytes = &self.bytes;
         let all = || {
             let mut all = roaring::RoaringBitmap::new();
             all.insert_range(logical_offset..(number_of_records + logical_offset));
             all
         };
-        Ok(match predicate {
+        let comparison_timer = timer.start_addition_measurement(SegmentKind::CompareInsert);
+        let result = match predicate {
             p @ (Predicate::Eq(pred) | Predicate::Ne(pred)) => {
                 let result = internal::query::buff_simd256_equal_filter(
                     bytes,
@@ -175,7 +180,10 @@ impl QueryExecutor for BUFFReader {
                     (Some(left), Some(right)) => left & right,
                 }
             }
-        })
+        };
+
+        comparison_timer.stop();
+        Ok(result)
     }
 
     fn filter_materialize<W: std::io::Write>(
@@ -184,10 +192,11 @@ impl QueryExecutor for BUFFReader {
         predicate: Predicate,
         bitmask: Option<&roaring::RoaringBitmap>,
         logical_offset: usize,
+        timer: &mut SegmentedExecutionTimes,
     ) -> decoder::Result<()> {
-        let filtered = self.filter(predicate, bitmask, logical_offset)?;
+        let filtered = self.filter(predicate, bitmask, logical_offset, timer)?;
 
-        default_materialize(self, output, Some(&filtered), logical_offset)
+        default_materialize(self, output, Some(&filtered), logical_offset, timer)
     }
 }
 
@@ -800,6 +809,7 @@ mod internal {
             let mut remaining_bits_length = fixed_representation_bits_length;
 
             let mut result_bitmask: Option<RoaringBitmap> = bitmask;
+
             while remaining_bits_length >= 8 {
                 remaining_bits_length -= 8;
 

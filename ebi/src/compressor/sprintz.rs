@@ -109,6 +109,7 @@ impl<W: BitWrite> Compressor for DeltaSprintzCompressorImpl<W> {
     fn reset(&mut self) {
         self.w.reset();
         self.buffer.clear();
+        self.timer = SegmentedExecutionTimes::new();
         self.total_bytes_in = 0;
     }
 
@@ -146,7 +147,6 @@ mod delta_impl {
         let (initial_number, number_of_bits_needed) = zigzag_delta_num_bits(quantized, buffer);
         delta_encode_timer.stop();
 
-        let bit_packing_timer = timer.start_measurement(SegmentKind::BitPacking);
         // write header
         let initial_number_bits = unsafe { mem::transmute::<i64, u64>(initial_number) };
         w.write_bits(initial_number_bits, 64);
@@ -157,6 +157,7 @@ mod delta_impl {
             return timer;
         }
 
+        let bit_packing_timer = timer.start_measurement(SegmentKind::BitPacking);
         for v in buffer.iter().copied() {
             w.write_bits(v, number_of_bits_needed as u32);
         }

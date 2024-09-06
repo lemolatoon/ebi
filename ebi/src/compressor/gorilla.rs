@@ -1,115 +1,40 @@
-use derive_builder::Builder;
-#[cfg(feature = "serde")]
-use serde::{Deserialize, Serialize};
-
 use crate::{
-    encoder,
-    format::{deserialize, serialize},
-    io::bit_write::BufferedBitWriter,
-    time::{SegmentKind, SegmentedExecutionTimes},
+    format::deserialize,
+    io::bit_write::{BitWrite, BufferedBitWriter},
 };
 
-use super::{AppendableCompressor, Capacity, Compressor};
+use super::{
+    general_xor::{
+        GeneralXorCompressor, GeneralXorCompressorConfig, GeneralXorCompressorConfigBuilder,
+        XorEncoder,
+    },
+    Capacity,
+};
 
-#[derive(Debug, Clone, PartialEq)]
-pub struct GorillaCompressor {
-    encoder: modified_tsz::GorillaFloatEncoder,
-    timer: SegmentedExecutionTimes,
-}
+pub type GorillaCompressor =
+    GeneralXorCompressor<BufferedBitWriter, modified_tsz::GorillaFloatEncoder>;
+pub type GorillaCompressorConfig = GeneralXorCompressorConfig<modified_tsz::GorillaFloatEncoder>;
+pub type GorillaCompressorConfigBuilder =
+    GeneralXorCompressorConfigBuilder<modified_tsz::GorillaFloatEncoder>;
 
-const DEFAULT_BUF_SIZE: usize = 1024 * 8;
+deserialize::impl_from_le_bytes!(GorillaCompressorConfig, gorilla, (capacity, Capacity));
 
-impl GorillaCompressor {
-    pub fn new() -> Self {
-        Self::with_capacity(DEFAULT_BUF_SIZE)
+impl XorEncoder for modified_tsz::GorillaFloatEncoder {
+    fn compress_float<W: BitWrite>(&mut self, mut w: W, bits: u64) -> usize {
+        self.encode(&mut w, f64::from_bits(bits))
     }
 
-    pub fn with_capacity(capacity: usize) -> Self {
-        let w = BufferedBitWriter::with_capacity(capacity);
-        let encoder = modified_tsz::GorillaFloatEncoder::new(w);
-        Self {
-            encoder,
-            timer: SegmentedExecutionTimes::new(),
-        }
-    }
-}
-
-impl Default for GorillaCompressor {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl Compressor for GorillaCompressor {
-    fn compress(&mut self, input: &[f64]) -> encoder::Result<()> {
-        self.reset();
-        let xor_encode_timer = self.timer.start_measurement(SegmentKind::Xor);
-        for value in input {
-            self.encoder.encode(*value);
-        }
-        xor_encode_timer.stop();
-
-        Ok(())
+    fn close<W: crate::io::bit_write::BitWrite>(&mut self, mut w: W) {
+        self.encode(&mut w, f64::NAN);
+        w.write_bit(false);
     }
 
-    fn total_bytes_in(&self) -> usize {
-        self.encoder.total_bytes_in()
-    }
-
-    fn total_bytes_buffered(&self) -> usize {
-        self.encoder.total_bytes_buffered()
-    }
-
-    fn prepare(&mut self) {
-        self.encoder.prepare();
-    }
-
-    fn buffers(&self) -> [&[u8]; super::MAX_BUFFERS] {
-        const E: &[u8] = &[];
-
-        [self.encoder.bytes(), E, E, E, E]
+    fn simulate_close(&self) -> usize {
+        self.simulate_encode(f64::NAN.to_bits()) + 1
     }
 
     fn reset(&mut self) {
-        self.encoder.reset();
-    }
-
-    fn execution_times(&self) -> Option<&SegmentedExecutionTimes> {
-        Some(&self.timer)
-    }
-}
-
-impl AppendableCompressor for GorillaCompressor {
-    fn append_compress(&mut self, input: &[f64]) {
-        for value in input {
-            self.encoder.encode(*value);
-        }
-    }
-}
-
-#[derive(Builder, Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-#[builder(pattern = "owned", build_fn(skip))]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-#[repr(C, packed)]
-pub struct GorillaCompressorConfig {
-    #[builder(setter(into), default)]
-    capacity: Capacity,
-}
-serialize::impl_to_le!(GorillaCompressorConfig, capacity);
-deserialize::impl_from_le_bytes!(GorillaCompressorConfig, gorilla, (capacity, Capacity));
-
-impl From<GorillaCompressorConfig> for GorillaCompressor {
-    fn from(config: GorillaCompressorConfig) -> Self {
-        Self::with_capacity(config.capacity.0 as usize)
-    }
-}
-
-impl GorillaCompressorConfigBuilder {
-    pub fn build(self) -> GorillaCompressorConfig {
-        let Self { capacity } = self;
-        GorillaCompressorConfig {
-            capacity: capacity.unwrap_or(Capacity::default()),
-        }
+        self.reset();
     }
 }
 
@@ -143,15 +68,7 @@ pub(crate) mod modified_tsz {
     // encoding assumes the value is greater than 12 bits, we can store the value 0 to signal the end
     // of the stream
 
-    use crate::io::bit_write::BitWrite as _;
-
-    use super::BufferedBitWriter;
-
-    /// END_MARKER is a special bit sequence used to indicate the end of the stream
-    pub const END_MARKER: u64 = 0b1111_0000_0000_0000_0000_0000_0000_0000_0000;
-
-    /// END_MARKER_LEN is the length, in bits, of END_MARKER
-    pub const END_MARKER_LEN: u32 = 36;
+    use crate::io::bit_write::BitWrite;
 
     #[derive(Debug, Clone, Copy, PartialEq, PartialOrd)]
     pub struct GorillaFloatEncoderState {
@@ -161,9 +78,6 @@ pub(crate) mod modified_tsz {
         // store the number of leading and trailing zeroes in the current xor as u32 so we
         // don't have to do any conversions after calling `leading_zeros` and `trailing_zeros`
         pub trailing_zeroes: u32,
-        pub total_bytes_in: usize,
-        /// total_bits_buffered is the total number of bits that have been written to the buffer
-        pub total_bits_buffered: usize,
         // will next DataPoint be the first DataPoint encoded
         pub first: bool,
     }
@@ -173,9 +87,6 @@ pub(crate) mod modified_tsz {
                 value_bits: 0,
                 leading_zeroes: 64,  // 64 is an initial sentinel value
                 trailing_zeroes: 64, // 64 is an initial sentinel value
-
-                total_bytes_in: 0,
-                total_bits_buffered: 0,
 
                 first: true,
             }
@@ -188,40 +99,47 @@ pub(crate) mod modified_tsz {
     #[derive(Debug, Clone, PartialEq)]
     pub struct GorillaFloatEncoder {
         state: GorillaFloatEncoderState,
-        w: BufferedBitWriter,
+    }
+
+    impl Default for GorillaFloatEncoder {
+        fn default() -> Self {
+            Self::new()
+        }
     }
 
     impl GorillaFloatEncoder {
-        /// new creates a new StdEncoder whose starting timestamp is `start` and writes its encoded
-        /// bytes to `w`
-        pub fn new(w: BufferedBitWriter) -> Self {
+        pub fn new() -> Self {
             Self {
                 state: GorillaFloatEncoderState::new(),
-                w,
             }
         }
 
-        fn write_first(&mut self, value_bits: u64) {
+        /// Returns the bits that have been written to the buffer
+        fn write_first(&mut self, w: &mut impl BitWrite, value_bits: u64) -> usize {
             // store the first value exactly
-            self.w.write_bits(value_bits, 64);
+            w.write_bits(value_bits, 64);
             self.state.value_bits = value_bits;
-            self.state.total_bits_buffered += 64;
 
-            self.state.first = true
+            self.state.first = true;
+
+            64
         }
 
-        fn write_next_value(&mut self, value_bits: u64) {
+        /// Returns the bits that have been written to the buffer
+        fn write_next_value(&mut self, w: &mut impl BitWrite, value_bits: u64) -> usize {
             let xor = value_bits ^ self.state.value_bits;
             self.state.value_bits = value_bits;
 
+            let mut bits_buffered = 0;
+
             if xor == 0 {
                 // if xor with previous value is zero just store single zero bit
-                self.w.write_bit(false);
-                self.state.total_bits_buffered += 1;
+                w.write_bit(false);
+                bits_buffered += 1;
             } else {
-                self.w.write_bit(true);
+                w.write_bit(true);
 
-                self.state.total_bits_buffered += 1;
+                bits_buffered += 1;
 
                 let mut leading_zeroes = xor.leading_zeros();
                 // we cannot encode leading_zeroes more than 32 bits in 5 bit.
@@ -236,13 +154,13 @@ pub(crate) mod modified_tsz {
                     // if the number of leading and trailing zeroes in this xor are >= the leading and
                     // trailing zeroes in the previous xor then we only need to store a control bit and
                     // the significant digits of this xor
-                    self.w.write_bit(false);
-                    self.w.write_bits(
+                    w.write_bit(false);
+                    w.write_bits(
                         xor.wrapping_shr(self.state.trailing_zeroes),
                         64 - self.state.leading_zeroes - self.state.trailing_zeroes,
                     );
 
-                    self.state.total_bits_buffered +=
+                    bits_buffered +=
                         (1 + 64 - self.state.leading_zeroes - self.state.trailing_zeroes) as usize;
                 } else {
                     // if the number of leading and trailing zeroes in this xor are not less than the
@@ -250,167 +168,97 @@ pub(crate) mod modified_tsz {
                     // use 6 bits to store the number of leading zeroes and 6 bits to store the number
                     // of significant digits before storing the significant digits themselves
 
-                    self.w.write_bit(true);
-                    self.w.write_bits(u64::from(leading_zeroes), 5); // not 6 bit, but 5 bit
+                    w.write_bit(true);
+                    w.write_bits(u64::from(leading_zeroes), 5); // not 6 bit, but 5 bit
 
                     // if significant_digits is 64 we cannot encode it using 6 bits, however since
                     // significant_digits is guaranteed to be at least 1 we can subtract 1 to ensure
                     // significant_digits can always be expressed with 6 bits or less
                     let significant_digits = 64 - leading_zeroes - trailing_zeroes;
-                    self.w.write_bits(u64::from(significant_digits - 1), 6);
-                    self.w
-                        .write_bits(xor.wrapping_shr(trailing_zeroes), significant_digits);
+                    w.write_bits(u64::from(significant_digits - 1), 6);
+                    w.write_bits(xor.wrapping_shr(trailing_zeroes), significant_digits);
 
-                    self.state.total_bits_buffered += (1 + 5 + 6 + significant_digits) as usize;
+                    bits_buffered += (1 + 5 + 6 + significant_digits) as usize;
 
                     // finally we need to update the number of leading and trailing zeroes
                     self.state.leading_zeroes = leading_zeroes;
                     self.state.trailing_zeroes = trailing_zeroes;
                 }
             }
+
+            bits_buffered
         }
     }
 
     impl GorillaFloatEncoder {
-        pub fn encode(&mut self, value: f64) {
+        /// Returns the bits that have been written to the buffer
+        pub fn encode(&mut self, w: &mut impl BitWrite, value: f64) -> usize {
             let value_bits = value.to_bits();
 
-            self.state.total_bytes_in += 8;
-
             if self.state.first {
-                self.write_first(value_bits);
+                let n_bits = self.write_first(w, value_bits);
                 self.state.first = false;
+                n_bits
             } else {
-                self.write_next_value(value_bits)
+                self.write_next_value(w, value_bits)
             }
         }
 
-        /// Returns the total number of bytes of the compressed data if the stream were to be closed
-        pub fn total_bytes_buffered(&self) -> usize {
-            (self.state.total_bits_buffered + END_MARKER_LEN as usize).next_multiple_of(8) / 8
-        }
+        /// Returns the bits that would be written to the buffer if the value was encoded
+        pub fn simulate_encode(&self, value_bits: u64) -> usize {
+            if self.state.first {
+                return 64;
+            }
 
-        /// Returns the total number of bytes of the encoded data
-        pub fn total_bytes_in(&self) -> usize {
-            self.state.total_bytes_in
-        }
+            let xor = value_bits ^ self.state.value_bits;
 
-        /// Prepare for the call to `close` or `bytes`.
-        /// This method writes the END_MARKER to the buffer
-        pub fn prepare(&mut self) {
-            self.w.write_bits(END_MARKER, 36);
-        }
+            let mut bits_buffered = 0;
 
-        /// Returns the compressed data as a slice of bytes
-        /// If you have END_MARKER written, you should call `prepare` before calling this method
-        pub fn bytes(&self) -> &[u8] {
-            self.w.as_slice()
+            if xor == 0 {
+                // if xor with previous value is zero just store single zero bit
+                bits_buffered += 1;
+            } else {
+                bits_buffered += 1;
+
+                let mut leading_zeroes = xor.leading_zeros();
+                // we cannot encode leading_zeroes more than 32 bits in 5 bit.
+                if leading_zeroes >= 32 {
+                    leading_zeroes = 31;
+                }
+                let trailing_zeroes = xor.trailing_zeros();
+
+                if leading_zeroes >= self.state.leading_zeroes
+                    && trailing_zeroes >= self.state.trailing_zeroes
+                {
+                    // if the number of leading and trailing zeroes in this xor are >= the leading and
+                    // trailing zeroes in the previous xor then we only need to store a control bit and
+                    // the significant digits of this xor
+
+                    bits_buffered +=
+                        (1 + 64 - self.state.leading_zeroes - self.state.trailing_zeroes) as usize;
+                } else {
+                    // if the number of leading and trailing zeroes in this xor are not less than the
+                    // leading and trailing zeroes in the previous xor then we store a control bit and
+                    // use 6 bits to store the number of leading zeroes and 6 bits to store the number
+                    // of significant digits before storing the significant digits themselves
+
+                    // if significant_digits is 64 we cannot encode it using 6 bits, however since
+                    // significant_digits is guaranteed to be at least 1 we can subtract 1 to ensure
+                    // significant_digits can always be expressed with 6 bits or less
+                    let significant_digits = 64 - leading_zeroes - trailing_zeroes;
+
+                    bits_buffered += (1 + 5 + 6 + significant_digits) as usize;
+
+                    // finally we need to update the number of leading and trailing zeroes
+                }
+            }
+
+            bits_buffered
         }
 
         /// Reset the encoder
         pub fn reset(&mut self) {
             self.state = GorillaFloatEncoderState::new();
-
-            self.w.reset();
-        }
-    }
-
-    #[cfg(test)]
-    mod tests {
-
-        use super::BufferedBitWriter;
-
-        use super::GorillaFloatEncoder;
-
-        #[test]
-        fn create_new_encoder() {
-            let w = BufferedBitWriter::new();
-            let mut e = GorillaFloatEncoder::new(w);
-
-            e.prepare();
-
-            assert_eq!(e.total_bytes_in(), 0);
-            assert_eq!(e.total_bytes_buffered(), 5);
-
-            let bytes = e.bytes();
-            // Just the END_MARKER
-            let expected_bytes: [u8; 5] =
-                [0b1111_0000, 0b0000_0000, 0b0000_0000, 0b0000_0000, 0b0000];
-
-            assert_eq!(bytes[..], expected_bytes[..]);
-        }
-
-        #[test]
-        fn encode_datapoint() {
-            let w = BufferedBitWriter::new();
-            let mut e = GorillaFloatEncoder::new(w);
-
-            let d1: f64 = 1.24;
-
-            e.encode(d1);
-
-            e.prepare();
-
-            assert_eq!(e.total_bytes_in(), 8);
-            assert_eq!(e.total_bytes_buffered(), 13);
-
-            let bytes = e.bytes();
-            let expected_bytes: [u8; 13] = [
-                0x3f, 0xf3, 0xd7, 0x0a, 0x3d, 0x70, 0xa3, 0xd7, /* 1.24 as double */
-                0xf0, 0, 0, 0, 0, /* END_MARKER */
-            ];
-
-            assert_eq!(bytes[..], expected_bytes[..]);
-        }
-
-        #[test]
-        fn encode_multiple_datapoints() {
-            let w = BufferedBitWriter::new();
-            let mut e = GorillaFloatEncoder::new(w);
-
-            let d1 = 12.0;
-
-            e.encode(d1);
-
-            let d2 = 24.0;
-
-            e.encode(d2);
-
-            println!("d1: {:016x}", d1.to_bits());
-            println!(
-                "d2: {:016x}, {:016x}",
-                d2.to_bits(),
-                d1.to_bits() ^ d2.to_bits()
-            );
-
-            e.prepare();
-
-            assert_eq!(e.total_bytes_in(), 16);
-            assert_eq!(e.total_bytes_buffered(), 15);
-
-            let bytes = e.bytes();
-            let expected_bytes: [u8; 15] = [
-                0x40,
-                0x28,
-                0x00,
-                0x00,
-                0x00,
-                0x00,
-                0x00,
-                0x00, /* 12.0 as double */
-                #[allow(clippy::unusual_byte_groupings)]
-                0b11__0_1011__0, /* control bit 11, # of leading zeros (11 (5 bits)) */
-                #[allow(clippy::unusual_byte_groupings)]
-                0b0_0000__1__11, /* # of meaning bits (1 (6 bits)), actual meaning bits 1, END_MARKER starts (2 bits) */
-                #[allow(clippy::unusual_byte_groupings)]
-                0b11__00_0000,
-                0,
-                0,
-                0,
-                0, /* END_MARKER */
-            ];
-
-            assert_eq!(bytes[..], expected_bytes[..]);
         }
     }
 }

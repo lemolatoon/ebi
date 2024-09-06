@@ -1,6 +1,7 @@
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 use std::{
+    marker::PhantomData,
     ops::AddAssign,
     time::{Duration, Instant},
 };
@@ -15,29 +16,45 @@ pub enum SegmentKind {
     Delta,
     Quantization,
     BitPacking,
+    CompareInsert,
+    Sum,
+    Decompression,
 }
 
-const N_SEGMENT_KINDS: usize = 6;
+pub trait KindIndexable: Copy {
+    const N_SEGMENT_KINDS: usize;
+    fn index(self) -> usize;
+}
 
-impl SegmentKind {
+impl KindIndexable for SegmentKind {
+    const N_SEGMENT_KINDS: usize = 9;
     #[inline]
-    pub fn index(self) -> usize {
+    fn index(self) -> usize {
         let index = self as usize;
-        debug_assert!(index < N_SEGMENT_KINDS, "Invalid segment kind: {:?}", self);
+        debug_assert!(
+            index < Self::N_SEGMENT_KINDS,
+            "Invalid segment kind: {:?}",
+            self
+        );
         index
     }
 }
 
-#[derive(Debug, Eq, PartialEq)]
-pub struct SegmentTimer<'a> {
-    times: &'a mut SegmentedExecutionTimes,
+#[derive(Eq, PartialEq)]
+pub struct SegmentTimer<'a, T: KindIndexable, const N: usize> {
+    times: &'a mut SegmentedExecutionTimesImpl<T, N>,
     is_addition: bool,
+    stop_on_drop: bool,
     start: Instant,
-    kind: SegmentKind,
+    kind: T,
 }
 
-impl SegmentTimer<'_> {
-    pub fn stop(self) {
+impl<T: KindIndexable, const N: usize> SegmentTimer<'_, T, N> {
+    pub fn stop(mut self) {
+        self.stop_without_drop();
+    }
+
+    fn stop_without_drop(&mut self) {
         let elapsed = self.start.elapsed();
         if self.is_addition {
             self.times.add_at(self.kind, elapsed);
@@ -45,12 +62,28 @@ impl SegmentTimer<'_> {
             self.times.update_at(self.kind, elapsed);
         }
     }
+
+    pub fn stop_on_drop(&mut self) {
+        self.stop_on_drop = true;
+    }
 }
 
-#[derive(Clone, Copy, Eq, PartialEq)]
-pub struct SegmentedExecutionTimes {
-    elapsed_times: [Duration; N_SEGMENT_KINDS],
+impl<T: KindIndexable, const N: usize> Drop for SegmentTimer<'_, T, N> {
+    fn drop(&mut self) {
+        if self.stop_on_drop {
+            self.stop_without_drop();
+        }
+    }
 }
+
+#[derive(Clone, Copy, Eq, PartialEq, PartialOrd, Ord)]
+pub struct SegmentedExecutionTimesImpl<T: KindIndexable, const N: usize> {
+    elapsed_times: [Duration; N],
+    _kind_indexable: PhantomData<T>,
+}
+
+pub type SegmentedExecutionTimes =
+    SegmentedExecutionTimesImpl<SegmentKind, { SegmentKind::N_SEGMENT_KINDS }>;
 
 impl std::fmt::Debug for SegmentedExecutionTimes {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -67,11 +100,20 @@ impl std::fmt::Debug for SegmentedExecutionTimes {
                 "BitPacking",
                 &self.elapsed_times[SegmentKind::BitPacking.index()],
             )
+            .field(
+                "CompareInsert",
+                &self.elapsed_times[SegmentKind::CompareInsert.index()],
+            )
+            .field("Sum", &self.elapsed_times[SegmentKind::Sum.index()])
+            .field(
+                "Decompression",
+                &self.elapsed_times[SegmentKind::Decompression.index()],
+            )
             .finish()
     }
 }
 
-impl AddAssign for SegmentedExecutionTimes {
+impl<T: KindIndexable, const N: usize> AddAssign for SegmentedExecutionTimesImpl<T, N> {
     fn add_assign(&mut self, rhs: Self) {
         for (lhs, rhs) in self
             .elapsed_times
@@ -138,7 +180,7 @@ impl From<SegmentedExecutionTimes> for SerializableSegmentedExecutionTimes {
 
 impl From<SerializableSegmentedExecutionTimes> for SegmentedExecutionTimes {
     fn from(times: SerializableSegmentedExecutionTimes) -> Self {
-        let mut elapsed_times = [Duration::default(); N_SEGMENT_KINDS];
+        let mut elapsed_times = [Duration::default(); SegmentKind::N_SEGMENT_KINDS];
 
         fn u128_nanos_to_duration(nanos: u128) -> Duration {
             let secs = (nanos / 1_000_000_000) as u64;
@@ -155,51 +197,59 @@ impl From<SerializableSegmentedExecutionTimes> for SegmentedExecutionTimes {
         elapsed_times[SegmentKind::BitPacking.index()] =
             u128_nanos_to_duration(times.bit_packing_nanos);
 
-        Self { elapsed_times }
+        Self {
+            elapsed_times,
+            _kind_indexable: PhantomData,
+        }
     }
 }
 
-impl Default for SegmentedExecutionTimes {
+impl<T: KindIndexable, const N: usize> Default for SegmentedExecutionTimesImpl<T, N> {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl SegmentedExecutionTimes {
+impl<T: KindIndexable, const N: usize> SegmentedExecutionTimesImpl<T, N> {
     pub fn new() -> Self {
         Self {
-            elapsed_times: [Duration::from_secs(0); N_SEGMENT_KINDS],
+            elapsed_times: [Duration::from_secs(0); N],
+            _kind_indexable: PhantomData,
         }
     }
 
-    pub fn start_measurement(&mut self, kind: SegmentKind) -> SegmentTimer {
+    pub fn start_measurement(&mut self, kind: T) -> SegmentTimer<T, N> {
         SegmentTimer {
             times: self,
             is_addition: false,
+            stop_on_drop: false,
             start: Instant::now(),
             kind,
         }
     }
 
-    pub fn start_addition_measurement(&mut self, kind: SegmentKind) -> SegmentTimer {
+    pub fn start_addition_measurement(&mut self, kind: T) -> SegmentTimer<T, N> {
         SegmentTimer {
             times: self,
             is_addition: true,
+            stop_on_drop: false,
             start: Instant::now(),
             kind,
         }
     }
 
-    fn update_at(&mut self, kind: SegmentKind, value: Duration) {
+    fn update_at(&mut self, kind: T, value: Duration) {
         self.elapsed_times[kind.index()] = value;
     }
 
-    fn add_at(&mut self, kind: SegmentKind, value: Duration) {
+    fn add_at(&mut self, kind: T, value: Duration) {
         let elapsed_time = &mut self.elapsed_times[kind.index()];
 
         *elapsed_time += value;
     }
+}
 
+impl SegmentedExecutionTimes {
     pub fn io_read(&self) -> Duration {
         self.elapsed_times[SegmentKind::IORead.index()]
     }

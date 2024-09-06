@@ -6,6 +6,7 @@ use std::{
 use crate::{
     decoder::{self, query::QueryExecutor, FileMetadataLike, GeneralChunkHandle},
     io::as_bytes_mut::AsBytesMut,
+    time::{SegmentKind, SegmentedExecutionTimes},
 };
 
 use super::Reader;
@@ -26,12 +27,15 @@ impl UncompressedReader {
     pub fn new<T: FileMetadataLike, R: Read>(
         handle: &GeneralChunkHandle<T>,
         mut reader: R,
+        timer: &mut SegmentedExecutionTimes,
     ) -> io::Result<UncompressedReaderImpl<io::Cursor<Vec<u8>>>> {
         let number_of_records = handle.number_of_records() as usize;
 
         let chunk_size = handle.chunk_size() as usize;
         let mut chunk_in_memory = vec![0; chunk_size];
+        let io_read_timer = timer.start_addition_measurement(SegmentKind::IORead);
         reader.read_exact(&mut chunk_in_memory)?;
+        io_read_timer.stop();
         let reader = io::Cursor::new(chunk_in_memory);
 
         Ok(UncompressedReaderImpl {
@@ -46,7 +50,7 @@ impl<R: Read> Reader for UncompressedReaderImpl<R> {
     type NativeHeader = ();
     type DecompressIterator<'a> = UncompressedIteratorImpl<'a, R> where Self: 'a;
 
-    fn decompress(&mut self) -> decoder::Result<&[f64]> {
+    fn decompress(&mut self, timer: &mut SegmentedExecutionTimes) -> decoder::Result<&[f64]> {
         if self.values.is_some() {
             return Ok(self.values.as_ref().unwrap());
         }
@@ -54,7 +58,9 @@ impl<R: Read> Reader for UncompressedReaderImpl<R> {
         let mut buf: Vec<f64> = vec![0.0; self.number_of_records];
         let buf_ref = buf.as_mut_slice();
         let bytes = buf_ref.as_bytes_mut();
+        let io_read_timer = timer.start_addition_measurement(SegmentKind::IORead);
         self.reader.read_exact(bytes)?;
+        io_read_timer.stop();
 
         self.values = Some(buf);
 

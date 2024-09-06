@@ -5,9 +5,10 @@ use crate::{
         self, error::DecoderError, query::QueryExecutor, FileMetadataLike, GeneralChunkHandle,
     },
     io::bit_read::{self, BitRead2, BufferedBitReader},
+    time::SegmentedExecutionTimes,
 };
 
-use super::Reader;
+use super::{default_decompress, Reader};
 
 type BitReader = bit_read::BufferedBitReader<Vec<u8>>;
 
@@ -25,11 +26,14 @@ impl<const N: usize> ChimpNReader<N> {
     pub fn new<T: FileMetadataLike, R: Read>(
         handle: &GeneralChunkHandle<T>,
         mut reader: R,
+        timer: &mut SegmentedExecutionTimes,
     ) -> Self {
         let number_of_records = handle.number_of_records() as usize;
         let chunk_size = handle.chunk_size() as usize;
         let mut chunk_in_memory = vec![0; chunk_size];
+        let io_read_timer = timer.start_addition_measurement(crate::time::SegmentKind::IORead);
         reader.read_exact(&mut chunk_in_memory).unwrap();
+        io_read_timer.stop();
         let bit_reader = BufferedBitReader::new(chunk_in_memory);
         ChimpNReader {
             bit_reader,
@@ -52,6 +56,17 @@ impl<const N: usize> Reader for ChimpNReader<N> {
             &mut self.bit_reader,
             self.number_of_records,
         ))
+    }
+
+    fn decompress(
+        &mut self,
+        timer: &mut crate::time::SegmentedExecutionTimes,
+    ) -> decoder::Result<&[f64]> {
+        let xor_timer = timer.start_addition_measurement(crate::time::SegmentKind::Xor);
+        let decompressed = default_decompress(self)?;
+        xor_timer.stop();
+
+        Ok(decompressed)
     }
 
     fn set_decompress_result(&mut self, data: Vec<f64>) -> &[f64] {

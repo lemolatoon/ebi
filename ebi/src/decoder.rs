@@ -1,6 +1,7 @@
 pub mod chunk_reader;
 pub mod error;
 pub mod query;
+pub mod timer;
 
 use chunk_reader::GeneralChunkReader;
 use error::DecoderError;
