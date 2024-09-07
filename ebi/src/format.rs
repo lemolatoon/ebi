@@ -1,4 +1,5 @@
 //! Structs for interpreting file formats that ebi uses.
+//!
 //! Structs below is *pseudo* structs for understanding the format.
 //! Code blocks with syntax highlighting are valid as Rust's code, and defined in this module.
 //! All bytes are laid as little-endian.
