@@ -51,6 +51,7 @@ pub(crate) use impl_from_le_bytes_ext;
 impl_from_le_bytes_ext!(ChunkFooter, FileFooter0, FileFooter3);
 
 /// A trait for attempting to convert a byte slice into a struct instance, assuming little-endian byte order.
+///
 /// This trait should be implemented for structs that can potentially be constructed from byte slices.
 pub trait TryFromLeBytes {
     type Error;
