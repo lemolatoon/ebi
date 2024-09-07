@@ -135,6 +135,9 @@ pub struct SerializableSegmentedExecutionTimes {
     pub delta_nanos: u128,
     pub quantization_nanos: u128,
     pub bit_packing_nanos: u128,
+    pub compare_insert_nanos: u128,
+    pub sum_nanos: u128,
+    pub decompression_nanos: u128,
 }
 serialize::impl_to_le!(
     SerializableSegmentedExecutionTimes,
@@ -143,7 +146,10 @@ serialize::impl_to_le!(
     xor_nanos,
     delta_nanos,
     quantization_nanos,
-    bit_packing_nanos
+    bit_packing_nanos,
+    compare_insert_nanos,
+    sum_nanos,
+    decompression_nanos
 );
 impl FromLeBytes for SerializableSegmentedExecutionTimes {
     fn from_le_bytes(bytes: &[u8]) -> Self {
@@ -153,6 +159,9 @@ impl FromLeBytes for SerializableSegmentedExecutionTimes {
         let delta_nanos = u128::from_le_bytes(bytes[48..64].try_into().unwrap());
         let quantization_nanos = u128::from_le_bytes(bytes[64..80].try_into().unwrap());
         let bit_packing_nanos = u128::from_le_bytes(bytes[80..96].try_into().unwrap());
+        let compare_insert_nanos = u128::from_le_bytes(bytes[96..112].try_into().unwrap());
+        let sum_nanos = u128::from_le_bytes(bytes[112..128].try_into().unwrap());
+        let decompression_nanos = u128::from_le_bytes(bytes[128..144].try_into().unwrap());
 
         Self {
             io_read_nanos,
@@ -161,6 +170,9 @@ impl FromLeBytes for SerializableSegmentedExecutionTimes {
             delta_nanos,
             quantization_nanos,
             bit_packing_nanos,
+            compare_insert_nanos,
+            sum_nanos,
+            decompression_nanos,
         }
     }
 }
@@ -174,6 +186,9 @@ impl From<SegmentedExecutionTimes> for SerializableSegmentedExecutionTimes {
             delta_nanos: times.delta().as_nanos(),
             quantization_nanos: times.quantization().as_nanos(),
             bit_packing_nanos: times.bit_packing().as_nanos(),
+            compare_insert_nanos: times.compare_insert().as_nanos(),
+            sum_nanos: times.sum().as_nanos(),
+            decompression_nanos: times.decompression().as_nanos(),
         }
     }
 }
@@ -196,6 +211,11 @@ impl From<SerializableSegmentedExecutionTimes> for SegmentedExecutionTimes {
             u128_nanos_to_duration(times.quantization_nanos);
         elapsed_times[SegmentKind::BitPacking.index()] =
             u128_nanos_to_duration(times.bit_packing_nanos);
+        elapsed_times[SegmentKind::CompareInsert.index()] =
+            u128_nanos_to_duration(times.compare_insert_nanos);
+        elapsed_times[SegmentKind::Sum.index()] = u128_nanos_to_duration(times.sum_nanos);
+        elapsed_times[SegmentKind::Decompression.index()] =
+            u128_nanos_to_duration(times.decompression_nanos);
 
         Self {
             elapsed_times,
@@ -272,5 +292,35 @@ impl SegmentedExecutionTimes {
 
     pub fn bit_packing(&self) -> Duration {
         self.elapsed_times[SegmentKind::BitPacking.index()]
+    }
+
+    pub fn compare_insert(&self) -> Duration {
+        self.elapsed_times[SegmentKind::CompareInsert.index()]
+    }
+
+    pub fn sum(&self) -> Duration {
+        self.elapsed_times[SegmentKind::Sum.index()]
+    }
+
+    pub fn decompression(&self) -> Duration {
+        self.elapsed_times[SegmentKind::Decompression.index()]
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::SerializableSegmentedExecutionTimes;
+
+    #[test]
+    pub fn test_segmented_execution_times_consistency() {
+        let mut times = super::SegmentedExecutionTimes::new();
+        for (i, duration) in times.elapsed_times.iter_mut().enumerate() {
+            *duration = std::time::Duration::from_secs(i as u64);
+        }
+
+        let serialized = SerializableSegmentedExecutionTimes::from(times);
+        let deserialized = super::SegmentedExecutionTimes::from(serialized);
+
+        assert_eq!(times, deserialized);
     }
 }
