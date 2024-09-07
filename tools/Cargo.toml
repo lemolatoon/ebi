@@ -1,10 +1,10 @@
 [package]
 name = "tools"
-version = "0.1.8"
+version = "0.1.9"
 edition = "2021"
 
 [dependencies]
-experimenter = { version = "0.1.8", path = "../experimenter" }
+experimenter = { version = "0.1.9", path = "../experimenter" }
 anyhow = "1.0.86"
 glob = "0.3.1"
 serde_json = "1.0.124"
