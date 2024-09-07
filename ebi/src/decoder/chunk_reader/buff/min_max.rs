@@ -52,16 +52,22 @@ pub(super) fn max_with_bitmask(
 
     let mut remaining_bits_length = fixed_representation_bits_length;
 
+    // All values are the same
+    if remaining_bits_length == 0 {
+        return Ok(base_fixed64 as f64 / scale);
+    }
+
     let mut to_check = bitmask;
     while remaining_bits_length > 0 {
         let mut next_to_check = RoaringBitmap::new();
         // If the remaining bits are less than 8, it will be the last subcolumn
         // we treat it separately
         if remaining_bits_length < 8 {
-            let previous_record_index = 0;
+            let mut expected_record_index_if_sequential = 0;
             let mut max_subcolumn = u8::MIN;
             for i in to_check.iter().map(|x| x - logical_offset) {
-                let n_records_to_skip = i - previous_record_index;
+                let n_records_to_skip = i - expected_record_index_if_sequential;
+                expected_record_index_if_sequential = i + 1;
                 let n_bits_to_skip = n_records_to_skip * remaining_bits_length;
                 bitpack
                     .skip(n_bits_to_skip as usize)
@@ -71,11 +77,11 @@ pub(super) fn max_with_bitmask(
                     .map_err(|_| DecoderError::UnexpectedEndOfChunk)?;
                 let subcolumn = flip(subcolumn);
                 if subcolumn == max_subcolumn {
-                    next_to_check.insert(i);
+                    next_to_check.insert(i + logical_offset);
                 } else if subcolumn > max_subcolumn {
                     next_to_check.clear();
                     max_subcolumn = subcolumn;
-                    next_to_check.insert(i);
+                    next_to_check.insert(i + logical_offset);
                 }
             }
 
@@ -158,6 +164,11 @@ pub(super) fn max_without_bitmask(bytes: &[u8], logical_offset: u32) -> decoder:
     let mut max_subcolumn = u8::MIN;
     let mut to_check = RoaringBitmap::new();
 
+    // All values are the same
+    if remaining_bits_length == 0 {
+        return Ok(base_fixed64 as f64 / scale);
+    }
+
     if remaining_bits_length >= 8 {
         let subcolumn_chunks = bitpack
             .read_n_byte(number_of_records as usize)
@@ -196,10 +207,11 @@ pub(super) fn max_without_bitmask(bytes: &[u8], logical_offset: u32) -> decoder:
         // If the remaining bits are less than 8, it will be the last subcolumn
         // we treat it separately
         if remaining_bits_length < 8 {
-            let previous_record_index = 0;
+            let mut expected_record_index_if_sequential = 0;
             let mut max_subcolumn = u8::MIN;
             for i in to_check.iter().map(|x| x - logical_offset) {
-                let n_records_to_skip = i - previous_record_index;
+                let n_records_to_skip = i - expected_record_index_if_sequential;
+                expected_record_index_if_sequential = i + 1;
                 let n_bits_to_skip = n_records_to_skip * remaining_bits_length;
                 bitpack
                     .skip(n_bits_to_skip as usize)
