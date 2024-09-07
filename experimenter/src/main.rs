@@ -328,6 +328,10 @@ fn main() -> anyhow::Result<()> {
             n_files,
             path.display(),
         );
+        if path.is_dir() {
+            eprintln!("Skipping directory: {}", path.display());
+            continue;
+        }
         if let Err(e) = process_file(&path, cli.clone()) {
             eprintln!("Failed to process file {}: {:?}", path.display(), e);
         } else {
@@ -833,6 +837,7 @@ fn create_default_compressor_config(
         "Failed to open file.: {}",
         filename.as_ref().display()
     ))?);
+    println!("get scale for {}", filename.as_ref().display());
     let scale = get_appropriate_scale(reader);
     let mut configs: Vec<(&'static str, CompressorConfig)> = vec![
         (
@@ -1053,7 +1058,7 @@ fn compress_command(
     } = config.clone();
     let now = chrono::Utc::now();
 
-    let (statistics, elapsed_time_nanos, result_string) = if in_memory {
+    let (statistics, elapsed_time_nanos, execution_times, result_string) = if in_memory {
         let mut content = Vec::new();
         File::open(filename.as_ref())
             .context(format!(
@@ -1092,10 +1097,12 @@ fn compress_command(
             "number_of_records: {}",
             decoder.footer().number_of_records()
         );
+        let segmented_execution_times = *decoder.footer().segmented_execution_times();
 
         (
             get_compress_statistics(&decoder),
             elapsed_time_nanos,
+            segmented_execution_times,
             result_string,
         )
     } else {
@@ -1129,10 +1136,12 @@ fn compress_command(
             "number_of_records: {}",
             decoder.footer().number_of_records()
         );
+        let segmented_execution_times = *decoder.footer().segmented_execution_times();
 
         (
             get_compress_statistics(&decoder),
             elapsed_time_nanos,
+            segmented_execution_times,
             result_string,
         )
     };
@@ -1144,6 +1153,7 @@ fn compress_command(
         compression_config: config,
         command_specific: statistics?,
         elapsed_time_nanos,
+        execution_times: execution_times.into(),
         input_filename: filename.as_ref().to_string_lossy().to_string(),
         datetime: now,
         result_string,
@@ -1166,7 +1176,7 @@ fn filter_command(
     let bitmask = bitmask.map(ebi::decoder::query::RoaringBitmap::from_iter);
     let now = chrono::Utc::now();
 
-    let (bitmask, elapsed_time_nanos, compression_config) = if in_memory {
+    let (bitmask, elapsed_time_nanos, execution_times, compression_config) = if in_memory {
         let mut content = Vec::new();
         File::open(filename.as_ref())
             .context(format!(
@@ -1192,7 +1202,12 @@ fn filter_command(
             compressor_config: *decoder.footer().compressor_config(),
         };
 
-        (bitmask, elapsed_time_nanos, compression_config)
+        (
+            bitmask,
+            elapsed_time_nanos,
+            decoder.segmented_execution_times(),
+            compression_config,
+        )
     } else {
         let mut decoder =
             Decoder::new(DecoderInput::from_file(filename.as_ref())?).context(format!(
@@ -1211,7 +1226,12 @@ fn filter_command(
             compressor_config: *decoder.footer().compressor_config(),
         };
 
-        (bitmask, elapsed_time_nanos, compression_config)
+        (
+            bitmask,
+            elapsed_time_nanos,
+            decoder.segmented_execution_times(),
+            compression_config,
+        )
     };
 
     let result_string = format!("{:?}", bitmask);
@@ -1223,6 +1243,7 @@ fn filter_command(
         compression_config,
         command_specific: config,
         elapsed_time_nanos,
+        execution_times: execution_times.into(),
         input_filename: filename.as_ref().to_string_lossy().to_string(),
         result_string,
         datetime: now,
@@ -1245,7 +1266,7 @@ fn filter_materialize_command(
     let bitmask = bitmask.map(ebi::decoder::query::RoaringBitmap::from_iter);
     let now = chrono::Utc::now();
 
-    let (compression_config, elapsed_time_nanos, result_string) = if in_memory {
+    let (compression_config, elapsed_time_nanos, execution_times, result_string) = if in_memory {
         let mut content = Vec::new();
         File::open(filename.as_ref())
             .context(format!(
@@ -1274,7 +1295,12 @@ fn filter_materialize_command(
         let output = decoder_output.into_writer().into_inner();
         let result_string = format!("bytes: {:?}", output.len());
 
-        (compression_config, elapsed_time_nanos, result_string)
+        (
+            compression_config,
+            elapsed_time_nanos,
+            decoder.segmented_execution_times(),
+            result_string,
+        )
     } else {
         let mut decoder =
             Decoder::new(DecoderInput::from_file(filename.as_ref())?).context(format!(
@@ -1302,7 +1328,12 @@ fn filter_materialize_command(
         let metadata = decoder_output.into_writer().into_inner()?.metadata()?;
         let result_string = format!("{:?}", metadata);
 
-        (compression_config, elapsed_time_nanos, result_string)
+        (
+            compression_config,
+            elapsed_time_nanos,
+            decoder.segmented_execution_times(),
+            result_string,
+        )
     };
 
     let output = OutputWrapper {
@@ -1312,6 +1343,7 @@ fn filter_materialize_command(
         compression_config,
         command_specific: config,
         elapsed_time_nanos,
+        execution_times: execution_times.into(),
         input_filename: filename.as_ref().to_string_lossy().to_string(),
         result_string,
         datetime: now,
@@ -1330,7 +1362,7 @@ fn materialize_command(
     let bitmask = bitmask.map(ebi::decoder::query::RoaringBitmap::from_iter);
     let now = chrono::Utc::now();
 
-    let (compression_config, elapsed_time_nanos, result_string) = if in_memory {
+    let (compression_config, elapsed_time_nanos, execution_times, result_string) = if in_memory {
         let mut content = Vec::new();
         File::open(filename.as_ref())
             .context(format!(
@@ -1360,7 +1392,12 @@ fn materialize_command(
         let bytes = decoder_output.into_writer().into_inner();
         let result_string = format!("bytes: {:?}", bytes.len());
 
-        (compression_config, elapsed_time_nanos, result_string)
+        (
+            compression_config,
+            elapsed_time_nanos,
+            decoder.segmented_execution_times(),
+            result_string,
+        )
     } else {
         let mut decoder =
             Decoder::new(DecoderInput::from_file(filename.as_ref())?).context(format!(
@@ -1389,7 +1426,12 @@ fn materialize_command(
         let metadata = decoder_output.into_writer().into_inner()?.metadata()?;
         let result_string = format!("{:?}", metadata);
 
-        (compression_config, elapsed_time_nanos, result_string)
+        (
+            compression_config,
+            elapsed_time_nanos,
+            decoder.segmented_execution_times(),
+            result_string,
+        )
     };
 
     let output = OutputWrapper {
@@ -1399,6 +1441,7 @@ fn materialize_command(
         compression_config,
         command_specific: config,
         elapsed_time_nanos,
+        execution_times: execution_times.into(),
         input_filename: filename.as_ref().to_string_lossy().to_string(),
         result_string,
         datetime: now,

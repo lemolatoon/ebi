@@ -6,7 +6,7 @@ use std::{
 use anyhow::Context as _;
 use ebi::{
     api::decoder::ChunkId, compressor::CompressorConfig, decoder::query::Predicate,
-    encoder::ChunkOption,
+    encoder::ChunkOption, time::SerializableSegmentedExecutionTimes,
 };
 use quick_impl::QuickImpl;
 use serde::{Deserialize, Serialize};
@@ -70,6 +70,7 @@ pub struct OutputWrapper<T> {
     pub compression_config: CompressionConfig,
     pub command_specific: T,
     pub elapsed_time_nanos: u64,
+    pub execution_times: SerializableSegmentedExecutionTimes,
     pub input_filename: String,
     pub datetime: chrono::DateTime<chrono::Utc>,
     pub result_string: String,
@@ -280,7 +281,7 @@ pub fn get_decimal_precision(s: &str) -> usize {
 pub fn get_appropriate_scale<R: BufRead>(reader: R) -> anyhow::Result<u32> {
     let mut max_decimal_precision = 0;
     let mut float_strs = BTreeMap::new();
-    for line in reader.lines() {
+    for line in tqdm::tqdm(reader.lines()) {
         let line = line.context("Failed to read line")?;
         let strs = line.split(',').filter_map(|s| {
             if s.is_empty() {
@@ -299,8 +300,12 @@ pub fn get_appropriate_scale<R: BufRead>(reader: R) -> anyhow::Result<u32> {
     let number_of_records = float_strs.values().map(|v| v.len()).sum::<usize>();
     let mut scale = None;
     const IGNORE_THRESHOLD: f64 = 0.01;
-    for (&precision, strs) in float_strs.iter().rev() {
+    for (&precision, strs) in tqdm::tqdm(float_strs.iter().rev()) {
         let number_of_records_of_precision = strs.len();
+        println!(
+            "number_of_records_of_precision: {}",
+            number_of_records_of_precision
+        );
         if (number_of_records_of_precision as f64 / number_of_records as f64) < IGNORE_THRESHOLD {
             println!(
                 "Skipping precision: {}, {} / {} ({}) < THRESHOLD ({})",
