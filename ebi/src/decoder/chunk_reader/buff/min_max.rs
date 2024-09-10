@@ -18,12 +18,16 @@ fn find_max_subcolumn(
     for i in to_check.iter().map(|x| x - logical_offset) {
         let subcolumn = chunk[i as usize];
         let subcolumn = flip(subcolumn);
-        if subcolumn == max_subcolumn {
-            next_to_check.insert(i + logical_offset);
-        } else if subcolumn > max_subcolumn {
-            next_to_check.clear();
-            max_subcolumn = subcolumn;
-            next_to_check.insert(i + logical_offset);
+        match subcolumn.cmp(&max_subcolumn) {
+            std::cmp::Ordering::Equal => {
+                next_to_check.insert(i + logical_offset);
+            }
+            std::cmp::Ordering::Greater => {
+                next_to_check.clear();
+                max_subcolumn = subcolumn;
+                next_to_check.insert(i + logical_offset);
+            }
+            _ => {}
         }
     }
 
@@ -76,12 +80,16 @@ pub(super) fn max_with_bitmask(
                     .read_bits(remaining_bits_length as usize)
                     .map_err(|_| DecoderError::UnexpectedEndOfChunk)?;
                 let subcolumn = flip(subcolumn);
-                if subcolumn == max_subcolumn {
-                    next_to_check.insert(i + logical_offset);
-                } else if subcolumn > max_subcolumn {
-                    next_to_check.clear();
-                    max_subcolumn = subcolumn;
-                    next_to_check.insert(i + logical_offset);
+                match subcolumn.cmp(&max_subcolumn) {
+                    std::cmp::Ordering::Equal => {
+                        next_to_check.insert(i + logical_offset);
+                    }
+                    std::cmp::Ordering::Greater => {
+                        next_to_check.clear();
+                        max_subcolumn = subcolumn;
+                        next_to_check.insert(i + logical_offset);
+                    }
+                    _ => {}
                 }
             }
 
@@ -175,12 +183,16 @@ pub(super) fn max_without_bitmask(bytes: &[u8], logical_offset: u32) -> decoder:
             .map_err(|_| DecoderError::UnexpectedEndOfChunk)?;
         for (i, &subcolumn) in subcolumn_chunks.iter().enumerate() {
             let subcolumn = flip(subcolumn);
-            if subcolumn > max_subcolumn {
-                max_subcolumn = subcolumn;
-                to_check.clear();
-                to_check.push(i as u32 + logical_offset);
-            } else if subcolumn == max_subcolumn {
-                to_check.push(i as u32 + logical_offset);
+            match subcolumn.cmp(&max_subcolumn) {
+                std::cmp::Ordering::Equal => {
+                    to_check.push(i as u32 + logical_offset);
+                }
+                std::cmp::Ordering::Greater => {
+                    max_subcolumn = subcolumn;
+                    to_check.clear();
+                    to_check.push(i as u32 + logical_offset);
+                }
+                std::cmp::Ordering::Less => {}
             }
         }
     } else {
@@ -189,12 +201,16 @@ pub(super) fn max_without_bitmask(bytes: &[u8], logical_offset: u32) -> decoder:
             let subcolumn = bitpack
                 .read_bits(remaining_bits_length as usize)
                 .map_err(|_| DecoderError::UnexpectedEndOfChunk)?;
-            if subcolumn == max_subcolumn {
-                to_check.insert(i + logical_offset);
-            } else if subcolumn > max_subcolumn {
-                to_check.clear();
-                max_subcolumn = subcolumn;
-                to_check.insert(i + logical_offset);
+            match subcolumn.cmp(&max_subcolumn) {
+                std::cmp::Ordering::Equal => {
+                    to_check.insert(i + logical_offset);
+                }
+                std::cmp::Ordering::Greater => {
+                    to_check.clear();
+                    max_subcolumn = subcolumn;
+                    to_check.insert(i + logical_offset);
+                }
+                std::cmp::Ordering::Less => {}
             }
         }
     }
@@ -219,12 +235,16 @@ pub(super) fn max_without_bitmask(bytes: &[u8], logical_offset: u32) -> decoder:
                 let subcolumn = bitpack
                     .read_bits(remaining_bits_length as usize)
                     .map_err(|_| DecoderError::UnexpectedEndOfChunk)?;
-                if subcolumn == max_subcolumn {
-                    next_to_check.insert(i + logical_offset);
-                } else if subcolumn > max_subcolumn {
-                    next_to_check.clear();
-                    max_subcolumn = subcolumn;
-                    next_to_check.insert(i + logical_offset);
+                match subcolumn.cmp(&max_subcolumn) {
+                    std::cmp::Ordering::Equal => {
+                        next_to_check.insert(i + logical_offset);
+                    }
+                    std::cmp::Ordering::Greater => {
+                        next_to_check.clear();
+                        max_subcolumn = subcolumn;
+                        next_to_check.insert(i + logical_offset);
+                    }
+                    _ => {}
                 }
             }
 

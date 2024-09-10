@@ -233,7 +233,7 @@ impl QueryExecutor for BUFFReader {
         let bitpacking_timer = timer.start_addition_measurement(SegmentKind::CompareInsert);
         let max_fp = if let Some(bitmask) = bitmask {
             if bitmask.is_empty() {
-                return Ok(std::f64::NAN);
+                return Ok(f64::NAN);
             }
 
             min_max::max_with_bitmask(&self.bytes, bitmask, logical_offset)?
