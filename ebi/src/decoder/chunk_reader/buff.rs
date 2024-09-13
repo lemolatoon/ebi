@@ -236,12 +236,43 @@ impl QueryExecutor for BUFFReader {
                 return Ok(f64::NAN);
             }
 
-            min_max::max_with_bitmask(&self.bytes, bitmask, logical_offset)?
+            min_max::max_with_bitmask::<false>(&self.bytes, bitmask, logical_offset)?
         } else {
             min_max::max_without_bitmask(&self.bytes, logical_offset)?
         };
         bitpacking_timer.stop();
 
         Ok(max_fp)
+    }
+
+    fn min(
+        &mut self,
+        bitmask: Option<&roaring::RoaringBitmap>,
+        logical_offset: usize,
+        timer: &mut SegmentedExecutionTimes,
+    ) -> decoder::Result<f64> {
+        let logical_offset = logical_offset as u32;
+        let number_of_records = self.number_of_records as u32;
+        let bitmask: Option<roaring::RoaringBitmap> = bitmask.map(|x| {
+            RoaringBitmap::from_sorted_iter(
+                x.iter()
+                    .filter(|&x| x >= logical_offset && x < logical_offset + number_of_records),
+            )
+            .unwrap()
+        });
+
+        let bitpacking_timer = timer.start_addition_measurement(SegmentKind::CompareInsert);
+        let min_fp = if let Some(bitmask) = bitmask {
+            if bitmask.is_empty() {
+                return Ok(f64::NAN);
+            }
+
+            min_max::max_with_bitmask::<true>(&self.bytes, bitmask, logical_offset)?
+        } else {
+            min_max::min_without_bitmask(&self.bytes)?
+        };
+        bitpacking_timer.stop();
+
+        Ok(min_fp)
     }
 }
