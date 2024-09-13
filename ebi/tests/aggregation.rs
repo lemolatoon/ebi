@@ -3,6 +3,7 @@ mod common;
 use core::f64;
 
 use ebi::{compressor::CompressorConfig, encoder::ChunkOption};
+use roaring::RoaringBitmap;
 
 fn round_at(value: f64, scale: u32) -> f64 {
     (value * scale as f64).round() / scale as f64
@@ -167,13 +168,43 @@ fn test_sum(
     let config = config.into();
     helper::test_sum_inner(
         config,
+        vec![0.0, 2.0, 3.0, 4.0, 5.0],
+        ChunkOption::RecordCount(8),
+        None,
+        None,
+        14.0,
+        round_scale,
+        "Basic Sum(base0)",
+    );
+    helper::test_sum_inner(
+        config,
+        vec![11.0, 12.0],
+        ChunkOption::RecordCount(8),
+        Some(&RoaringBitmap::from_iter(vec![0])),
+        None,
+        11.0,
+        round_scale,
+        "Basic Sum(bitmask)",
+    );
+    helper::test_sum_inner(
+        config,
+        vec![0.0, 2.0, 3.0, 4.0, 500.0],
+        ChunkOption::RecordCount(8),
+        None,
+        None,
+        509.0,
+        round_scale,
+        "Basic Sum(multi-subcolumn)",
+    );
+    helper::test_sum_inner(
+        config,
         vec![-1.0, 2.0, 3.0, 4.0, 5.0],
         ChunkOption::RecordCount(8),
         None,
         None,
         13.0,
         round_scale,
-        "Basic Sum",
+        "Basic Sum(base -1)",
     );
 
     let mut gen = common::RandomGen::new(round_scale, lower_bound, upper_bound);
@@ -201,7 +232,10 @@ fn test_sum(
     };
     let n_records = gen.n_records();
     let (values, expected) = if expected.is_infinite() {
-        let values: Vec<f64> = values.into_iter().map(|v| v / n_records as f64).collect();
+        let values: Vec<f64> = values
+            .into_iter()
+            .map(|v| gen.round(v / n_records as f64))
+            .collect();
         let expected = if let Some(bitmask) = bitmask.as_ref() {
             let mut sum = 0.0;
             for i in bitmask {

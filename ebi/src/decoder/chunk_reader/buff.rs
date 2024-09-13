@@ -3,6 +3,7 @@ mod filter;
 mod filter_cmp;
 mod filter_eq;
 mod min_max;
+mod sum;
 
 use core::slice;
 use std::{io::Read, iter};
@@ -274,5 +275,26 @@ impl QueryExecutor for BUFFReader {
         bitpacking_timer.stop();
 
         Ok(min_fp)
+    }
+
+    fn sum(
+        &mut self,
+        bitmask: Option<&RoaringBitmap>,
+        logical_offset: usize,
+        timer: &mut SegmentedExecutionTimes,
+    ) -> decoder::Result<f64> {
+        let sum_timer = timer.start_addition_measurement(SegmentKind::Sum);
+        let logical_offset = logical_offset as u32;
+        let number_of_records = self.number_of_records as u32;
+        let bitmask: Option<roaring::RoaringBitmap> = bitmask.map(|x| {
+            RoaringBitmap::from_sorted_iter(
+                x.iter()
+                    .filter(|&x| x >= logical_offset && x < logical_offset + number_of_records),
+            )
+            .unwrap()
+        });
+        let result = sum::sum_with_bitmask(&self.bytes, bitmask.as_ref(), logical_offset);
+        sum_timer.stop();
+        result
     }
 }
