@@ -6,7 +6,9 @@ use crate::{
     decoder::{
         self,
         error::DecoderError,
-        query::{default_filter, default_materialize, default_max, Predicate, QueryExecutor},
+        query::{
+            default_filter, default_materialize, default_max, default_sum, Predicate, QueryExecutor,
+        },
         FileMetadataLike, GeneralChunkHandle,
     },
     io::bit_read::{self, BitRead2, BufferedBitReader},
@@ -229,6 +231,122 @@ impl QueryExecutor for DeltaSprintzReader {
             min_max_without_bitmask::<true>(self.number_of_records, &mut self.bit_reader, timer)
         }
     }
+
+    fn sum(
+        &mut self,
+        bitmask: Option<&RoaringBitmap>,
+        logical_offset: usize,
+        timer: &mut SegmentedExecutionTimes,
+    ) -> decoder::Result<f64> {
+        if self.decompressed.is_some() {
+            return default_sum(self, bitmask, logical_offset, timer);
+        }
+
+        if let Some(bitmask) = bitmask {
+            if bitmask.is_empty() {
+                return Ok(0.0);
+            }
+            let bitmask = bitmask.iter().filter(|&x| {
+                x >= logical_offset as u32
+                    && x < logical_offset as u32 + self.number_of_records as u32
+            });
+            sum(
+                self.number_of_records,
+                &mut self.bit_reader,
+                bitmask,
+                logical_offset,
+                timer,
+            )
+        } else {
+            sum_without_bitmask(self.number_of_records, &mut self.bit_reader, timer)
+        }
+    }
+}
+
+fn sum(
+    number_of_records: u64,
+    bit_reader: &mut BitReader,
+    mut bitmask: impl Iterator<Item = u32>,
+    logical_offset: usize,
+    timer: &mut SegmentedExecutionTimes,
+) -> decoder::Result<f64> {
+    bit_reader.reset();
+
+    let initial_value_bits = bit_reader
+        .read_bits(64)
+        .ok_or(DecoderError::UnexpectedEndOfChunk)?;
+    let initial_value = unsafe { std::mem::transmute::<u64, i64>(initial_value_bits) };
+    let scale = bit_reader
+        .read_bits(32)
+        .ok_or(DecoderError::UnexpectedEndOfChunk)? as u32;
+    let number_of_bits_needed = bit_reader
+        .read_byte()
+        .ok_or(DecoderError::UnexpectedEndOfChunk)?;
+
+    let comparison_timer = timer.start_addition_measurement(SegmentKind::CompareInsert);
+    let mut sum = 0;
+    let mut previous_value_quantized = initial_value;
+    let Some(mut next) = bitmask.next() else {
+        return Ok(f64::NAN);
+    };
+    for record_index in 0..number_of_records {
+        let zigzag_delta = bit_reader
+            .read_bits(number_of_bits_needed)
+            .ok_or(DecoderError::UnexpectedEndOfChunk)?;
+        let delta = unzigzag(zigzag_delta);
+        let quantized = previous_value_quantized + delta;
+        previous_value_quantized = quantized;
+
+        if record_index as u32 + logical_offset as u32 != next {
+            continue;
+        }
+
+        sum += quantized;
+        if let Some(next_logical_record_index) = bitmask.next() {
+            next = next_logical_record_index;
+        } else {
+            break;
+        }
+    }
+    comparison_timer.stop();
+
+    Ok(sum as f64 / scale as f64)
+}
+
+fn sum_without_bitmask(
+    number_of_records: u64,
+    bit_reader: &mut BitReader,
+    timer: &mut SegmentedExecutionTimes,
+) -> decoder::Result<f64> {
+    bit_reader.reset();
+
+    let initial_value_bits = bit_reader
+        .read_bits(64)
+        .ok_or(DecoderError::UnexpectedEndOfChunk)?;
+    let initial_value = unsafe { std::mem::transmute::<u64, i64>(initial_value_bits) };
+    let scale = bit_reader
+        .read_bits(32)
+        .ok_or(DecoderError::UnexpectedEndOfChunk)? as u32;
+    let number_of_bits_needed = bit_reader
+        .read_byte()
+        .ok_or(DecoderError::UnexpectedEndOfChunk)?;
+
+    let comparison_timer = timer.start_addition_measurement(SegmentKind::CompareInsert);
+    let mut sum = 0;
+    let mut previous_value_quantized = initial_value;
+    for _ in 0..number_of_records {
+        let zigzag_delta = bit_reader
+            .read_bits(number_of_bits_needed)
+            .ok_or(DecoderError::UnexpectedEndOfChunk)?;
+        let delta = unzigzag(zigzag_delta);
+        let quantized = previous_value_quantized + delta;
+        previous_value_quantized = quantized;
+
+        sum += quantized;
+    }
+    comparison_timer.stop();
+
+    Ok(sum as f64 / scale as f64)
 }
 
 fn min_max<const IS_MIN: bool>(
