@@ -6,7 +6,7 @@ use crate::{
     decoder::{
         self,
         error::DecoderError,
-        query::{default_filter, default_materialize, Predicate, QueryExecutor},
+        query::{default_filter, default_materialize, default_max, Predicate, QueryExecutor},
         FileMetadataLike, GeneralChunkHandle,
     },
     io::bit_read::{self, BitRead2, BufferedBitReader},
@@ -169,6 +169,161 @@ impl QueryExecutor for DeltaSprintzReader {
 
         default_materialize(self, output, bitmask, logical_offset, timer)
     }
+
+    fn max(
+        &mut self,
+        bitmask: Option<&RoaringBitmap>,
+        logical_offset: usize,
+        timer: &mut SegmentedExecutionTimes,
+    ) -> decoder::Result<f64> {
+        if self.decompressed.is_some() {
+            return default_max(self, bitmask, logical_offset, timer);
+        }
+
+        if let Some(bitmask) = bitmask {
+            if bitmask.is_empty() {
+                return Ok(f64::NAN);
+            }
+            let bitmask = bitmask.iter().filter(|&x| {
+                x >= logical_offset as u32
+                    && x < logical_offset as u32 + self.number_of_records as u32
+            });
+            min_max::<false>(
+                self.number_of_records,
+                &mut self.bit_reader,
+                bitmask,
+                logical_offset,
+                timer,
+            )
+        } else {
+            min_max_without_bitmask::<false>(self.number_of_records, &mut self.bit_reader, timer)
+        }
+    }
+
+    fn min(
+        &mut self,
+        bitmask: Option<&RoaringBitmap>,
+        logical_offset: usize,
+        timer: &mut SegmentedExecutionTimes,
+    ) -> decoder::Result<f64> {
+        if self.decompressed.is_some() {
+            return default_max(self, bitmask, logical_offset, timer);
+        }
+
+        if let Some(bitmask) = bitmask {
+            if bitmask.is_empty() {
+                return Ok(f64::NAN);
+            }
+            let bitmask = bitmask.iter().filter(|&x| {
+                x >= logical_offset as u32
+                    && x < logical_offset as u32 + self.number_of_records as u32
+            });
+            min_max::<true>(
+                self.number_of_records,
+                &mut self.bit_reader,
+                bitmask,
+                logical_offset,
+                timer,
+            )
+        } else {
+            min_max_without_bitmask::<true>(self.number_of_records, &mut self.bit_reader, timer)
+        }
+    }
+}
+
+fn min_max<const IS_MIN: bool>(
+    number_of_records: u64,
+    bit_reader: &mut BitReader,
+    mut bitmask: impl Iterator<Item = u32>,
+    logical_offset: usize,
+    timer: &mut SegmentedExecutionTimes,
+) -> decoder::Result<f64> {
+    bit_reader.reset();
+
+    let initial_value_bits = bit_reader
+        .read_bits(64)
+        .ok_or(DecoderError::UnexpectedEndOfChunk)?;
+    let initial_value = unsafe { std::mem::transmute::<u64, i64>(initial_value_bits) };
+    let scale = bit_reader
+        .read_bits(32)
+        .ok_or(DecoderError::UnexpectedEndOfChunk)? as u32;
+    let number_of_bits_needed = bit_reader
+        .read_byte()
+        .ok_or(DecoderError::UnexpectedEndOfChunk)?;
+
+    let comparison_timer = timer.start_addition_measurement(SegmentKind::CompareInsert);
+    let mut max_quantized = if IS_MIN { i64::MAX } else { i64::MIN };
+    let mut previous_value_quantized = initial_value;
+    let Some(mut next) = bitmask.next() else {
+        return Ok(f64::NAN);
+    };
+    for record_index in 0..number_of_records {
+        let zigzag_delta = bit_reader
+            .read_bits(number_of_bits_needed)
+            .ok_or(DecoderError::UnexpectedEndOfChunk)?;
+        let delta = unzigzag(zigzag_delta);
+        let quantized = previous_value_quantized + delta;
+        previous_value_quantized = quantized;
+
+        if record_index as u32 + logical_offset as u32 != next {
+            continue;
+        }
+
+        if IS_MIN {
+            max_quantized = max_quantized.min(quantized);
+        } else {
+            max_quantized = max_quantized.max(quantized);
+        }
+
+        if let Some(next_logical_record_index) = bitmask.next() {
+            next = next_logical_record_index;
+        } else {
+            break;
+        }
+    }
+    comparison_timer.stop();
+
+    Ok(max_quantized as f64 / scale as f64)
+}
+
+fn min_max_without_bitmask<const IS_MIN: bool>(
+    number_of_records: u64,
+    bit_reader: &mut BitReader,
+    timer: &mut SegmentedExecutionTimes,
+) -> decoder::Result<f64> {
+    bit_reader.reset();
+
+    let initial_value_bits = bit_reader
+        .read_bits(64)
+        .ok_or(DecoderError::UnexpectedEndOfChunk)?;
+    let initial_value = unsafe { std::mem::transmute::<u64, i64>(initial_value_bits) };
+    let scale = bit_reader
+        .read_bits(32)
+        .ok_or(DecoderError::UnexpectedEndOfChunk)? as u32;
+    let number_of_bits_needed = bit_reader
+        .read_byte()
+        .ok_or(DecoderError::UnexpectedEndOfChunk)?;
+
+    let comparison_timer = timer.start_addition_measurement(SegmentKind::CompareInsert);
+    let mut previous_value_quantized = initial_value;
+    let mut max_quantized = if IS_MIN { i64::MAX } else { i64::MIN };
+    for _ in 0..number_of_records {
+        let zigzag_delta = bit_reader
+            .read_bits(number_of_bits_needed)
+            .ok_or(DecoderError::UnexpectedEndOfChunk)?;
+        let delta = unzigzag(zigzag_delta);
+        let quantized = previous_value_quantized + delta;
+        previous_value_quantized = quantized;
+
+        if IS_MIN {
+            max_quantized = max_quantized.min(quantized);
+        } else {
+            max_quantized = max_quantized.max(quantized);
+        }
+    }
+    comparison_timer.stop();
+
+    Ok(max_quantized as f64 / scale as f64)
 }
 
 pub struct DeltaSprintzDecompressIteratorImpl<R: BitRead2> {

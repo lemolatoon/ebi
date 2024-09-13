@@ -62,6 +62,21 @@ impl RandomGen {
         self.update_normal_dist(mean, std_dev);
     }
 
+    #[allow(dead_code)]
+    pub fn update_n_records(&mut self, n_records: usize) {
+        let is_n_records_set = self.n_records.is_some();
+        self.n_records = Some(n_records);
+
+        if !is_n_records_set {
+            return;
+        }
+
+        self.chunk_option = None;
+        self.chunk_id = None;
+        self.bitmask = None;
+        self.predicate = None;
+    }
+
     fn update_normal_dist(&mut self, mean: f64, std_dev: f64) {
         self.normal_dist = rand_distr::Normal::new(mean, std_dev).unwrap();
     }

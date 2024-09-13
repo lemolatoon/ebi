@@ -157,6 +157,31 @@ impl<T: AsRef<[u8]>> BufferedBitReader<T> {
             high_bits | low_bits
         }
     }
+
+    /// Skips the next `n` bits in the buffer without reading them.
+    ///
+    /// # Example
+    /// ```
+    /// use ebi::io::bit_read::BufferedBitReader;
+    /// use ebi::io::bit_read::BitRead2 as _;
+    ///
+    /// let mut reader = BufferedBitReader::new(vec![0b1010_1010, 0b1111_0010, 0b1111_1111, 0b0011_1100]);
+    ///
+    /// reader.skip_bits(4); // Skips the first 4 bits
+    /// assert_eq!(reader.read_bits(3).unwrap(), 0b101); // Reads the next 3 bits
+    ///
+    /// reader.skip_bits(5); // Skips the next 5 bits
+    /// assert_eq!(reader.read_bits(3).unwrap(), 0b001); // Reads the next 3 bits
+    ///
+    /// reader.skip_bits(9); // Skips the next 9 bits
+    /// assert_eq!(reader.read_byte().unwrap(), 0b0011_1100); // Reads the next byte
+    ///
+    pub fn skip_bits(&mut self, n: usize) {
+        let skip_bytes = (n + self.bit_pos) / 8;
+        self.byte_pos += skip_bytes;
+        let skip_bits = (n + self.bit_pos) % 8;
+        self.bit_pos = skip_bits;
+    }
 }
 
 impl<T: AsRef<[u8]>> BitRead2 for BufferedBitReader<T> {
