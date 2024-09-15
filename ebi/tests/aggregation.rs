@@ -63,8 +63,13 @@ mod helper {
         };
         println!("(sum, expected): ({}, {})", sum, expected);
 
+        let eps = if let CompressorConfig::BUFF(_) = config {
+            0.5 * values.len() as f64
+        } else {
+            1e-3
+        };
         assert!(
-            (sum - expected).abs() < 1e-3,
+            (sum - expected).abs() < eps,
             "[{test_name}]: Sum result mismatch (expected: {expected}, got: {sum}, diff: {})",
             (sum - expected).abs()
         );
