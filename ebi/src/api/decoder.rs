@@ -397,7 +397,7 @@ impl<R: Read + Seek> Decoder<R> {
 
             let mut chunk_reader = Self::chunk_reader_from_handle(input, chunk_handle)?;
 
-            result = result.max(chunk_reader.min(bitmask)?);
+            result = result.max(chunk_reader.max(bitmask)?);
 
             self.timer += chunk_reader.segmented_execution_times();
         }

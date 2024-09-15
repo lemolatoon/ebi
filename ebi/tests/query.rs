@@ -11,7 +11,7 @@ pub const fn using_miri() -> bool {
 }
 
 #[cfg(test)]
-mod helper {
+pub mod helper {
     use ebi::api::decoder::ChunkId;
     use ebi::compressor::CompressorConfig;
     use ebi::decoder::query::{Range, RangeValue};
