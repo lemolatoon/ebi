@@ -53,6 +53,18 @@ pub struct MaterializeConfig {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MaxConfig {
+    pub chunk_id: Option<ChunkId>,
+    pub bitmask: Option<Vec<u32>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SumConfig {
+    pub chunk_id: Option<ChunkId>,
+    pub bitmask: Option<Vec<u32>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CompressStatistics {
     pub compression_elapsed_time_nano_secs: u64,
     pub uncompressed_size: u64,
@@ -87,6 +99,8 @@ pub struct AllOutputInner {
     pub compress: Vec<OutputWrapper<CompressStatistics>>,
     pub filters: HashMap<String, FilterFamilyOutput>,
     pub materialize: Vec<OutputWrapper<MaterializeConfig>>,
+    pub max: Vec<OutputWrapper<MaxConfig>>,
+    pub sum: Vec<OutputWrapper<SumConfig>>,
 }
 
 impl AllOutputInner {
@@ -223,6 +237,10 @@ pub enum Output {
     FilterMaterialize(OutputWrapper<FilterMaterializeConfig>),
     #[quick_impl(impl From)]
     Materialize(OutputWrapper<MaterializeConfig>),
+    #[quick_impl(impl From)]
+    Max(OutputWrapper<MaxConfig>),
+    #[quick_impl(impl From)]
+    Sum(OutputWrapper<SumConfig>),
     #[quick_impl(impl From)]
     All(AllOutput),
 }

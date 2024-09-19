@@ -1,7 +1,7 @@
 use experimenter::{
     get_appropriate_scale, AllOutput, AllOutputInner, CompressStatistics, CompressionConfig,
-    FilterConfig, FilterFamilyOutput, FilterMaterializeConfig, MaterializeConfig, Output,
-    OutputWrapper,
+    FilterConfig, FilterFamilyOutput, FilterMaterializeConfig, MaterializeConfig, MaxConfig,
+    Output, OutputWrapper, SumConfig,
 };
 use glob::glob;
 use std::{
@@ -246,6 +246,8 @@ enum Commands {
     Filter(ConfigPath),
     FilterMaterialize(ConfigPath),
     Materialize(ConfigPath),
+    Max(ConfigPath),
+    Sum(ConfigPath),
     All(AllArgs),
 }
 
@@ -260,6 +262,8 @@ impl Commands {
             Commands::CreateDefaultCompressorConfig { .. } => "compressor_config",
             Commands::All { .. } => "all",
             Commands::AllPatch { .. } => "all_patch",
+            Commands::Max { .. } => "max",
+            Commands::Sum { .. } => "sum",
         }
     }
 }
@@ -351,24 +355,55 @@ fn process_file(filename: impl AsRef<Path>, cli: Cli) -> anyhow::Result<()> {
     let filename2 = filename.as_ref().to_string_lossy().to_string();
     let cli2 = cli.clone();
 
-    let in_memory = false;
     let output: Output = match cli.command {
-        Commands::Compress(args) => {
-            compress_command(in_memory, filename, args.read()?, args)?.into()
-        }
-        Commands::Filter(args) => filter_command(in_memory, filename, args.read()?, args)?.into(),
-        Commands::FilterMaterialize(args) => {
-            filter_materialize_command(in_memory, filename, args.read()?, args)?.into()
-        }
-        Commands::Materialize(args) => {
-            materialize_command(in_memory, filename, args.read()?, args)?.into()
-        }
+        Commands::Compress(args) => compress_command(
+            args.in_memory.unwrap_or(false),
+            filename,
+            args.read()?,
+            args,
+        )?
+        .into(),
+        Commands::Filter(args) => filter_command(
+            args.in_memory.unwrap_or(false),
+            filename,
+            args.read()?,
+            args,
+        )?
+        .into(),
+        Commands::FilterMaterialize(args) => filter_materialize_command(
+            args.in_memory.unwrap_or(false),
+            filename,
+            args.read()?,
+            args,
+        )?
+        .into(),
+        Commands::Materialize(args) => materialize_command(
+            args.in_memory.unwrap_or(false),
+            filename,
+            args.read()?,
+            args,
+        )?
+        .into(),
         Commands::CreateFilterConfig { output_dir } => {
             return create_config_command(filename, output_dir);
         }
         Commands::CreateDefaultCompressorConfig { output_dir } => {
             return create_default_compressor_config(filename, output_dir);
         }
+        Commands::Max(args) => max_command(
+            args.in_memory.unwrap_or(false),
+            filename,
+            args.read()?,
+            args,
+        )?
+        .into(),
+        Commands::Sum(args) => sum_command(
+            args.in_memory.unwrap_or(false),
+            filename,
+            args.read()?,
+            args,
+        )?
+        .into(),
         Commands::AllPatch { .. } => unreachable!(),
         Commands::All { .. } => unreachable!(),
     };
@@ -555,6 +590,32 @@ fn process_experiment_for_compressor(
         all_output_inner.materialize.push(materialize_result);
     }
 
+    for _ in tqdm(0..n).desc(Some("Max")) {
+        let max_result = max_command(
+            in_memory,
+            compressed_file.as_path(),
+            MaxConfig {
+                chunk_id: None,
+                bitmask: None,
+            },
+            ConfigPath::empty(),
+        )?;
+        all_output_inner.max.push(max_result);
+    }
+
+    for _ in tqdm(0..n).desc(Some("Sum")) {
+        let sum_result = sum_command(
+            in_memory,
+            compressed_file.as_path(),
+            SumConfig {
+                chunk_id: None,
+                bitmask: None,
+            },
+            ConfigPath::empty(),
+        )?;
+        all_output_inner.sum.push(sum_result);
+    }
+
     create_saved_file_at(save_dir.as_ref(), binary_file_stem, all_output_inner)?;
     Ok(())
 }
@@ -585,6 +646,8 @@ fn process_experiment_for_dataset(
                 compress: Vec::with_capacity(n),
                 filters: HashMap::with_capacity(3),
                 materialize: Vec::with_capacity(n),
+                max: Vec::with_capacity(n),
+                sum: Vec::with_capacity(n),
             });
 
         process_experiment_for_compressor(
@@ -1425,6 +1488,180 @@ fn materialize_command(
 
         let metadata = decoder_output.into_writer().into_inner()?.metadata()?;
         let result_string = format!("{:?}", metadata);
+
+        (
+            compression_config,
+            elapsed_time_nanos,
+            decoder.segmented_execution_times(),
+            result_string,
+        )
+    };
+
+    let output = OutputWrapper {
+        in_memory,
+        version: env!("CARGO_PKG_VERSION").to_string(),
+        config_path: path.config.clone(),
+        compression_config,
+        command_specific: config,
+        elapsed_time_nanos,
+        execution_times: execution_times.into(),
+        input_filename: filename.as_ref().to_string_lossy().to_string(),
+        result_string,
+        datetime: now,
+    };
+
+    Ok(output)
+}
+
+fn max_command(
+    in_memory: bool,
+    filename: impl AsRef<Path>,
+    config: MaxConfig,
+    path: ConfigPath,
+) -> anyhow::Result<OutputWrapper<MaxConfig>> {
+    let MaxConfig { chunk_id, bitmask } = config.clone();
+    let bitmask = bitmask.map(ebi::decoder::query::RoaringBitmap::from_iter);
+    let now = chrono::Utc::now();
+
+    let (compression_config, elapsed_time_nanos, execution_times, result_string) = if in_memory {
+        let mut content = Vec::new();
+        File::open(filename.as_ref())
+            .context(format!(
+                "Failed to open file.: {}",
+                filename.as_ref().display()
+            ))?
+            .read_to_end(&mut content)
+            .context(format!(
+                "Failed to read file.: {}",
+                filename.as_ref().display()
+            ))?;
+        let mut decoder = Decoder::new(DecoderInput::from_reader(Cursor::new(&content[..])))
+            .context("Failed to create decoder from input memory")?;
+
+        let start = std::time::Instant::now();
+        let max_fp = decoder
+            .max(bitmask.as_ref(), chunk_id)
+            .context("Failed to perform max")?;
+        let elapsed_time_nanos = start.elapsed().as_nanos().try_into().unwrap_or(u64::MAX);
+
+        let compression_config = CompressionConfig {
+            chunk_option: *decoder.header().config().chunk_option(),
+            compressor_config: *decoder.footer().compressor_config(),
+        };
+
+        let result_string = max_fp.to_string();
+
+        (
+            compression_config,
+            elapsed_time_nanos,
+            decoder.segmented_execution_times(),
+            result_string,
+        )
+    } else {
+        let mut decoder =
+            Decoder::new(DecoderInput::from_file(filename.as_ref())?).context(format!(
+                "Failed to create decoder from input file.: {}",
+                filename.as_ref().display()
+            ))?;
+        let start = std::time::Instant::now();
+        let max_fp = decoder
+            .max(bitmask.as_ref(), chunk_id)
+            .context("Failed to perform max")?;
+        let elapsed_time_nanos = start.elapsed().as_nanos().try_into().unwrap_or(u64::MAX);
+
+        let compression_config = CompressionConfig {
+            chunk_option: *decoder.header().config().chunk_option(),
+            compressor_config: *decoder.footer().compressor_config(),
+        };
+
+        let result_string = max_fp.to_string();
+
+        (
+            compression_config,
+            elapsed_time_nanos,
+            decoder.segmented_execution_times(),
+            result_string,
+        )
+    };
+
+    let output = OutputWrapper {
+        in_memory,
+        version: env!("CARGO_PKG_VERSION").to_string(),
+        config_path: path.config.clone(),
+        compression_config,
+        command_specific: config,
+        elapsed_time_nanos,
+        execution_times: execution_times.into(),
+        input_filename: filename.as_ref().to_string_lossy().to_string(),
+        result_string,
+        datetime: now,
+    };
+
+    Ok(output)
+}
+
+fn sum_command(
+    in_memory: bool,
+    filename: impl AsRef<Path>,
+    config: SumConfig,
+    path: ConfigPath,
+) -> anyhow::Result<OutputWrapper<SumConfig>> {
+    let SumConfig { chunk_id, bitmask } = config.clone();
+    let bitmask = bitmask.map(ebi::decoder::query::RoaringBitmap::from_iter);
+    let now = chrono::Utc::now();
+
+    let (compression_config, elapsed_time_nanos, execution_times, result_string) = if in_memory {
+        let mut content = Vec::new();
+        File::open(filename.as_ref())
+            .context(format!(
+                "Failed to open file.: {}",
+                filename.as_ref().display()
+            ))?
+            .read_to_end(&mut content)
+            .context(format!(
+                "Failed to read file.: {}",
+                filename.as_ref().display()
+            ))?;
+        let mut decoder = Decoder::new(DecoderInput::from_reader(Cursor::new(&content[..])))
+            .context("Failed to create decoder from input memory")?;
+
+        let start = std::time::Instant::now();
+        let sum_fp = decoder
+            .sum(bitmask.as_ref(), chunk_id)
+            .context("Failed to perform max")?;
+        let elapsed_time_nanos = start.elapsed().as_nanos().try_into().unwrap_or(u64::MAX);
+
+        let compression_config = CompressionConfig {
+            chunk_option: *decoder.header().config().chunk_option(),
+            compressor_config: *decoder.footer().compressor_config(),
+        };
+
+        let result_string = sum_fp.to_string();
+
+        (
+            compression_config,
+            elapsed_time_nanos,
+            decoder.segmented_execution_times(),
+            result_string,
+        )
+    } else {
+        let mut decoder =
+            Decoder::new(DecoderInput::from_file(filename.as_ref())?).context(format!(
+                "Failed to create decoder from input file.: {}",
+                filename.as_ref().display()
+            ))?;
+        let start = std::time::Instant::now();
+        let sum_fp = decoder
+            .sum(bitmask.as_ref(), chunk_id)
+            .context("Failed to perform max")?;
+        let elapsed_time_nanos = start.elapsed().as_nanos().try_into().unwrap_or(u64::MAX);
+
+        let compression_config = CompressionConfig {
+            chunk_option: *decoder.header().config().chunk_option(),
+            compressor_config: *decoder.footer().compressor_config(),
+        };
+
+        let result_string = sum_fp.to_string();
 
         (
             compression_config,
