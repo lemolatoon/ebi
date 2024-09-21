@@ -140,13 +140,28 @@ def get_color_exe(label: str) -> tuple[float, float, float, float]:
     return color_map[label]
 
 
-# Function to plot a stacked bar chart for execution time ratios by compression method
 def plot_stacked_execution_time_ratios_for_methods(
     # methods to dataset to execution times
     data: Dict[str, List[ExecutionTimesWithOthers]],
     dataset_index: int,
     dataset_name: str,
     y_label: str,
+    output_path: str,
+):
+    plot_relative_stacked_execution_time_ratios_for_methods(
+        data, dataset_index, dataset_name, output_path
+    )
+    plot_absolute_stacked_execution_times_for_methods(
+        data, dataset_index, dataset_name, output_path.replace(".png", "_absolute.png")
+    )
+
+
+# Function to plot a stacked bar chart for execution time ratios by compression method
+def plot_relative_stacked_execution_time_ratios_for_methods(
+    # methods to dataset to execution times
+    data: Dict[str, List[ExecutionTimesWithOthers]],
+    dataset_index: int,
+    dataset_name: str,
     output_path: str,
 ):
     methods = list(data.keys())
@@ -190,6 +205,57 @@ def plot_stacked_execution_time_ratios_for_methods(
     plt.xlabel("Compression Methods")
     plt.ylabel("Execution Time Percentage (%)")
     plt.title(f"Execution Time Ratios for {dataset_name} by Compression Method")
+    plt.xticks(index, methods, rotation=45)
+    plt.legend(title="Processing Types", bbox_to_anchor=(1.05, 1), loc="upper left")
+    plt.tight_layout()
+    plt.savefig(output_path)
+
+
+def plot_absolute_stacked_execution_times_for_methods(
+    # methods to dataset to execution times
+    data: Dict[str, List[ExecutionTimesWithOthers]],
+    dataset_index: int,
+    dataset_name: str,
+    output_path: str,
+):
+    methods = list(data.keys())
+    processing_types = list(data[methods[0]][0].keys())
+
+    # Calculate the absolute time for each compression method
+    times_by_method = {}
+    for method in methods:
+        times_by_method[method] = data[method][dataset_index]
+
+    # Identify processing types that are non-zero across all methods
+    valid_processing_types = []
+    for processing_type in processing_types:
+        if any(times_by_method[method][processing_type] > 0 for method in methods):
+            valid_processing_types.append(processing_type)
+
+    # Prepare to plot the chart
+    bar_width = 0.5
+    index = np.arange(len(methods))
+
+    plt.figure(figsize=(12, 8))
+
+    # Plot the stacked bar chart for each processing type
+    bottom = np.zeros(len(methods))
+    for i, processing_type in enumerate(valid_processing_types):
+        values = [times_by_method[method][processing_type] for method in methods]
+        plt.bar(
+            index,
+            values,
+            bar_width,
+            label=processing_type,
+            bottom=bottom,
+            color=get_color_exe(processing_type),
+        )
+        bottom += values
+
+    # Add chart decorations
+    plt.xlabel("Compression Methods")
+    plt.ylabel("Execution Time (seconds)")  # y-axis now reflects absolute time
+    plt.title(f"Execution Times for {dataset_name} by Compression Method")
     plt.xticks(index, methods, rotation=45)
     plt.legend(title="Processing Types", bbox_to_anchor=(1.05, 1), loc="upper left")
     plt.tight_layout()
