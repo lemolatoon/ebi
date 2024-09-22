@@ -54,12 +54,51 @@ class CompressStatistics(TypedDict):
 T = TypeVar("T")
 
 
+class ExecutionTimes(TypedDict):
+    io_read_nanos: int
+    io_write_nanos: int
+    xor_nanos: int
+    delta_nanos: int
+    quantization_nanos: int
+    bit_packing_nanos: int
+    compare_insert_nanos: int
+    sum_nanos: int
+    decompression_nanos: int
+
+
+execution_times_keys: List[str] = [
+    "io_read_nanos",
+    "io_write_nanos",
+    "xor_nanos",
+    "delta_nanos",
+    "quantization_nanos",
+    "bit_packing_nanos",
+    "compare_insert_nanos",
+    "sum_nanos",
+    "decompression_nanos",
+]
+
+
+class ExecutionTimesWithOthers(TypedDict):
+    io_read_nanos: int
+    io_write_nanos: int
+    xor_nanos: int
+    delta_nanos: int
+    quantization_nanos: int
+    bit_packing_nanos: int
+    compare_insert_nanos: int
+    sum_nanos: int
+    decompression_nanos: int
+    others: int
+
+
 class OutputWrapper(TypedDict, Generic[T]):
     version: str
     config_path: str
     compression_config: CompressionConfig
     command_specific: T
     elapsed_time_nanos: int
+    execution_times: ExecutionTimes
     input_filename: str
     datetime: datetime
     result_string: str
@@ -78,6 +117,149 @@ class AllOutputInner(TypedDict):
 
 class AllOutput(TypedDict):
     __root__: Dict[str, Dict[str, AllOutputInner]]
+
+
+# Function to calculate the ratios for each process
+def calculate_ratios(data: Dict[str, Any], total_time: float) -> Dict[str, float]:
+    ratios = {}
+    for key, value in data.items():
+        ratios[key] = (value / total_time) * 100  # Express as a percentage
+    return ratios
+
+
+color_map_exe: dict[str, tuple[float, float, float, float]] = {}
+
+
+def get_color_exe(label: str) -> tuple[float, float, float, float]:
+    global color_map
+    if label in color_map:
+        return color_map[label]
+    next_index = len(color_map)
+    color_map[label] = matplotlib.colormaps["tab20"](next_index)
+
+    return color_map[label]
+
+
+def plot_stacked_execution_time_ratios_for_methods(
+    # methods to dataset to execution times
+    data: Dict[str, List[ExecutionTimesWithOthers]],
+    dataset_index: int,
+    dataset_name: str,
+    y_label: str,
+    output_path: str,
+):
+    plot_relative_stacked_execution_time_ratios_for_methods(
+        data, dataset_index, dataset_name, output_path
+    )
+    plot_absolute_stacked_execution_times_for_methods(
+        data, dataset_index, dataset_name, output_path.replace(".png", "_absolute.png")
+    )
+
+
+# Function to plot a stacked bar chart for execution time ratios by compression method
+def plot_relative_stacked_execution_time_ratios_for_methods(
+    # methods to dataset to execution times
+    data: Dict[str, List[ExecutionTimesWithOthers]],
+    dataset_index: int,
+    dataset_name: str,
+    output_path: str,
+):
+    methods = list(data.keys())
+    processing_types = list(data[methods[0]][0].keys())
+
+    # Calculate the ratio for each compression method
+    ratios_by_method = {}
+    for method in methods:
+        total_time = sum(data[method][dataset_index].values())
+        ratios_by_method[method] = calculate_ratios(
+            data[method][dataset_index], total_time
+        )
+
+    # Identify processing types that are non-zero across all methods
+    valid_processing_types = []
+    for processing_type in processing_types:
+        if any(ratios_by_method[method][processing_type] > 0 for method in methods):
+            valid_processing_types.append(processing_type)
+
+    # Prepare to plot the chart
+    bar_width = 0.5
+    index = np.arange(len(methods))
+
+    plt.figure(figsize=(12, 8))
+
+    # Plot the stacked bar chart for each processing type
+    bottom = np.zeros(len(methods))
+    for i, processing_type in enumerate(valid_processing_types):
+        values = [ratios_by_method[method][processing_type] for method in methods]
+        plt.bar(
+            index,
+            values,
+            bar_width,
+            label=processing_type,
+            bottom=bottom,
+            color=get_color_exe(processing_type),
+        )
+        bottom += values
+
+    # Add chart decorations
+    plt.xlabel("Compression Methods")
+    plt.ylabel("Execution Time Percentage (%)")
+    plt.title(f"Execution Time Ratios for {dataset_name} by Compression Method")
+    plt.xticks(index, methods, rotation=45)
+    plt.legend(title="Processing Types", bbox_to_anchor=(1.05, 1), loc="upper left")
+    plt.tight_layout()
+    plt.savefig(output_path)
+
+
+def plot_absolute_stacked_execution_times_for_methods(
+    # methods to dataset to execution times
+    data: Dict[str, List[ExecutionTimesWithOthers]],
+    dataset_index: int,
+    dataset_name: str,
+    output_path: str,
+):
+    methods = list(data.keys())
+    processing_types = list(data[methods[0]][0].keys())
+
+    # Calculate the absolute time for each compression method
+    times_by_method = {}
+    for method in methods:
+        times_by_method[method] = data[method][dataset_index]
+
+    # Identify processing types that are non-zero across all methods
+    valid_processing_types = []
+    for processing_type in processing_types:
+        if any(times_by_method[method][processing_type] > 0 for method in methods):
+            valid_processing_types.append(processing_type)
+
+    # Prepare to plot the chart
+    bar_width = 0.5
+    index = np.arange(len(methods))
+
+    plt.figure(figsize=(12, 8))
+
+    # Plot the stacked bar chart for each processing type
+    bottom = np.zeros(len(methods))
+    for i, processing_type in enumerate(valid_processing_types):
+        values = [times_by_method[method][processing_type] for method in methods]
+        plt.bar(
+            index,
+            values,
+            bar_width,
+            label=processing_type,
+            bottom=bottom,
+            color=get_color_exe(processing_type),
+        )
+        bottom += values
+
+    # Add chart decorations
+    plt.xlabel("Compression Methods")
+    plt.ylabel("Execution Time (seconds)")  # y-axis now reflects absolute time
+    plt.title(f"Execution Times for {dataset_name} by Compression Method")
+    plt.xticks(index, methods, rotation=45)
+    plt.legend(title="Processing Types", bbox_to_anchor=(1.05, 1), loc="upper left")
+    plt.tight_layout()
+    plt.savefig(output_path)
 
 
 def plot_comparison(
@@ -236,6 +418,37 @@ def main():
         for key in ["eq", "ne", "greater"]
     }
 
+    # execution times
+    compression_execution_times_data: dict[
+        str, List[Optional[ExecutionTimesWithOthers]]
+    ] = {
+        method_name: [None] * len(dataset_names) for method_name in compression_methods
+    }
+    decompression_execution_times_data: dict[
+        str, List[Optional[ExecutionTimesWithOthers]]
+    ] = {
+        method_name: [None] * len(dataset_names) for method_name in compression_methods
+    }
+    filter_execution_times_data: dict[
+        str, dict[str, List[Optional[ExecutionTimesWithOthers]]]
+    ] = {
+        key: {
+            method_name: [None] * len(dataset_names)
+            for method_name in compression_methods
+        }
+        for key in ["eq", "ne", "greater"]
+    }
+
+    filter_materialize_execution_times_data: dict[
+        str, dict[str, List[Optional[ExecutionTimesWithOthers]]]
+    ] = {
+        key: {
+            method_name: [None] * len(dataset_names)
+            for method_name in compression_methods
+        }
+        for key in ["eq", "ne", "greater"]
+    }
+
     for dataset_index, dataset_name in enumerate(tqdm(dataset_names)):
         methods: Dict[str, AllOutputInner] = all_output[dataset_name]
         if dataset_name == "command_type":
@@ -256,6 +469,32 @@ def main():
             decompression_throughput = uncompressed_size / fmean(
                 materialize["elapsed_time_nanos"]
                 for materialize in output["materialize"]
+            )
+
+            compression_execution_times: ExecutionTimesWithOthers = {}  # type: ignore
+            decompression_execution_times: ExecutionTimesWithOthers = {}  # type: ignore
+            for key in execution_times_keys:
+                compression_execution_times[key] = fmean(
+                    compress["execution_times"][key] for compress in output["compress"]
+                )
+                compression_execution_times["others"] = fmean(
+                    compress["elapsed_time_nanos"] for compress in output["compress"]
+                ) - sum(compression_execution_times.values())
+
+                decompression_execution_times[key] = fmean(
+                    materialize["execution_times"][key]
+                    for materialize in output["materialize"]
+                )
+                decompression_execution_times["others"] = fmean(
+                    materialize["elapsed_time_nanos"]
+                    for materialize in output["materialize"]
+                ) - sum(decompression_execution_times.values())
+
+            compression_execution_times_data[method_name][dataset_index] = (
+                compression_execution_times
+            )
+            decompression_execution_times_data[method_name][dataset_index] = (
+                decompression_execution_times
             )
 
             compression_ratios_data[method_name][dataset_index] = ratio
@@ -285,6 +524,35 @@ def main():
                 filter_materialize_throughput_data[filter_name][method_name][
                     dataset_index
                 ] = filter_materialize_throughput
+
+                filter_execution_times: ExecutionTimesWithOthers = {}  # type: ignore
+                filter_materialize_execution_times: ExecutionTimesWithOthers = {}  # type: ignore
+
+                for key in execution_times_keys:
+                    filter_execution_times[key] = fmean(
+                        f["execution_times"][key]
+                        for f in output["filters"][filter_name]["filter"]
+                    )
+                    filter_execution_times["others"] = fmean(
+                        f["elapsed_time_nanos"]
+                        for f in output["filters"][filter_name]["filter"]
+                    ) - sum(filter_execution_times.values())
+
+                    filter_materialize_execution_times[key] = fmean(
+                        f["execution_times"][key]
+                        for f in output["filters"][filter_name]["filter_materialize"]
+                    )
+                    filter_materialize_execution_times["others"] = fmean(
+                        f["elapsed_time_nanos"]
+                        for f in output["filters"][filter_name]["filter_materialize"]
+                    ) - sum(filter_materialize_execution_times.values())
+
+                filter_execution_times_data[filter_name][method_name][dataset_index] = (
+                    filter_execution_times
+                )
+                filter_materialize_execution_times_data[filter_name][method_name][
+                    dataset_index
+                ] = filter_materialize_execution_times
 
     # Convert to DataFrame
     compression_ratios_df = pl.DataFrame(compression_ratios_data)
@@ -325,6 +593,28 @@ def main():
                 f"compression_throughputs.png",
             ),
         )
+
+        plot_stacked_execution_time_ratios_for_methods(
+            compression_execution_times_data,
+            dataset_index,
+            dataset_name,
+            f"{dataset_name}: Compression Execution Times",
+            os.path.join(
+                dataset_out_dir,
+                f"compression_execution_times.png",
+            ),
+        )
+        plot_stacked_execution_time_ratios_for_methods(
+            decompression_execution_times_data,
+            dataset_index,
+            dataset_name,
+            f"{dataset_name}: Decompression Execution Times",
+            os.path.join(
+                dataset_out_dir,
+                f"decompression_execution_times.png",
+            ),
+        )
+
         dataset_filter_dir = os.path.join(dataset_out_dir, "filter")
         os.makedirs(dataset_filter_dir, exist_ok=True)
         for filter_name in ["eq", "ne", "greater"]:
@@ -349,6 +639,27 @@ def main():
                     dataset_filter_dir,
                     f"{
                         filter_name}_filter_materialize_elapsed_seconds.png",
+                ),
+            )
+
+            plot_stacked_execution_time_ratios_for_methods(
+                filter_execution_times_data[filter_name],
+                dataset_index,
+                dataset_name,
+                f"{dataset_name}: {filter_name} Filter Execution Times",
+                os.path.join(
+                    dataset_filter_dir,
+                    f"{filter_name}_filter_execution_times.png",
+                ),
+            )
+            plot_stacked_execution_time_ratios_for_methods(
+                filter_materialize_execution_times_data[filter_name],
+                dataset_index,
+                dataset_name,
+                f"{dataset_name}: {filter_name} Filter Materialize Execution Times",
+                os.path.join(
+                    dataset_filter_dir,
+                    f"{filter_name}_filter_materialize_execution_times.png",
                 ),
             )
 
