@@ -153,6 +153,25 @@ pub fn default_max<T: Reader + ?Sized>(
     Ok(max)
 }
 
+#[inline]
+pub fn default_distance_squared<T: Reader + ?Sized>(
+    reader: &mut T,
+    offset_in_chunk: usize,
+    target: &[f64],
+    timer: &mut SegmentedExecutionTimes,
+) -> decoder::Result<f64> {
+    let decompressed = reader.decompress(timer)?;
+    let sum_timer = timer.start_addition_measurement(SegmentKind::Sum);
+    let offset_in_chunk = std::cmp::min(decompressed.len(), offset_in_chunk);
+    let sum = decompressed[offset_in_chunk..]
+        .iter()
+        .zip(target)
+        .map(|(&a, &b)| (a - b) * (a - b))
+        .sum();
+    sum_timer.stop();
+    Ok(sum)
+}
+
 /// A trait for query execution.
 /// This trait provides default implementations based of [`Reader`] trait.
 /// The each implementation of this trait can be specialized for each compression scheme.
@@ -248,6 +267,30 @@ pub trait QueryExecutor: Reader {
         timer: &mut SegmentedExecutionTimes,
     ) -> decoder::Result<f64> {
         default_max(self, bitmask, logical_offset, timer)
+    }
+
+    /// Calculates the distance^2 between the data at the specified offset in the chunk and the target slice.
+    ///
+    /// Let `chunk` is the logical chunk of f64 array.
+    /// The distance will be calculated with the vector of length: `min(chunk[offset_in_chunk..].len(), target.len())`.
+    ///
+    /// # Parameters
+    ///
+    /// - `offset_in_chunk`: The offset within the chunk where the data is located.
+    /// - `target`: A slice of `f64` values representing the target data to compare against.
+    /// - `timer`: A mutable reference to `SegmentedExecutionTimes` for recording execution times.
+    ///
+    /// # Returns
+    ///
+    /// A `Result` containing the calculated distance^2 as an `f64` value, or an error if the calculation fails.
+    ///
+    fn distance_squared(
+        &mut self,
+        offset_in_chunk: usize,
+        target: &[f64],
+        timer: &mut SegmentedExecutionTimes,
+    ) -> decoder::Result<f64> {
+        todo!()
     }
 }
 
