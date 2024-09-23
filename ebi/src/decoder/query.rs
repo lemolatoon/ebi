@@ -290,7 +290,7 @@ pub trait QueryExecutor: Reader {
         target: &[f64],
         timer: &mut SegmentedExecutionTimes,
     ) -> decoder::Result<f64> {
-        todo!()
+        default_distance_squared(self, offset_in_chunk, target, timer)
     }
 }
 
