@@ -41,6 +41,13 @@ class MaterializeConfig(TypedDict):
     chunk_id: Optional[int]
     bitmask: Optional[List[int]]
 
+class MaxConfig(TypedDict):
+    chunk_id: Optional[int]
+    bitmask: Optional[List[int]]
+
+class SumConfig(TypedDict):
+    chunk_id: Optional[int]
+    bitmask: Optional[List[int]]
 
 class CompressStatistics(TypedDict):
     compression_elapsed_time_nano_secs: int
@@ -74,6 +81,8 @@ class AllOutputInner(TypedDict):
     compress: List[OutputWrapper[CompressStatistics]]
     filters: Mapping[str, FilterFamilyOutput]
     materialize: List[OutputWrapper[MaterializeConfig]]
+    max: List[OutputWrapper[MaxConfig]]
+    sum: List[OutputWrapper[SumConfig]]
 
 
 class AllOutput(TypedDict):
@@ -221,6 +230,12 @@ def main():
     decompression_throughput_data: dict[str, List[Optional[float]]] = {
         method_name: [None] * len(dataset_names) for method_name in compression_methods
     }
+    max_throughput_data: dict[str, List[Optional[float]]] = {
+        method_name: [None] * len(dataset_names) for method_name in compression_methods
+    }
+    sum_throughput_data: dict[str, List[Optional[float]]] = {
+        method_name: [None] * len(dataset_names) for method_name in compression_methods
+    }
     filter_throughput_data: dict[str, dict[str, List[Optional[float]]]] = {
         key: {
             method_name: [None] * len(dataset_names)
@@ -257,6 +272,12 @@ def main():
                 materialize["elapsed_time_nanos"]
                 for materialize in output["materialize"]
             )
+            max_throughput = uncompressed_size / fmean(
+                max["elapsed_time_nanos"] for max in output["max"]
+            )
+            sum_throughput = uncompressed_size / fmean(
+                sum["elapsed_time_nanos"] for sum in output["sum"]
+            )
 
             compression_ratios_data[method_name][dataset_index] = ratio
             compression_throughput_data[method_name][dataset_index] = (
@@ -265,6 +286,8 @@ def main():
             decompression_throughput_data[method_name][dataset_index] = (
                 decompression_throughput
             )
+            max_throughput_data[method_name][dataset_index] = max_throughput
+            sum_throughput_data[method_name][dataset_index] = sum_throughput
 
             for filter_name in ["eq", "ne", "greater"]:
                 uncompressed_size = output["compress"][0]["command_specific"][
@@ -290,6 +313,8 @@ def main():
     compression_ratios_df = pl.DataFrame(compression_ratios_data)
     compression_throughput_df = pl.DataFrame(compression_throughput_data)
     decompression_throughput_df = pl.DataFrame(decompression_throughput_data)
+    max_throughput_df = pl.DataFrame(max_throughput_data)
+    sum_throughput_df = pl.DataFrame(sum_throughput_data)
     filter_throughput_dfs = {
         key: pl.DataFrame(filter_throughput_data[key])
         for key in ["eq", "ne", "greater"]
@@ -363,6 +388,27 @@ def main():
             ),
         )
 
+        plot_comparison(
+            max_throughput_df.columns,
+            max_throughput_df.row(dataset_index),
+            f"{dataset_name}: Max Throughput (bigger, better)",
+            "Throughput (GB/s)",
+            os.path.join(
+                dataset_out_dir,
+                f"max_elapsed_seconds.png",
+            ),
+        )
+        plot_comparison(
+            sum_throughput_df.columns,
+            sum_throughput_df.row(dataset_index),
+            f"{dataset_name}: Sum Throughput (bigger, better)",
+            "Throughput (GB/s)",
+            os.path.join(
+                dataset_out_dir,
+                f"sum_elapsed_seconds.png",
+            ),
+        )
+
     # filter for all rows making sure there are no null values
     # as preparing the average plots
     compression_ratios_df = compression_ratios_df.filter(
@@ -372,6 +418,12 @@ def main():
         pl.all_horizontal(pl.col("*").is_not_null())
     )
     decompression_throughput_df = decompression_throughput_df.filter(
+        pl.all_horizontal(pl.col("*").is_not_null())
+    )
+    max_throughput_df = max_throughput_df.filter(
+        pl.all_horizontal(pl.col("*").is_not_null())
+    )
+    sum_throughput_df = sum_throughput_df.filter(
         pl.all_horizontal(pl.col("*").is_not_null())
     )
     for filter_name in ["eq", "ne", "greater"]:
@@ -418,6 +470,26 @@ def main():
         "Average Decompression Throughput (bigger, better)",
         "Throughput (GB/s)",
         os.path.join(barchart_dir, "average_decompression_throughput.png"),
+    )
+    plot_comparison(
+        max_throughput_df.columns,
+        [
+            max_throughput_df[column].mean()
+            for column in max_throughput_df.columns
+        ],
+        "Average Max Throughput (bigger, better)",
+        "Throughput (GB/s)",
+        os.path.join(barchart_dir, "average_max_throughput.png"),
+    )
+    plot_comparison(
+        sum_throughput_df.columns,
+        [
+            sum_throughput_df[column].mean()
+            for column in sum_throughput_df.columns
+        ],
+        "Average Sum Throughput (bigger, better)",
+        "Throughput (GB/s)",
+        os.path.join(barchart_dir, "average_sum_throughput.png"),
     )
 
     os.makedirs(os.path.join(barchart_dir, "filter"), exist_ok=True)
@@ -471,6 +543,19 @@ def main():
         os.path.join(boxplot_dir, "boxplot_decompression_throughput.png"),
     )
 
+    plot_boxplot(
+        max_throughput_df,
+        "Boxplot for Average Max Throughput (bigger, better)",
+        "Throughput (GB/s)",
+        os.path.join(boxplot_dir, "boxplot_max_throughput.png"),
+    )
+    plot_boxplot(
+        sum_throughput_df,
+        "Boxplot for Average Sum Throughput (bigger, better)",
+        "Throughput (GB/s)",
+        os.path.join(boxplot_dir, "boxplot_sum_throughput.png"),
+    )
+
     for filter_name in ["eq", "ne", "greater"]:
         plot_boxplot(
             filter_throughput_dfs[filter_name],
@@ -502,6 +587,8 @@ def main():
     compression_ratios_avg = compression_ratios_df.mean()
     compression_throughput_avg = compression_throughput_df.mean()
     decompression_throughput_avg = decompression_throughput_df.mean()
+    max_throughput_avg = max_throughput_df.mean()
+    sum_throughput_avg = sum_throughput_df.mean()
 
     filter_throughput_avg = {
         key: df.mean() for key, df in filter_throughput_dfs.items()
@@ -521,6 +608,8 @@ def main():
             "Decompression Throughput": np.array(
                 decompression_throughput_avg.select(pred).row(0)
             ),
+            "Max Throughput": np.array(max_throughput_avg.select(pred).row(0)),
+            "Sum Throughput": np.array(sum_throughput_avg.select(pred).row(0)),
         }
 
         for key in filter_throughput_avg:
@@ -581,6 +670,28 @@ def main():
             ),
         )
     )
+    # Top 5 Max Throughput
+    max_throughput_sorted_labels = list(
+        map(
+            lambda x: x[0],
+            sorted(
+                zip(labels, np.array(max_throughput_df.mean().row(0))),
+                key=lambda x: x[1],
+                reverse=True,
+            ),
+        )
+    )
+    # Top 5 Sum Throughput
+    sum_throughput_sorted_labels = list(
+        map(
+            lambda x: x[0],
+            sorted(
+                zip(labels, np.array(sum_throughput_df.mean().row(0))),
+                key=lambda x: x[1],
+                reverse=True,
+            ),
+        )
+    )
     # Top 5 Filter GREATER Throughput
     filter_greater_throughput_sorted_labels = list(
         map(
@@ -596,6 +707,8 @@ def main():
         compression_ratios_sorted_labels.remove(unnecessary_label)
         compression_throughput_sorted_labels.remove(unnecessary_label)
         filter_greater_throughput_sorted_labels.remove(unnecessary_label)
+        max_throughput_sorted_labels.remove(unnecessary_label)
+        sum_throughput_sorted_labels.remove(unnecessary_label)
 
     plot_radar_chart(
         compression_ratios_sorted_labels[:5],
@@ -617,6 +730,16 @@ def main():
         os.path.join(
             combined_radar_chart_dir, "top_5_decompression_throughput_radar_chart.png"
         ),
+    )
+    plot_radar_chart(
+        max_throughput_sorted_labels[:5],
+        "Top 5 Max Throughput",
+        os.path.join(combined_radar_chart_dir, "top_5_max_throughput_radar_chart.png"),
+    )
+    plot_radar_chart(
+        sum_throughput_sorted_labels[:5],
+        "Top 5 Sum Throughput",
+        os.path.join(combined_radar_chart_dir, "top_5_sum_throughput_radar_chart.png"),
     )
     plot_radar_chart(
         filter_greater_throughput_sorted_labels[:5],
