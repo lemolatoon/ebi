@@ -65,6 +65,12 @@ pub struct SumConfig {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UCR2018Config {
+    pub precision: usize,
+    pub k: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CompressStatistics {
     pub compression_elapsed_time_nano_secs: u64,
     pub uncompressed_size: u64,

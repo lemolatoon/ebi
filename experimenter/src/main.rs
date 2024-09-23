@@ -1,14 +1,14 @@
 use experimenter::{
     get_appropriate_scale, AllOutput, AllOutputInner, CompressStatistics, CompressionConfig,
     FilterConfig, FilterFamilyOutput, FilterMaterializeConfig, MaterializeConfig, MaxConfig,
-    Output, OutputWrapper, SumConfig,
+    Output, OutputWrapper, SumConfig, UCR2018Config,
 };
 use glob::glob;
 use std::{
     collections::{HashMap, HashSet},
     ffi::OsStr,
     fs::{self, File},
-    io::{self, BufReader, Cursor, Read, Seek, Write as _},
+    io::{self, BufRead, BufReader, Cursor, Read, Seek, Write as _},
     iter::{self},
     path::{Path, PathBuf},
 };
@@ -24,6 +24,7 @@ use ebi::{
     compressor::CompressorConfig,
     decoder::query::{Predicate, Range, RangeValue, RoaringBitmap},
     encoder::ChunkOption,
+    time::SegmentedExecutionTimes,
 };
 
 #[derive(Parser, Debug, Clone)]
@@ -249,6 +250,7 @@ enum Commands {
     Max(ConfigPath),
     Sum(ConfigPath),
     All(AllArgs),
+    UCR2018(ConfigPath),
 }
 
 impl Commands {
@@ -264,6 +266,7 @@ impl Commands {
             Commands::AllPatch { .. } => "all_patch",
             Commands::Max { .. } => "max",
             Commands::Sum { .. } => "sum",
+            Commands::UCR2018 { .. } => "ucr2018",
         }
     }
 }
@@ -316,6 +319,27 @@ fn main() -> anyhow::Result<()> {
             .join("all_patch");
         let all_outputs = all_patch_command(args, patched)?;
         save_output_json(all_outputs.into(), save_dir)?;
+
+        return Ok(());
+    }
+
+    if let Commands::UCR2018(args) = &cli.command {
+        let args = args.clone();
+        let input_dir = Path::new(input);
+        anyhow::ensure!(
+            input_dir.is_dir(),
+            "Input directory does not exist or not directory: {}",
+            input_dir.display()
+        );
+        let config: UCR2018Config = args.read()?;
+        anyhow::ensure!(
+            config.k == 1,
+            "Currently only k=1 is supported, but got k={}",
+            config.k
+        );
+        let save_dir = input_dir.parent().unwarp().join("result").join("ucr2018");
+        let output = ucr2018_command(input_dir, config)?;
+        save_output_json(output, save_dir)?;
 
         return Ok(());
     }
@@ -1685,4 +1709,102 @@ fn sum_command(
     };
 
     Ok(output)
+}
+
+fn round_by_scale(value: f64, scale: usize) -> f64 {
+    let scale = scale as f64;
+    (value * scale).round() / scale
+}
+struct LabelPixel {
+    pub label: isize,
+    pub pixels: Vec<f64>,
+}
+pub fn slurp_file(file: impl AsRef<Path>, prec: i32) -> Vec<LabelPixel> {
+    let file = file.as_ref();
+    BufReader::new(File::open(file).unwrap())
+        .lines()
+        .skip(1)
+        .map(|line| {
+            let line = line.unwrap();
+            let mut iter = line.trim().split('\t').map(|x| x.parse::<f64>().unwrap());
+
+            LabelPixel {
+                label: iter.next().unwrap() as isize,
+                pixels: {
+                    if prec < 0 {
+                        iter.collect()
+                    } else {
+                        iter.map(|x| round_by_scale(x, prec as usize)).collect()
+                    }
+                },
+            }
+        })
+        .collect()
+}
+
+/// Return `compression_method -> dataset_name -> [output]`
+fn ucr2018_command(
+    input_dir: impl AsRef<Path>,
+    config: UCR2018Config,
+) -> anyhow::Result<HashMap<String, HashMap<String, Vec<OutputWrapper<UCR2018Config>>>>> {
+    let precision = config.precision;
+    let input_dir = input_dir.as_ref();
+    let configs: Vec<CompressorConfig> = vec![
+        CompressorConfig::uncompressed().build().into(),
+        CompressorConfig::chimp128().build().into(),
+        CompressorConfig::chimp().build().into(),
+        CompressorConfig::elf_on_chimp().build().into(),
+        CompressorConfig::elf().build().into(),
+        CompressorConfig::gorilla().build().into(),
+        CompressorConfig::rle().build().into(),
+        CompressorConfig::zstd().build().into(),
+        CompressorConfig::gzip().build().into(),
+        CompressorConfig::snappy().build().into(),
+        CompressorConfig::ffi_alp().build().into(),
+        CompressorConfig::delta_sprintz()
+            .scale(precision as u32)
+            .build()
+            .into(),
+        CompressorConfig::buff()
+            .scale(precision as u32)
+            .build()
+            .into(),
+    ];
+
+    let mut result = HashMap::new();
+
+    let dataset_entries = entry_iter(input_dir)?.collect::<Vec<_>>();
+    for config in tqdm(configs) {
+        for dataset_entry in tqdm(dataset_entries.iter()) {
+            if !dataset_entry.is_dir() {
+                continue;
+            }
+
+            let dataset_name = dataset_entry
+                .file_name()
+                .unwrap()
+                .to_string_lossy()
+                .to_string();
+            let train_file = dataset_entry.join(format!("{}_TRAIN.tsv", dataset_name));
+            let test_file = dataset_entry.join(format!("{}_TEST.tsv", dataset_name));
+
+            let train_data = slurp_file(&train_file, precision as i32);
+            let test_data = slurp_file(&test_file, precision as i32);
+            let train_vectors = train_data
+                .iter()
+                .map(|x| x.pixels.clone())
+                .collect::<Vec<_>>();
+            let train_labels = train_data.iter().map(|x| x.label).collect::<Vec<_>>();
+
+            let test_vectors = test_data
+                .iter()
+                .map(|x| x.pixels.clone())
+                .collect::<Vec<_>>();
+            let test_labels = test_data.iter().map(|x| x.label).collect::<Vec<_>>();
+
+            for (i, test_vector) in test_vectors.into_iter().enumerate() {}
+        }
+    }
+
+    Ok(result)
 }
