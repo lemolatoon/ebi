@@ -17,6 +17,15 @@ pub struct CompressionConfig {
     pub compressor_config: CompressorConfig,
 }
 
+impl CompressionConfig {
+    pub fn new(chunk_option: ChunkOption, compressor_config: CompressorConfig) -> Self {
+        Self {
+            chunk_option,
+            compressor_config,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FilterConfig {
     pub predicate: Predicate,
@@ -66,8 +75,36 @@ pub struct SumConfig {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UCR2018Config {
+    pub n: usize,
     pub precision: usize,
     pub k: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UCR2018ResultForOneDataset {
+    pub dataset_name: String,
+    pub config: UCR2018Config,
+    pub compression_config: CompressionConfig,
+    pub elapsed_time_nanos: Vec<Vec<u128>>,
+    pub execution_times: Vec<Vec<SerializableSegmentedExecutionTimes>>,
+    pub accuracy: f64,
+    pub compression_statistics: CompressStatistics,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UCR2018Result {
+    /// dataset_name -> UCR2018ResultForOneDataset
+    pub results: HashMap<String, UCR2018ResultForOneDataset>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UCR2018ForAllCompressionMethodsResult {
+    /// compression_method -> UCR2018Result
+    pub results: HashMap<String, UCR2018Result>,
+    /// Start time of the experiment
+    pub start_time: chrono::DateTime<chrono::Utc>,
+    /// End time of the experiment
+    pub end_time: chrono::DateTime<chrono::Utc>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -249,6 +286,8 @@ pub enum Output {
     Sum(OutputWrapper<SumConfig>),
     #[quick_impl(impl From)]
     All(AllOutput),
+    #[quick_impl(impl From)]
+    UCR2018(UCR2018ForAllCompressionMethodsResult),
 }
 
 /// # Examples

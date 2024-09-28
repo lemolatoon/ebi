@@ -1,7 +1,8 @@
 use experimenter::{
     get_appropriate_scale, AllOutput, AllOutputInner, CompressStatistics, CompressionConfig,
     FilterConfig, FilterFamilyOutput, FilterMaterializeConfig, MaterializeConfig, MaxConfig,
-    Output, OutputWrapper, SumConfig, UCR2018Config,
+    Output, OutputWrapper, SumConfig, UCR2018Config, UCR2018ForAllCompressionMethodsResult,
+    UCR2018Result, UCR2018ResultForOneDataset,
 };
 use glob::glob;
 use std::{
@@ -24,7 +25,6 @@ use ebi::{
     compressor::CompressorConfig,
     decoder::query::{Predicate, Range, RangeValue, RoaringBitmap},
     encoder::ChunkOption,
-    time::SegmentedExecutionTimes,
 };
 
 #[derive(Parser, Debug, Clone)]
@@ -43,6 +43,8 @@ struct ConfigPath {
     #[arg(long, short)]
     in_memory: Option<bool>,
 }
+
+const DEFAULT_CHUNK_OPTION: ChunkOption = ChunkOption::RecordCount(128 * 1024 * 1024 / 8);
 
 impl ConfigPath {
     fn read<T: serde::de::DeserializeOwned>(&self) -> anyhow::Result<T> {
@@ -337,8 +339,8 @@ fn main() -> anyhow::Result<()> {
             "Currently only k=1 is supported, but got k={}",
             config.k
         );
-        let save_dir = input_dir.parent().unwarp().join("result").join("ucr2018");
-        let output = ucr2018_command(input_dir, config)?;
+        let save_dir = input_dir.parent().unwrap().join("result").join("ucr2018");
+        let output = ucr2018_command(input_dir, config)?.into();
         save_output_json(output, save_dir)?;
 
         return Ok(());
@@ -430,6 +432,7 @@ fn process_file(filename: impl AsRef<Path>, cli: Cli) -> anyhow::Result<()> {
         .into(),
         Commands::AllPatch { .. } => unreachable!(),
         Commands::All { .. } => unreachable!(),
+        Commands::UCR2018 { .. } => unreachable!(),
     };
 
     // Get the directory where the filename is located
@@ -968,7 +971,7 @@ fn create_default_compressor_config(
         (
             name,
             CompressionConfig {
-                chunk_option: ChunkOption::RecordCount(128 * 1024 * 1024 / 8),
+                chunk_option: DEFAULT_CHUNK_OPTION,
                 compressor_config: config,
             },
         )
@@ -1715,7 +1718,7 @@ fn round_by_scale(value: f64, scale: usize) -> f64 {
     let scale = scale as f64;
     (value * scale).round() / scale
 }
-struct LabelPixel {
+pub struct LabelPixel {
     pub label: isize,
     pub pixels: Vec<f64>,
 }
@@ -1745,9 +1748,11 @@ pub fn slurp_file(file: impl AsRef<Path>, prec: i32) -> Vec<LabelPixel> {
 /// Return `compression_method -> dataset_name -> [output]`
 fn ucr2018_command(
     input_dir: impl AsRef<Path>,
-    config: UCR2018Config,
-) -> anyhow::Result<HashMap<String, HashMap<String, Vec<OutputWrapper<UCR2018Config>>>>> {
-    let precision = config.precision;
+    ucr2018config: UCR2018Config,
+) -> anyhow::Result<UCR2018ForAllCompressionMethodsResult> {
+    let start_time = chrono::Utc::now();
+    let UCR2018Config { n, precision, k } = ucr2018config.clone();
+    anyhow::ensure!(k == 1, "k must be 1");
     let input_dir = input_dir.as_ref();
     let configs: Vec<CompressorConfig> = vec![
         CompressorConfig::uncompressed().build().into(),
@@ -1771,10 +1776,10 @@ fn ucr2018_command(
             .into(),
     ];
 
-    let mut result = HashMap::new();
-
     let dataset_entries = entry_iter(input_dir)?.collect::<Vec<_>>();
+    let mut results_for_all_ucr2018 = HashMap::new();
     for config in tqdm(configs) {
+        let mut results = HashMap::new();
         for dataset_entry in tqdm(dataset_entries.iter()) {
             if !dataset_entry.is_dir() {
                 continue;
@@ -1792,7 +1797,7 @@ fn ucr2018_command(
             let test_data = slurp_file(&test_file, precision as i32);
             let train_vectors = train_data
                 .iter()
-                .map(|x| x.pixels.clone())
+                .flat_map(|x| x.pixels.clone())
                 .collect::<Vec<_>>();
             let train_labels = train_data.iter().map(|x| x.label).collect::<Vec<_>>();
 
@@ -1802,9 +1807,87 @@ fn ucr2018_command(
                 .collect::<Vec<_>>();
             let test_labels = test_data.iter().map(|x| x.label).collect::<Vec<_>>();
 
-            for (i, test_vector) in test_vectors.into_iter().enumerate() {}
+            let train_vectors_encoded = {
+                let input = EncoderInput::from_f64_slice(&train_vectors);
+                let output = EncoderOutput::from_vec(Vec::new());
+
+                let mut encoder = Encoder::new(input, output, DEFAULT_CHUNK_OPTION, config);
+
+                encoder
+                    .encode()
+                    .context(format!("Failed to encode {}", dataset_name))?;
+
+                encoder.into_output().into_inner().into_inner()
+            };
+
+            let compression_statistics = {
+                let decoder_input =
+                    DecoderInput::from_reader(Cursor::new(&train_vectors_encoded[..]));
+                let decoder = Decoder::new(decoder_input)
+                    .context(format!("Failed to create decoder for {}", dataset_name))?;
+                get_compress_statistics(&decoder)
+            }?;
+
+            let mut n_correct = 0;
+            let n_test_vectors = test_vectors.len();
+            let mut elapsed_time_nanos = Vec::with_capacity(n_test_vectors);
+            let mut segmented_execution_times = Vec::with_capacity(n_test_vectors);
+            for (i, test_vector) in test_vectors.into_iter().enumerate() {
+                let mut is_correct = false;
+                let mut elapsed_time_nanos_for_one_test_vector = Vec::with_capacity(n);
+                let mut segmented_execution_times_for_one_test_vector = Vec::with_capacity(n);
+                for _ in 0..n {
+                    let decoder_input =
+                        DecoderInput::from_reader(Cursor::new(&train_vectors_encoded[..]));
+                    let mut decoder = Decoder::new(decoder_input)
+                        .context(format!("Failed to create decoder for {}", dataset_name))?;
+
+                    let start = std::time::Instant::now();
+                    let knn_result = decoder.knn1(&test_vector[..])?;
+                    let elapsed_time_nano = start.elapsed().as_nanos();
+
+                    elapsed_time_nanos_for_one_test_vector.push(elapsed_time_nano);
+                    segmented_execution_times_for_one_test_vector
+                        .push(decoder.segmented_execution_times().into());
+
+                    is_correct = test_labels[i] == train_labels[knn_result.index];
+                }
+
+                if is_correct {
+                    n_correct += 1;
+                }
+
+                elapsed_time_nanos.push(elapsed_time_nanos_for_one_test_vector);
+                segmented_execution_times.push(segmented_execution_times_for_one_test_vector);
+            }
+            let accuracy = n_correct as f64 / n_test_vectors as f64;
+
+            let compression_config = CompressionConfig::new(DEFAULT_CHUNK_OPTION, config);
+            let result = UCR2018ResultForOneDataset {
+                dataset_name: dataset_name.clone(),
+                config: ucr2018config.clone(),
+                compression_config,
+                elapsed_time_nanos,
+                execution_times: segmented_execution_times,
+                accuracy,
+                compression_statistics,
+            };
+
+            results.insert(dataset_name, result);
         }
+
+        let ucr2018_result = UCR2018Result { results };
+
+        let compression_scheme_key = format!("{:?}", config.compression_scheme());
+        results_for_all_ucr2018.insert(compression_scheme_key, ucr2018_result);
     }
 
-    Ok(result)
+    let end_time = chrono::Utc::now();
+    let result_for_all = UCR2018ForAllCompressionMethodsResult {
+        results: results_for_all_ucr2018,
+        start_time,
+        end_time,
+    };
+
+    Ok(result_for_all)
 }
