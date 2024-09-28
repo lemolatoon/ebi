@@ -752,6 +752,7 @@ dependencies = [
  "chrono",
  "clap",
  "ebi",
+ "either",
  "glob",
  "quick-impl",
  "serde",

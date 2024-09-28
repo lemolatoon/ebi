@@ -62,6 +62,12 @@ impl From<DeltaSprintzCompressorConfig> for DeltaSprintzCompressorImpl<BitWriter
     }
 }
 
+impl DeltaSprintzCompressorConfig {
+    pub fn set_scale(&mut self, scale: u32) {
+        self.scale = scale;
+    }
+}
+
 impl<W: BitWrite> DeltaSprintzCompressorImpl<W> {
     pub fn new(bit_writer: W, scale: u32) -> Self {
         Self {

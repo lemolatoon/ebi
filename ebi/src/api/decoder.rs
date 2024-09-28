@@ -492,7 +492,7 @@ impl<R: Read + Seek> Decoder<R> {
                     chunk_reader.distance_squared(offset, &target[..n_records_in_vector])?;
 
                 if n_records_in_vector == target_len {
-                    if processing_vector.distance < min_result.distance {
+                    if processing_vector.distance <= min_result.distance {
                         min_result = processing_vector;
                     }
                     processing_vector.index += 1;

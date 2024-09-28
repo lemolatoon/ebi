@@ -1,3 +1,4 @@
+use either::Either;
 use experimenter::{
     get_appropriate_scale, AllOutput, AllOutputInner, CompressStatistics, CompressionConfig,
     FilterConfig, FilterFamilyOutput, FilterMaterializeConfig, MaterializeConfig, MaxConfig,
@@ -201,12 +202,12 @@ impl AllArgs {
 }
 
 fn config_entries(config_dir: impl AsRef<Path>) -> anyhow::Result<impl Iterator<Item = PathBuf>> {
-    Ok(entry_iter(config_dir)?
+    Ok(entry_file_iter(config_dir)?
         .filter(|p| matches!(p.extension().and_then(|s| s.to_str()), Some("json"))))
 }
 
 fn csv_entries(csv_dir: impl AsRef<Path>) -> anyhow::Result<impl Iterator<Item = PathBuf>> {
-    Ok(entry_iter(csv_dir)?.filter(|p| {
+    Ok(entry_file_iter(csv_dir)?.filter(|p| {
         matches!(
             p.extension().and_then(|s| s.to_str()),
             Some("csv" | "txt") | None
@@ -215,10 +216,11 @@ fn csv_entries(csv_dir: impl AsRef<Path>) -> anyhow::Result<impl Iterator<Item =
 }
 
 fn binary_entries(binary_dir: impl AsRef<Path>) -> anyhow::Result<impl Iterator<Item = PathBuf>> {
-    Ok(entry_iter(binary_dir)?.filter(|p| p.extension().and_then(|s| s.to_str()) == Some("bin")))
+    Ok(entry_file_iter(binary_dir)?
+        .filter(|p| p.extension().and_then(|s| s.to_str()) == Some("bin")))
 }
 
-fn entry_iter(dir: impl AsRef<Path>) -> anyhow::Result<impl Iterator<Item = PathBuf>> {
+fn entry_file_iter(dir: impl AsRef<Path>) -> anyhow::Result<impl Iterator<Item = PathBuf>> {
     let entries = fs::read_dir(dir.as_ref()).context(format!(
         "Failed to read directory: {}",
         dir.as_ref().display()
@@ -227,6 +229,22 @@ fn entry_iter(dir: impl AsRef<Path>) -> anyhow::Result<impl Iterator<Item = Path
         let e = e.ok()?;
         let path = e.path();
         if path.is_file() {
+            Some(path)
+        } else {
+            None
+        }
+    }))
+}
+
+fn entry_dir_iter(dir: impl AsRef<Path>) -> anyhow::Result<impl Iterator<Item = PathBuf>> {
+    let entries = fs::read_dir(dir.as_ref()).context(format!(
+        "Failed to read directory: {}",
+        dir.as_ref().display()
+    ))?;
+    Ok(entries.filter_map(|e| {
+        let e = e.ok()?;
+        let path = e.path();
+        if path.is_dir() {
             Some(path)
         } else {
             None
@@ -340,8 +358,8 @@ fn main() -> anyhow::Result<()> {
             config.k
         );
         let save_dir = input_dir.parent().unwrap().join("result").join("ucr2018");
-        let output = ucr2018_command(input_dir, config)?.into();
-        save_output_json(output, save_dir)?;
+        let output = ucr2018_command(input_dir, config)?;
+        save_ucr2018_json(output, save_dir)?;
 
         return Ok(());
     }
@@ -468,6 +486,35 @@ fn save_output_json(output: Output, save_dir: impl AsRef<Path>) -> anyhow::Resul
 
     // Write the output to JSON
     write_output_json(output, output_file)?;
+
+    Ok(())
+}
+
+fn save_ucr2018_json(
+    output: UCR2018ForAllCompressionMethodsResult,
+    save_dir: impl AsRef<Path>,
+) -> anyhow::Result<()> {
+    // Create the directory if it doesn't exist
+    std::fs::create_dir_all(&save_dir)?;
+
+    // Determine the next available directory name
+    let mut dir_number = 0;
+    let output_dir = loop {
+        let output_dirname = save_dir.as_ref().join(format!("{:03}", dir_number));
+        if !output_dirname.exists() {
+            break output_dirname;
+        }
+        dir_number += 1;
+    };
+
+    // Create the directory
+    std::fs::create_dir_all(&output_dir)?;
+
+    // Write the output to JSON
+    for (dataset, result) in output.results.into_iter() {
+        let output_file = output_dir.join(format!("{}.json", dataset));
+        write_output_json(result, output_file)?;
+    }
 
     Ok(())
 }
@@ -928,7 +975,7 @@ fn create_default_compressor_config(
         filename.as_ref().display()
     ))?);
     println!("get scale for {}", filename.as_ref().display());
-    let scale = get_appropriate_scale(reader);
+    let scale = get_appropriate_scale(reader, ',');
     let mut configs: Vec<(&'static str, CompressorConfig)> = vec![
         (
             "uncompressed",
@@ -1723,6 +1770,13 @@ pub struct LabelPixel {
     pub pixels: Vec<f64>,
 }
 pub fn slurp_file(file: impl AsRef<Path>, prec: i32) -> Vec<LabelPixel> {
+    fn nan_to_zero(x: f64) -> f64 {
+        if x.is_nan() {
+            0.0
+        } else {
+            x
+        }
+    }
     let file = file.as_ref();
     BufReader::new(File::open(file).unwrap())
         .lines()
@@ -1735,9 +1789,10 @@ pub fn slurp_file(file: impl AsRef<Path>, prec: i32) -> Vec<LabelPixel> {
                 label: iter.next().unwrap() as isize,
                 pixels: {
                     if prec < 0 {
-                        iter.collect()
+                        iter.map(nan_to_zero).collect()
                     } else {
-                        iter.map(|x| round_by_scale(x, prec as usize)).collect()
+                        iter.map(|x| round_by_scale(nan_to_zero(x), prec as usize))
+                            .collect()
                     }
                 },
             }
@@ -1753,7 +1808,60 @@ fn ucr2018_command(
     let start_time = chrono::Utc::now();
     let UCR2018Config { n, precision, k } = ucr2018config.clone();
     anyhow::ensure!(k == 1, "k must be 1");
+    anyhow::ensure!(
+        precision >= -1,
+        "precision must be greater than or equal to -1"
+    );
+    if precision == -1 {
+        println!("Precision is -1, It means the precision will be automatically detected.");
+    }
     let input_dir = input_dir.as_ref();
+    dbg!(input_dir);
+    let dataset_entries = entry_dir_iter(input_dir)?
+        .flat_map(|path| {
+            const MISSING_VALUE_AND_VARIABLE_LENGTH_DATASETS_ADJUSTED: &str =
+                "Missing_value_and_variable_length_datasets_adjusted";
+            if path.file_name().unwrap() == MISSING_VALUE_AND_VARIABLE_LENGTH_DATASETS_ADJUSTED {
+                Either::Left(entry_dir_iter(path).unwrap())
+            } else {
+                Either::Right(iter::once(path))
+            }
+        })
+        .collect::<Vec<_>>();
+    dbg!(&dataset_entries);
+
+    let mut dataset_scales = HashMap::new();
+    let mut scale_fallbacked_datasets = Vec::new();
+    for dataset_entry in tqdm(dataset_entries.iter()) {
+        if !dataset_entry.is_dir() {
+            continue;
+        }
+
+        let dataset_name = dataset_entry
+            .file_name()
+            .unwrap()
+            .to_string_lossy()
+            .to_string();
+        let train_file = dataset_entry.join(format!("{}_TRAIN.tsv", dataset_name));
+        let train_file_reader = BufReader::new(
+            File::open(&train_file)
+                .context(format!("Failed to open file.: {}", train_file.display()))?,
+        );
+        let scale = match get_appropriate_scale(train_file_reader, '\t') {
+            Ok(scale) => scale,
+            Err(_) => {
+                println!(
+                    "Failed to get appropriate scale for {}, Fallback to precision 9, scale: 10^9",
+                    dataset_name
+                );
+                scale_fallbacked_datasets.push(dataset_name.clone());
+                10u32.pow(9)
+            }
+        };
+        dataset_scales.insert(dataset_name, scale);
+    }
+    dbg!(&dataset_scales);
+
     let configs: Vec<CompressorConfig> = vec![
         CompressorConfig::uncompressed().build().into(),
         CompressorConfig::chimp128().build().into(),
@@ -1776,11 +1884,11 @@ fn ucr2018_command(
             .into(),
     ];
 
-    let dataset_entries = entry_iter(input_dir)?.collect::<Vec<_>>();
     let mut results_for_all_ucr2018 = HashMap::new();
-    for config in tqdm(configs) {
+    for config in tqdm(configs).desc(Some("compression_method")) {
+        let start_time = chrono::Utc::now();
         let mut results = HashMap::new();
-        for dataset_entry in tqdm(dataset_entries.iter()) {
+        for dataset_entry in tqdm(dataset_entries.iter()).desc(Some("dataset")) {
             if !dataset_entry.is_dir() {
                 continue;
             }
@@ -1790,11 +1898,24 @@ fn ucr2018_command(
                 .unwrap()
                 .to_string_lossy()
                 .to_string();
+            println!(
+                "dataset: {}\tcompression_method: {:?}",
+                &dataset_name,
+                config.compression_scheme()
+            );
+            let config = if precision == -1 {
+                // set scale if precision is -1 (auto detect)
+                let mut config = config;
+                config.set_scale(dataset_scales[&dataset_name]);
+                config
+            } else {
+                config
+            };
             let train_file = dataset_entry.join(format!("{}_TRAIN.tsv", dataset_name));
             let test_file = dataset_entry.join(format!("{}_TEST.tsv", dataset_name));
 
-            let train_data = slurp_file(&train_file, precision as i32);
-            let test_data = slurp_file(&test_file, precision as i32);
+            let train_data = slurp_file(&train_file, dataset_scales[&dataset_name] as i32);
+            let test_data = slurp_file(&test_file, dataset_scales[&dataset_name] as i32);
             let train_vectors = train_data
                 .iter()
                 .flat_map(|x| x.pixels.clone())
@@ -1832,7 +1953,9 @@ fn ucr2018_command(
             let n_test_vectors = test_vectors.len();
             let mut elapsed_time_nanos = Vec::with_capacity(n_test_vectors);
             let mut segmented_execution_times = Vec::with_capacity(n_test_vectors);
-            for (i, test_vector) in test_vectors.into_iter().enumerate() {
+            for (i, test_vector) in
+                tqdm(test_vectors.into_iter().enumerate()).desc(Some("test_vectors"))
+            {
                 let mut is_correct = false;
                 let mut elapsed_time_nanos_for_one_test_vector = Vec::with_capacity(n);
                 let mut segmented_execution_times_for_one_test_vector = Vec::with_capacity(n);
@@ -1876,7 +1999,17 @@ fn ucr2018_command(
             results.insert(dataset_name, result);
         }
 
-        let ucr2018_result = UCR2018Result { results };
+        let end_time = chrono::Utc::now();
+        let ucr2018_result = UCR2018Result {
+            start_time,
+            end_time,
+            results,
+            scale_fallbacked_dataset: if precision == -1 {
+                Some(scale_fallbacked_datasets.clone())
+            } else {
+                None
+            },
+        };
 
         let compression_scheme_key = format!("{:?}", config.compression_scheme());
         results_for_all_ucr2018.insert(compression_scheme_key, ucr2018_result);

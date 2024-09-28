@@ -289,6 +289,24 @@ impl CompressorConfig {
         CompressionScheme::from(self)
     }
 
+    pub fn set_scale(&mut self, scale: u32) {
+        match self {
+            CompressorConfig::BUFF(c) => c.set_scale(scale),
+            CompressorConfig::DeltaSprintz(c) => c.set_scale(scale),
+            CompressorConfig::Uncompressed(_)
+            | CompressorConfig::RLE(_)
+            | CompressorConfig::Gorilla(_)
+            | CompressorConfig::Chimp(_)
+            | CompressorConfig::Chimp128(_)
+            | CompressorConfig::ElfOnChimp(_)
+            | CompressorConfig::Elf(_)
+            | CompressorConfig::Zstd(_)
+            | CompressorConfig::Gzip(_)
+            | CompressorConfig::Snappy(_)
+            | CompressorConfig::FFIAlp(_) => {}
+        }
+    }
+
     /// Serialize the compressor configuration to the given writer.
     /// The first byte is the size of the configuration in bytes.
     /// The rest of the bytes are the serialized configuration.
