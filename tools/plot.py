@@ -9,7 +9,7 @@ import matplotlib
 from statistics import fmean
 from tqdm import tqdm
 
-from typing import Any, Generic, Mapping, TypeVar, TypedDict, List, Optional, Dict
+from typing_extensions import Any, Generic, Mapping, TypeVar, TypedDict, List, Optional, Dict
 from datetime import datetime
 
 
@@ -621,8 +621,7 @@ def main():
             plot_comparison(
                 filter_throughput_dfs[filter_name].columns,
                 filter_throughput_dfs[filter_name].row(dataset_index),
-                f"{dataset_name}: {
-                    filter_name} Filter Throughput (bigger, better)",
+                f"{dataset_name}: {filter_name} Filter Throughput (bigger, better)",
                 "Throughput (GB/s)",
                 os.path.join(
                     dataset_filter_dir,
@@ -632,13 +631,11 @@ def main():
             plot_comparison(
                 filter_materialize_throughput_dfs[filter_name].columns,
                 filter_materialize_throughput_dfs[filter_name].row(dataset_index),
-                f"{dataset_name}: {
-                    filter_name} Filter Materialize Throughput (bigger, better)",
+                f"{dataset_name}: {filter_name} Filter Materialize Throughput (bigger, better)",
                 "Throughput (GB/s)",
                 os.path.join(
                     dataset_filter_dir,
-                    f"{
-                        filter_name}_filter_materialize_elapsed_seconds.png",
+                    f"{filter_name}_filter_materialize_elapsed_seconds.png",
                 ),
             )
 
@@ -753,8 +750,7 @@ def main():
                 filter_materialize_throughput_dfs[filter_name][column].mean()
                 for column in filter_materialize_throughput_dfs[filter_name].columns
             ],
-            f"Average {
-                filter_name.upper()} Filter Materialize Throughput (bigger, better)",
+            f"Average {filter_name.upper()} Filter Materialize Throughput (bigger, better)",
             "Throughput (GB/s)",
             os.path.join(
                 os.path.join(barchart_dir, "filter"),
@@ -785,24 +781,20 @@ def main():
     for filter_name in ["eq", "ne", "greater"]:
         plot_boxplot(
             filter_throughput_dfs[filter_name],
-            f"Boxplot for Average {
-                filter_name.upper()} Filter Throughput (bigger, better)",
+            f"Boxplot for Average {filter_name.upper()} Filter Throughput (bigger, better)",
             f"Throughput (GB/s)",
             os.path.join(
                 os.path.join(boxplot_dir, "filter"),
-                f"boxplot_{
-                    filter_name}_filter_throughput.png",
+                f"boxplot_{filter_name}_filter_throughput.png",
             ),
         )
         plot_boxplot(
             filter_materialize_throughput_dfs[filter_name],
-            f"Boxplot for Average {
-                filter_name.upper()} Filter Materialize Throughput (bigger, better)",
+            f"Boxplot for Average {filter_name.upper()} Filter Materialize Throughput (bigger, better)",
             f"Throughput (GB/s, bigger, better)",
             os.path.join(
                 os.path.join(boxplot_dir, "filter"),
-                f"boxplot_{
-                    filter_name}_filter_materialize_throughput.png",
+                f"boxplot_{filter_name}_filter_materialize_throughput.png",
             ),
         )
 
