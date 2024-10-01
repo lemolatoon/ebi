@@ -60,6 +60,19 @@ impl<'handle, T: FileMetadataLike, R: Read> GeneralChunkReader<'handle, T, R> {
         })
     }
 
+    /// Advance the reader to the next chunk.
+    ///
+    /// # Preconditions
+    /// - The reader must be at the end of the current chunk.
+    pub fn advance(&mut self, next_handle: &'handle GeneralChunkHandle<T>) {
+        self.handle = next_handle;
+        self.timer = SegmentedExecutionTimes::new();
+    }
+
+    pub fn is_last_chunk(&self) -> bool {
+        self.handle.is_last_chunk()
+    }
+
     /// Returns the execution times of the method, which is measured by the previous operation.
     pub fn segmented_execution_times(&self) -> SegmentedExecutionTimes {
         self.timer
@@ -75,6 +88,14 @@ impl<'handle, T: FileMetadataLike, R: Read> GeneralChunkReader<'handle, T, R> {
 
     pub fn chunk_footer(&self) -> &NativeChunkFooter {
         self.handle.chunk_footer()
+    }
+
+    pub fn number_of_records(&self) -> u64 {
+        self.handle.number_of_records()
+    }
+
+    pub fn chunk_index(&self) -> usize {
+        self.handle.chunk_index
     }
 
     pub fn inner(&self) -> &GeneralChunkReaderInner<R> {

@@ -11,8 +11,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     decoder::{
-        self, chunk_reader::GeneralChunkReader, query::Predicate, FileMetadataLike, FileReader,
-        GeneralChunkHandle, Metadata,
+        self, chunk_reader::GeneralChunkReader, error::DecoderError, query::Predicate,
+        FileMetadataLike, FileReader, GeneralChunkHandle, Metadata,
     },
     format::native::{NativeChunkFooter, NativeFileFooter, NativeFileHeader},
     time::SegmentedExecutionTimes,
@@ -508,6 +508,127 @@ impl<R: Read + Seek> Decoder<R> {
         }
 
         Ok(min_result)
+    }
+
+    /// Performs matrix multiplication between the target matrix and the data matrix within the chunk.
+    ///
+    /// The target matrix should be provided in a 'column first' layout, while the data matrix within the chunk
+    /// will be interpreted in a 'row first' layout. The function interprets the chunk as a 3-D array, where the first
+    /// dimension represents the batch size. The result of the matrix multiplication is returned in a
+    /// 'row first' layout.
+    ///
+    /// # Parameters
+    ///
+    /// - `target_matrix`: A slice of `f64` values representing the target matrix in 'column first' layout.
+    /// - `target_matrix_shape`: A tuple representing the shape of the target matrix (rows, columns).
+    /// - `data_matrix_shape`: A tuple representing the shape of the data matrix (rows, columns).
+    /// - `timer`: A mutable reference to `SegmentedExecutionTimes` for recording execution times.
+    ///
+    /// # Returns
+    ///
+    /// A `Result` containing a boxed slice of `f64` values representing the result of the matrix multiplication
+    /// in 'row first' layout, or an error if the calculation fails.
+    ///
+    /// `result` = `data_matrix` (matmul op) `target_matrix`
+    ///
+    /// # Errors
+    ///
+    /// This function will return an error if there is an issue accessing the data chunk or performing the calculation.
+    ///
+    /// # Preconditions
+    ///
+    /// - The number of columns in the target matrix must be equal to the number of rows in the data matrix.
+    /// - The total number of elements in the data matrix must be a multiple of the product of its dimensions.
+    ///
+    ///
+    /// # Example
+    ///
+    /// Given the following matrices:
+    ///
+    /// ```text
+    /// chunk (row first layout): [a11, a12, a13, a21, a22, a23, a31, a32, a33]
+    /// ```
+    /// which corresponds to:
+    ///
+    /// ```text
+    ///       | a11  a12  a13 |
+    /// A =   | a21  a22  a23 |
+    ///       | a31  a32  a33 |
+    /// ```
+    ///
+    /// and
+    ///
+    /// ```text
+    /// target_matrix (column first layout): [b11, b21, b31, b12, b22, b32, b13, b23, b33]
+    /// ```
+    /// which corresponds to:
+    ///
+    /// ```text
+    ///         | b11  b12  b13 |
+    ///   B =   | b21  b22  b23 |
+    ///         | b31  b32  b33 |
+    /// ```
+    ///
+    /// The result will be: C = AB
+    ///
+    /// ```text
+    /// results (row first layout): [c11, c12, c13, c21, c22, c23, c31, c32, c33]
+    /// ```
+    /// which corresponds to:
+    ///
+    /// ```text
+    ///         | c11  c12  c13 |
+    ///   C =   | c21  c22  c23 |
+    ///         | c31  c32  c33 |
+    /// ```
+    pub fn matmul(
+        &mut self,
+        target_matrix: &[f64],
+        target_matrix_shape: (usize, usize),
+        data_matrix_shape: (usize, usize),
+        timer: &mut SegmentedExecutionTimes,
+    ) -> decoder::Result<Box<[f64]>> {
+        let number_of_records = self.footer().number_of_records() as usize;
+
+        let (target_rows, target_columns) = target_matrix_shape;
+        let (data_rows, data_columns) = data_matrix_shape;
+
+        let is_matrix_shape_invalid = data_columns != target_rows;
+        let is_data_matrix_shape_aligned_to_number_of_records_invalid =
+            number_of_records % (data_rows * data_columns) != 0;
+        if is_matrix_shape_invalid || is_data_matrix_shape_aligned_to_number_of_records_invalid {
+            return Err(DecoderError::PreconditionsNotMet.into());
+        }
+
+        let batch_size = number_of_records / (data_rows * data_columns);
+
+        let mut result_matrices = Vec::with_capacity(batch_size * data_rows * target_columns);
+
+        let mut offset_in_chunk = 0;
+        let mut chunk_index = 0;
+        let mut chunk_reader = self.chunk_reader(ChunkId::new(chunk_index))?;
+
+        for _ in 0..batch_size {
+            if offset_in_chunk >= chunk_reader.number_of_records() as usize {
+                offset_in_chunk = 0;
+                chunk_index += 1;
+                chunk_reader = self.chunk_reader(ChunkId::new(chunk_index))?;
+            }
+            for row_index in 0..data_rows {
+                for target_column in target_matrix.chunks_exact(target_rows) {
+                    let result = chunk_reader.dot_product(
+                        offset_in_chunk + row_index * data_columns,
+                        target_column,
+                        timer,
+                    )?;
+
+                    result_matrices.push(result);
+                }
+            }
+            offset_in_chunk += data_rows * data_columns;
+        }
+
+        Ok(result_matrices.into_boxed_slice())
     }
 
     pub fn chunk_reader(
