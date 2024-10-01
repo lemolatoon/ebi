@@ -104,6 +104,18 @@ impl ChunkId {
     }
 }
 
+/// Represents the result of a K-nearest neighbors search.
+///
+/// Each `KnnResult` contains the index and the label of this neighbor.
+#[derive(Debug, Clone, Copy, PartialEq, PartialOrd)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct KnnResult {
+    /// The index of this neighbor in the original data.
+    pub index: usize,
+    /// The distance of this neighbor.
+    pub distance: f64,
+}
+
 pub struct Decoder<R: Read + Seek> {
     input: DecoderInput<R>,
     file_metadata_ref: Arc<Metadata>,
@@ -403,6 +415,99 @@ impl<R: Read + Seek> Decoder<R> {
         }
 
         Ok(result)
+    }
+
+    /// Finds the K-nearest neighbors to the target slice within the data.
+    ///
+    /// The data will be interpreted as a 2D `f64` array with tags logically. Each entry in the array
+    /// a vector of `f64` values. The function calculates the distances between
+    /// the target slice and each vector in the data, and returns the K-nearest neighbors.
+    ///
+    /// # Parameters
+    ///
+    /// - `target`: A slice of `f64` values representing the target data to compare against.
+    ///
+    /// # Returns
+    ///
+    /// A vector of `KnnResult` representing the K-nearest neighbors. Each `KnnResult` contains the
+    /// index and the distance of the neighbor.
+    ///
+    /// # Example
+    /// ```text
+    /// Data: [1.0, 1.2, 1.3, 1.4, 2.0, 1.5, 1.7, 1.8, 1.0, 1.9, 3.0, 4.0]
+    /// where target.len() == 4
+    /// ```
+    /// will be interpreted as:
+    /// ```text
+    /// [
+    ///     [1.0, 1.2, 1.3, 1.4],
+    ///     [2.0, 1.5, 1.7, 1.8],
+    ///     [1.0, 1.9, 3.0, 4.0],
+    /// ]
+    /// ```
+    pub fn knn1(&mut self, target: &[f64]) -> decoder::Result<KnnResult> {
+        let target_len = target.len();
+
+        let Self {
+            input,
+            chunk_handles,
+            ..
+        } = self;
+
+        self.timer = SegmentedExecutionTimes::new();
+
+        let mut processing_vector = KnnResult {
+            index: 0,
+            distance: 0.0,
+        };
+        let mut min_result = KnnResult {
+            index: usize::MAX,
+            distance: f64::INFINITY,
+        };
+        let mut remaining_records = 0;
+        for chunk_handle in chunk_handles.iter_mut() {
+            let mut offset = 0;
+            let chunk_number_of_records = chunk_handle.number_of_records() as usize;
+            let mut chunk_reader = Self::chunk_reader_from_handle(input, chunk_handle)?;
+
+            if remaining_records != 0 {
+                // If the vector is not fully processed, continue processing it with the partial distance of the previous chunk.
+                let remaining_target_start = target_len - remaining_records;
+                processing_vector.distance +=
+                    chunk_reader.distance_squared(0, &target[remaining_target_start..])?;
+
+                if processing_vector.distance < min_result.distance {
+                    min_result = processing_vector;
+                }
+
+                remaining_records = 0;
+
+                processing_vector.index += 1;
+                offset += remaining_records;
+            }
+
+            while offset < chunk_number_of_records {
+                let n_records_in_vector = target_len.min(chunk_number_of_records - offset);
+                processing_vector.distance =
+                    chunk_reader.distance_squared(offset, &target[..n_records_in_vector])?;
+
+                if n_records_in_vector == target_len {
+                    if processing_vector.distance <= min_result.distance {
+                        min_result = processing_vector;
+                    }
+                    processing_vector.index += 1;
+                } else {
+                    // If the vector is not fully processed, save the partial distance for the next chunk.
+                    remaining_records = target_len - n_records_in_vector;
+                }
+
+                offset += n_records_in_vector;
+            }
+
+            self.timer += chunk_reader.segmented_execution_times();
+        }
+
+        Ok(min_result)
     }
 
     pub fn chunk_reader(

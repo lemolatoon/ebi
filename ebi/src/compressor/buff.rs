@@ -106,6 +106,12 @@ impl BUFFCompressorConfigBuilder {
     }
 }
 
+impl BUFFCompressorConfig {
+    pub fn set_scale(&mut self, scale: u32) {
+        self.scale = scale;
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 struct Precalculated {
     min: usize,
