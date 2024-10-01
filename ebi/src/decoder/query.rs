@@ -172,6 +172,25 @@ pub fn default_distance_squared<T: Reader + ?Sized>(
     Ok(sum)
 }
 
+#[inline]
+pub fn default_dot_product<T: Reader + ?Sized>(
+    reader: &mut T,
+    offset_in_chunk: usize,
+    target: &[f64],
+    timer: &mut SegmentedExecutionTimes,
+) -> decoder::Result<f64> {
+    let decompressed = reader.decompress(timer)?;
+    let sum_timer = timer.start_addition_measurement(SegmentKind::Sum);
+    let offset_in_chunk = std::cmp::min(decompressed.len(), offset_in_chunk);
+    let sum = decompressed[offset_in_chunk..]
+        .iter()
+        .zip(target)
+        .map(|(&a, &b)| a * b)
+        .sum();
+    sum_timer.stop();
+    Ok(sum)
+}
+
 /// A trait for query execution.
 /// This trait provides default implementations based of [`Reader`] trait.
 /// The each implementation of this trait can be specialized for each compression scheme.
@@ -291,6 +310,29 @@ pub trait QueryExecutor: Reader {
         timer: &mut SegmentedExecutionTimes,
     ) -> decoder::Result<f64> {
         default_distance_squared(self, offset_in_chunk, target, timer)
+    }
+
+    /// Calculates the dot product between the data at the specified offset in the chunk and the target slice.
+    ///
+    /// Let `chunk` is the logical chunk of f64 array.
+    /// The dot product will be calculated with the vector of length: `min(chunk[offset_in_chunk..].len(), target.len())`.
+    ///
+    /// # Parameters
+    ///
+    /// - `offset_in_chunk`: The offset within the chunk where the data is located.
+    /// - `target`: A slice of `f64` values representing the target data to compare against.
+    /// - `timer`: A mutable reference to `SegmentedExecutionTimes` for recording execution times.
+    ///
+    /// # Returns
+    ///
+    /// A `Result` containing the calculated dot product as an `f64` value, or an error if the calculation fails.
+    fn dot_product(
+        &mut self,
+        offset_in_chunk: usize,
+        target: &[f64],
+        timer: &mut SegmentedExecutionTimes,
+    ) -> decoder::Result<f64> {
+        default_dot_product(self, offset_in_chunk, target, timer)
     }
 }
 
