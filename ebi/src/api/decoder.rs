@@ -586,8 +586,8 @@ impl<R: Read + Seek> Decoder<R> {
         target_matrix: &[f64],
         target_matrix_shape: (usize, usize),
         data_matrix_shape: (usize, usize),
-        timer: &mut SegmentedExecutionTimes,
     ) -> decoder::Result<Box<[f64]>> {
+        let mut timer = SegmentedExecutionTimes::new();
         let number_of_records = self.footer().number_of_records() as usize;
 
         let (target_rows, target_columns) = target_matrix_shape;
@@ -612,7 +612,7 @@ impl<R: Read + Seek> Decoder<R> {
             if offset_in_chunk >= chunk_reader.number_of_records() as usize {
                 offset_in_chunk = 0;
                 chunk_index += 1;
-                *timer += chunk_reader.segmented_execution_times();
+                timer += chunk_reader.segmented_execution_times();
                 chunk_reader = self.chunk_reader(ChunkId::new(chunk_index))?;
             }
             for row_index in 0..data_rows {
@@ -620,7 +620,7 @@ impl<R: Read + Seek> Decoder<R> {
                     let result = chunk_reader.dot_product(
                         offset_in_chunk + row_index * data_columns,
                         target_column,
-                        timer,
+                        &mut timer,
                     )?;
 
                     result_matrices.push(result);
@@ -629,7 +629,9 @@ impl<R: Read + Seek> Decoder<R> {
             offset_in_chunk += data_rows * data_columns;
         }
         debug_assert!(chunk_reader.is_last_chunk());
-        *timer = chunk_reader.segmented_execution_times();
+        timer = chunk_reader.segmented_execution_times();
+
+        self.timer = timer;
 
         Ok(result_matrices.into_boxed_slice())
     }

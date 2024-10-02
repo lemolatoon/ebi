@@ -18,7 +18,6 @@ use ebi::{
     compressor::CompressorConfig,
     decoder::query::{Predicate, Range, RangeValue},
     encoder::ChunkOption,
-    time::SegmentedExecutionTimes,
 };
 use rand::Rng;
 
@@ -139,9 +138,7 @@ fn main() {
         "elapsed time: {:?}",
         decoder.footer().compression_elapsed_time()
     );
-    let result = decoder
-        .matmul(&b, (2, 4), (3, 2), &mut SegmentedExecutionTimes::default())
-        .unwrap();
+    let result = decoder.matmul(&b, (2, 4), (3, 2)).unwrap();
     println!("{:?}", result);
 
     let reader = decoder.chunk_reader(ChunkId::new(0)).unwrap();

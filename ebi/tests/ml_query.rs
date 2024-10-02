@@ -10,7 +10,6 @@ mod helper {
         },
         compressor::CompressorConfig,
         encoder::ChunkOption,
-        time::SegmentedExecutionTimes,
     };
 
     pub fn test_knn1(
@@ -155,12 +154,7 @@ mod helper {
             let mut decoder = Decoder::new(decoder_input).unwrap();
 
             decoder
-                .matmul(
-                    &target,
-                    (target_h, target_w),
-                    (data_h, data_w),
-                    &mut SegmentedExecutionTimes::new(),
-                )
+                .matmul(&target, (target_h, target_w), (data_h, data_w))
                 .unwrap_or_else(|_| panic!("{}: matmul failed", test_name))
         };
 
