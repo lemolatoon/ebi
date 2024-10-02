@@ -612,6 +612,7 @@ impl<R: Read + Seek> Decoder<R> {
             if offset_in_chunk >= chunk_reader.number_of_records() as usize {
                 offset_in_chunk = 0;
                 chunk_index += 1;
+                *timer += chunk_reader.segmented_execution_times();
                 chunk_reader = self.chunk_reader(ChunkId::new(chunk_index))?;
             }
             for row_index in 0..data_rows {
@@ -627,6 +628,8 @@ impl<R: Read + Seek> Decoder<R> {
             }
             offset_in_chunk += data_rows * data_columns;
         }
+        debug_assert!(chunk_reader.is_last_chunk());
+        *timer = chunk_reader.segmented_execution_times();
 
         Ok(result_matrices.into_boxed_slice())
     }
