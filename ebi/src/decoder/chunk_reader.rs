@@ -60,6 +60,19 @@ impl<'handle, T: FileMetadataLike, R: Read> GeneralChunkReader<'handle, T, R> {
         })
     }
 
+    /// Advance the reader to the next chunk.
+    ///
+    /// # Preconditions
+    /// - The reader must be at the end of the current chunk.
+    pub fn advance(&mut self, next_handle: &'handle GeneralChunkHandle<T>) {
+        self.handle = next_handle;
+        self.timer = SegmentedExecutionTimes::new();
+    }
+
+    pub fn is_last_chunk(&self) -> bool {
+        self.handle.is_last_chunk()
+    }
+
     /// Returns the execution times of the method, which is measured by the previous operation.
     pub fn segmented_execution_times(&self) -> SegmentedExecutionTimes {
         self.timer
@@ -75,6 +88,14 @@ impl<'handle, T: FileMetadataLike, R: Read> GeneralChunkReader<'handle, T, R> {
 
     pub fn chunk_footer(&self) -> &NativeChunkFooter {
         self.handle.chunk_footer()
+    }
+
+    pub fn number_of_records(&self) -> u64 {
+        self.handle.number_of_records()
+    }
+
+    pub fn chunk_index(&self) -> usize {
+        self.handle.chunk_index
     }
 
     pub fn inner(&self) -> &GeneralChunkReaderInner<R> {
@@ -203,6 +224,29 @@ impl<'handle, T: FileMetadataLike, R: Read> GeneralChunkReader<'handle, T, R> {
     ) -> decoder::Result<f64> {
         self.reader
             .distance_squared(offset_in_chunk, target, &mut self.timer)
+    }
+
+    /// Calculates the dot product between the data at the specified offset in the chunk and the target slice.
+    ///
+    /// Let `chunk` is the logical chunk of f64 array.
+    /// The dot product will be calculated with the vector of length: `min(chunk[offset_in_chunk..].len(), target.len())`.
+    ///
+    /// # Parameters
+    ///
+    /// - `offset_in_chunk`: The offset within the chunk where the data is located.
+    /// - `target`: A slice of `f64` values representing the target data to compare against.
+    /// - `timer`: A mutable reference to `SegmentedExecutionTimes` for recording execution times.
+    ///
+    /// # Returns
+    ///
+    /// A `Result` containing the calculated dot product as an `f64` value, or an error if the calculation fails.
+    pub fn dot_product(
+        &mut self,
+        offset_in_chunk: usize,
+        target: &[f64],
+        timer: &mut SegmentedExecutionTimes,
+    ) -> decoder::Result<f64> {
+        self.reader.dot_product(offset_in_chunk, target, timer)
     }
 }
 
@@ -533,6 +577,35 @@ macro_rules! impl_generic_reader {
                     $(
                         $(#[$meta])?
                         $enum_name::$variant(c) => c.distance_squared(offset_in_chunk, target, timer),
+                    )*
+                }
+            }
+
+
+            /// Calculates the dot product between the data at the specified offset in the chunk and the target slice.
+            ///
+            /// Let `chunk` is the logical chunk of f64 array.
+            /// The dot product will be calculated with the vector of length: `min(chunk[offset_in_chunk..].len(), target.len())`.
+            ///
+            /// # Parameters
+            ///
+            /// - `offset_in_chunk`: The offset within the chunk where the data is located.
+            /// - `target`: A slice of `f64` values representing the target data to compare against.
+            /// - `timer`: A mutable reference to `SegmentedExecutionTimes` for recording execution times.
+            ///
+            /// # Returns
+            ///
+            /// A `Result` containing the calculated dot product as an `f64` value, or an error if the calculation fails.
+            pub fn dot_product(
+                &mut self,
+                offset_in_chunk: usize,
+                target: &[f64],
+                timer: &mut SegmentedExecutionTimes,
+            ) -> decoder::Result<f64> {
+                match self {
+                    $(
+                        $(#[$meta])?
+                        $enum_name::$variant(c) => c.dot_product(offset_in_chunk, target, timer),
                     )*
                 }
             }

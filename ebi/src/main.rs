@@ -66,7 +66,7 @@ fn main() {
     //     .build();
     // let compressor_config = CompressorConfig::zstd().build();
     // let compressor_config = CompressorConfig::ffi_alp().build();
-    let chunk_option = ChunkOption::RecordCount(RECORD_COUNT * 10 + 3);
+    let chunk_option = ChunkOption::RecordCount(6);
     // let chunk_option = ChunkOption::ByteSizeBestEffort(1024 * 8);
     dbg!(chunk_option);
 
@@ -99,11 +99,29 @@ fn main() {
     // let binding = &[24903104499507892000.0];
     // let binding = vec![0.4, 100000000.5, 0.5, 0.6, 0.7, 0.8, 0.9, 0.9, 1.0];
     let binding = &[(i64::MAX / (2 * scale) as i64) as f64];
+    let data = [
+        /* 1st matrix */ [1, 2],
+        [3, 4],
+        [0, 1],
+        /* 2nd matrix */ [3, 2],
+        [-1, 8],
+        [0, 1],
+    ]
+    .into_iter()
+    .flatten()
+    .map(|x| x as f64)
+    .collect::<Vec<f64>>();
+    // b = np.array([
+    //     [1, 5, 6, 2],
+    //     [1, 4, 3, 1],
+    // ])
+    // column first layout
+    let b = [1.0, 1.0, 5.0, 4.0, 6.0, 3.0, 2.0, 1.0];
     // let binding = &[0.3];
     println!("binding: {}", binding[0]);
     let mut encoder = Encoder::new(
-        EncoderInput::from_file("uncompressed.bin").unwrap(),
-        // EncoderInput::from_f64_slice(binding),
+        // EncoderInput::from_file("uncompressed.bin").unwrap(),
+        EncoderInput::from_f64_slice(&data),
         EncoderOutput::from_file("compressed.bin").unwrap(),
         chunk_option,
         compressor_config,
@@ -120,6 +138,8 @@ fn main() {
         "elapsed time: {:?}",
         decoder.footer().compression_elapsed_time()
     );
+    let result = decoder.matmul(&b, (2, 4), (3, 2)).unwrap();
+    println!("{:?}", result);
 
     let reader = decoder.chunk_reader(ChunkId::new(0)).unwrap();
     let chunk_footers = reader.footer().chunk_footers();

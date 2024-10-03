@@ -259,6 +259,10 @@ impl<T: FileMetadataLike> GeneralChunkHandle<T> {
         }
     }
 
+    pub fn is_last_chunk(&self) -> bool {
+        self.chunk_index + 1 == self.file_metadata.footer().number_of_chunks() as usize
+    }
+
     pub fn header(&self) -> &NativeFileHeader {
         self.file_metadata.header()
     }

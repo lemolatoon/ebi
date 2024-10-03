@@ -1,16 +1,18 @@
 use either::Either;
 use experimenter::{
     get_appropriate_scale, AllOutput, AllOutputInner, CompressStatistics, CompressionConfig,
-    FilterConfig, FilterFamilyOutput, FilterMaterializeConfig, MaterializeConfig, MaxConfig,
-    Output, OutputWrapper, SumConfig, UCR2018Config, UCR2018ForAllCompressionMethodsResult,
-    UCR2018Result, UCR2018ResultForOneDataset,
+    FilterConfig, FilterFamilyOutput, FilterMaterializeConfig, MaterializeConfig, MatrixResult,
+    MaxConfig, Output, OutputWrapper, SumConfig, UCR2018Config,
+    UCR2018ForAllCompressionMethodsResult, UCR2018Result, UCR2018ResultForOneDataset,
 };
 use glob::glob;
+use rand::Rng as _;
+use rand_chacha::{rand_core::SeedableRng as _, ChaCha20Rng};
 use std::{
     collections::{HashMap, HashSet},
     ffi::OsStr,
     fs::{self, File},
-    io::{self, BufRead, BufReader, Cursor, Read, Seek, Write as _},
+    io::{self, BufRead, BufReader, BufWriter, Cursor, Read, Seek, Write as _},
     iter::{self},
     path::{Path, PathBuf},
 };
@@ -271,6 +273,10 @@ enum Commands {
     Sum(ConfigPath),
     All(AllArgs),
     UCR2018(ConfigPath),
+    Matrix {
+        #[arg(long, short('o'))]
+        output_dir: PathBuf,
+    },
 }
 
 impl Commands {
@@ -287,6 +293,7 @@ impl Commands {
             Commands::Max { .. } => "max",
             Commands::Sum { .. } => "sum",
             Commands::UCR2018 { .. } => "ucr2018",
+            Commands::Matrix { .. } => "matrix",
         }
     }
 }
@@ -306,6 +313,37 @@ fn main() -> anyhow::Result<()> {
         save_output_json(all_outputs.into(), save_dir)?;
 
         return Ok(());
+    }
+
+    if let Commands::Matrix { output_dir } = &cli.command {
+        let save_dir = output_dir.join("result").join("matrix");
+        // Create the directory if it doesn't exist
+        std::fs::create_dir_all(&save_dir)?;
+
+        // Determine the next available directory name
+        let mut dir_number = 0;
+        let output_dir = loop {
+            let output_dirname = save_dir.join(format!("{:03}", dir_number));
+            if !output_dirname.exists() {
+                break output_dirname;
+            }
+            dir_number += 1;
+        };
+
+        // Create the directory
+        std::fs::create_dir_all(&output_dir)?;
+
+        for precision in tqdm([1, 3, 5, 8]) {
+            for matrix_size in tqdm([128, 1024, 4096, 8192]) {
+                let filename = format!("matrix_{}_{}.json", matrix_size, precision);
+                let output = matrix_command(precision, matrix_size)?;
+
+                serde_json::to_writer(
+                    BufWriter::new(File::create(output_dir.join(filename))?),
+                    &output,
+                )?;
+            }
+        }
     }
 
     let Some(input) = &cli.input else {
@@ -451,6 +489,7 @@ fn process_file(filename: impl AsRef<Path>, cli: Cli) -> anyhow::Result<()> {
         Commands::AllPatch { .. } => unreachable!(),
         Commands::All { .. } => unreachable!(),
         Commands::UCR2018 { .. } => unreachable!(),
+        Commands::Matrix { .. } => unreachable!(),
     };
 
     // Get the directory where the filename is located
@@ -2023,4 +2062,115 @@ fn ucr2018_command(
     };
 
     Ok(result_for_all)
+}
+
+fn matrix_command(
+    precision: usize,
+    matrix_size: usize,
+) -> anyhow::Result<HashMap<String, MatrixResult>> {
+    let scale = 10u64.pow(precision as u32);
+    let seed: u64 = (precision * matrix_size + 42).try_into()?;
+    let mut rng = ChaCha20Rng::seed_from_u64(seed);
+    const N_DATA_MATRIX: usize = 50;
+
+    let data_array_size = N_DATA_MATRIX * matrix_size * matrix_size;
+    let mut data_matrices = vec![0.0; data_array_size];
+
+    rng.fill(&mut data_matrices[..]);
+
+    let mut target_matrix = vec![0.0; matrix_size * matrix_size];
+
+    rng.fill(&mut target_matrix[..]);
+
+    data_matrices
+        .iter_mut()
+        .for_each(|x| *x = round_by_scale(*x, scale as usize));
+    target_matrix
+        .iter_mut()
+        .for_each(|x| *x = round_by_scale(*x, scale as usize));
+
+    match DEFAULT_CHUNK_OPTION {
+        ChunkOption::RecordCount(c) => assert!(
+            c % (matrix_size * matrix_size) == 0,
+            "{} % ({} * {}) != 0",
+            c,
+            matrix_size,
+            matrix_size
+        ),
+        ChunkOption::ByteSizeBestEffort(_) | ChunkOption::Full => unreachable!(),
+    }
+
+    let configs: Vec<CompressorConfig> = vec![
+        CompressorConfig::uncompressed().build().into(),
+        CompressorConfig::chimp128().build().into(),
+        CompressorConfig::chimp().build().into(),
+        CompressorConfig::elf_on_chimp().build().into(),
+        CompressorConfig::elf().build().into(),
+        CompressorConfig::gorilla().build().into(),
+        CompressorConfig::rle().build().into(),
+        CompressorConfig::zstd().build().into(),
+        CompressorConfig::gzip().build().into(),
+        CompressorConfig::snappy().build().into(),
+        CompressorConfig::ffi_alp().build().into(),
+        CompressorConfig::delta_sprintz()
+            .scale(precision as u32)
+            .build()
+            .into(),
+        CompressorConfig::buff()
+            .scale(precision as u32)
+            .build()
+            .into(),
+    ];
+    let mut results = HashMap::new();
+    for config in tqdm(configs) {
+        let start_time = chrono::Utc::now();
+        let (encoded, compression_elapsed_time_nano_secs) = {
+            let input = EncoderInput::from_f64_slice(&data_matrices);
+            let output = EncoderOutput::from_vec(Vec::new());
+
+            let mut encoder = Encoder::new(input, output, DEFAULT_CHUNK_OPTION, config);
+
+            let start = std::time::Instant::now();
+            encoder.encode().context("Failed to encode")?;
+            let elapsed_time_nanos = start.elapsed().as_nanos();
+
+            (
+                encoder.into_output().into_inner().into_inner(),
+                elapsed_time_nanos,
+            )
+        };
+
+        let decoder_input = DecoderInput::from_reader(Cursor::new(&encoded[..]));
+        let mut decoder = Decoder::new(decoder_input)?;
+
+        let compression_statistics = get_compress_statistics(&decoder)?;
+
+        let start = std::time::Instant::now();
+        let matmul_result = decoder.matmul(
+            &target_matrix,
+            (matrix_size, matrix_size),
+            (matrix_size, matrix_size),
+        )?;
+        let elapsed_time_nanos = start.elapsed().as_nanos();
+        let segmented_execution_times = decoder.segmented_execution_times();
+
+        let end_time = chrono::Utc::now();
+        let result = MatrixResult {
+            compression_config: CompressionConfig::new(DEFAULT_CHUNK_OPTION, config),
+            compression_elapsed_time_nano_secs: compression_elapsed_time_nano_secs as u64,
+            compression_statistics,
+            matmul_elapsed_time_nano_secs: elapsed_time_nanos as u64,
+            matmul_segmented_execution_times: segmented_execution_times.into(),
+            precision,
+            matrix_size,
+            result_string: format!("{:?}", &matmul_result[..5.min(matmul_result.len())]),
+
+            start_time,
+            end_time,
+        };
+
+        results.insert(format!("{:?}", config.compression_scheme()), result);
+    }
+
+    Ok(results)
 }
