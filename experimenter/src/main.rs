@@ -26,7 +26,7 @@ use ebi::{
         encoder::{Encoder, EncoderInput, EncoderOutput},
     },
     compressor::CompressorConfig,
-    decoder::query::{Predicate, Range, RangeValue, RoaringBitmap},
+    decoder::query::{Predicate, Range, RangeValue},
     encoder::ChunkOption,
 };
 
@@ -1118,29 +1118,17 @@ fn create_config_command(
     filename: impl AsRef<Path>,
     output_dir: Option<PathBuf>,
 ) -> anyhow::Result<()> {
-    let encoder_input = EncoderInput::from_file(filename.as_ref()).context(format!(
-        "Failed to create encoder input from input file.: {}",
-        filename.as_ref().display()
-    ))?;
-    let encoder_output = EncoderOutput::from_vec(Vec::new());
-
-    let mut encoder = Encoder::new(
-        encoder_input,
-        encoder_output,
-        ChunkOption::RecordCount(128 * 1024 * 1024 / 8),
-        CompressorConfig::uncompressed().build(),
-    );
-    encoder.encode().context("Failed to encode")?;
-    let mut writer = encoder.into_output().into_inner();
-    writer.seek(io::SeekFrom::Start(0))?;
-    let decoder_input = DecoderInput::from_reader(writer);
-    let mut decoder = Decoder::new(decoder_input)?;
-
-    let sum = decoder
-        .sum(None, None)
-        .context("Failed to get sum value from decoder")?;
-    let avg = sum / decoder.footer().number_of_records() as f64;
-
+    let mut buf = Vec::new();
+    File::open(filename.as_ref())
+        .context(format!(
+            "Failed to create encoder input from input file.: {}",
+            filename.as_ref().display()
+        ))?
+        .read_to_end(&mut buf)
+        .context(format!(
+            "Failed to read input file.: {}",
+            filename.as_ref().display()
+        ))?;
     let base_dir = Path::new(filename.as_ref())
         .file_stem()
         .unwrap()
@@ -1165,20 +1153,34 @@ fn create_config_command(
                 .join(base_dir))
         })?;
 
-    let greater_predicate =
-        Predicate::Range(Range::new(RangeValue::Inclusive(avg), RangeValue::None));
+    let mut floats = buf
+        .chunks_exact(8)
+        .map(|b| f64::from_le_bytes(b.try_into().unwrap()))
+        .collect::<Vec<_>>();
 
-    let mut out_buf = [0u8; 8];
-    let mut out = DecoderOutput::from_writer(&mut out_buf[..]);
-    let number_of_records = decoder.footer().number_of_records();
-    let bitmask = RoaringBitmap::from_iter(iter::once(number_of_records as u32 / 2));
-    decoder
-        .materialize(&mut out, Some(&bitmask), None)
-        .context("Failed to materialize")?;
+    let number_of_records = floats.len() as u64;
 
-    let eq_predicate = Predicate::Eq(f64::from_le_bytes(out_buf));
+    floats.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    let ten_percentile = floats[(number_of_records * 10 / 100) as usize];
+    let half_percentile = floats[(number_of_records / 2) as usize];
+    let ninety_percentile = floats[(number_of_records * 90 / 100) as usize];
 
-    let ne_predicate = Predicate::Ne(f64::from_le_bytes(out_buf));
+    let greater_predicate_ten_percentile = Predicate::Range(Range::new(
+        RangeValue::Exclusive(ten_percentile),
+        RangeValue::None,
+    ));
+    let greater_predicate_half_percentile = Predicate::Range(Range::new(
+        RangeValue::Exclusive(half_percentile),
+        RangeValue::None,
+    ));
+    let greater_predicate_ninety_percentile = Predicate::Range(Range::new(
+        RangeValue::Exclusive(ninety_percentile),
+        RangeValue::None,
+    ));
+
+    let eq_predicate = Predicate::Eq(half_percentile);
+
+    let ne_predicate = Predicate::Ne(half_percentile);
 
     std::fs::create_dir_all(&output_dir).context(format!(
         "Failed to create output directory: {}",
@@ -1188,7 +1190,12 @@ fn create_config_command(
     let mut created_files = Vec::new();
     let mut err = None;
     for (pred, name) in &[
-        (greater_predicate, "greater"),
+        (greater_predicate_ten_percentile, "greater_10th_percentile"),
+        (greater_predicate_half_percentile, "greater_50th_percentile"),
+        (
+            greater_predicate_ninety_percentile,
+            "greater_90th_percentile",
+        ),
         (eq_predicate, "eq"),
         (ne_predicate, "ne"),
     ] {
