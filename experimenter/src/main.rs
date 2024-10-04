@@ -333,8 +333,29 @@ fn main() -> anyhow::Result<()> {
         // Create the directory
         std::fs::create_dir_all(&output_dir)?;
 
-        for precision in tqdm([1, 3, 5, 8]) {
-            for matrix_size in tqdm([128, 1024, 4096, 8192]) {
+        let precisions = [1, 3, 5, 8];
+        for precision in precisions {
+            assert!(
+                10u32.checked_pow(precision).is_some(),
+                "10^{} is too large for u32",
+                precision
+            );
+        }
+        let matrix_sizes = [128, 512, 1024, 4096];
+        for matrix_size in matrix_sizes {
+            match DEFAULT_CHUNK_OPTION {
+                ChunkOption::RecordCount(c) => assert!(
+                    c % (matrix_size * matrix_size) == 0,
+                    "{} % ({} * {}) != 0",
+                    c,
+                    matrix_size,
+                    matrix_size
+                ),
+                ChunkOption::ByteSizeBestEffort(_) | ChunkOption::Full => unreachable!(),
+            }
+        }
+        for precision in tqdm(precisions) {
+            for matrix_size in tqdm(matrix_sizes) {
                 let filename = format!("matrix_{}_{}.json", matrix_size, precision);
                 let output = matrix_command(precision, matrix_size)?;
 
@@ -2065,13 +2086,13 @@ fn ucr2018_command(
 }
 
 fn matrix_command(
-    precision: usize,
+    precision: u32,
     matrix_size: usize,
 ) -> anyhow::Result<HashMap<String, MatrixResult>> {
-    let scale = 10u64.pow(precision as u32);
-    let seed: u64 = (precision * matrix_size + 42).try_into()?;
+    let scale = 10u32.pow(precision);
+    let seed: u64 = (precision as usize * matrix_size + 42).try_into()?;
     let mut rng = ChaCha20Rng::seed_from_u64(seed);
-    const N_DATA_MATRIX: usize = 50;
+    const N_DATA_MATRIX: usize = 20;
 
     let data_array_size = N_DATA_MATRIX * matrix_size * matrix_size;
     let mut data_matrices = vec![0.0; data_array_size];
@@ -2113,13 +2134,10 @@ fn matrix_command(
         CompressorConfig::snappy().build().into(),
         CompressorConfig::ffi_alp().build().into(),
         CompressorConfig::delta_sprintz()
-            .scale(precision as u32)
+            .scale(scale)
             .build()
             .into(),
-        CompressorConfig::buff()
-            .scale(precision as u32)
-            .build()
-            .into(),
+        CompressorConfig::buff().scale(scale).build().into(),
     ];
     let mut results = HashMap::new();
     for config in tqdm(configs) {
@@ -2156,6 +2174,7 @@ fn matrix_command(
 
         let end_time = chrono::Utc::now();
         let result = MatrixResult {
+            n_data_matrix: N_DATA_MATRIX,
             compression_config: CompressionConfig::new(DEFAULT_CHUNK_OPTION, config),
             compression_elapsed_time_nano_secs: compression_elapsed_time_nano_secs as u64,
             compression_statistics,

@@ -112,13 +112,14 @@ pub struct UCR2018ForAllCompressionMethodsResult {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MatrixResult {
+    pub n_data_matrix: usize,
     pub compression_config: CompressionConfig,
     pub compression_statistics: CompressStatistics,
     pub compression_elapsed_time_nano_secs: u64,
 
     pub matmul_elapsed_time_nano_secs: u64,
     pub matmul_segmented_execution_times: SerializableSegmentedExecutionTimes,
-    pub precision: usize,
+    pub precision: u32,
     pub matrix_size: usize,
 
     pub result_string: String,
