@@ -365,6 +365,8 @@ fn main() -> anyhow::Result<()> {
                 )?;
             }
         }
+
+        return Ok(());
     }
 
     let Some(input) = &cli.input else {
@@ -1118,6 +1120,7 @@ fn create_config_command(
     filename: impl AsRef<Path>,
     output_dir: Option<PathBuf>,
 ) -> anyhow::Result<()> {
+    println!("create filter config for {}", filename.as_ref().display());
     let mut buf = Vec::new();
     File::open(filename.as_ref())
         .context(format!(
@@ -1160,7 +1163,14 @@ fn create_config_command(
 
     let number_of_records = floats.len() as u64;
 
-    floats.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    anyhow::ensure!(
+        !floats.iter().any(|&f| f.is_nan()),
+        "Found NaN in the input file"
+    );
+    floats.sort_by(|a, b| {
+        a.partial_cmp(b)
+            .unwrap_or_else(|| panic!("Failed to compare {} and {}", a, b))
+    });
     let ten_percentile = floats[(number_of_records * 10 / 100) as usize];
     let half_percentile = floats[(number_of_records / 2) as usize];
     let ninety_percentile = floats[(number_of_records * 90 / 100) as usize];
