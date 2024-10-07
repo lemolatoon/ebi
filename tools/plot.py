@@ -385,6 +385,7 @@ compression_methods = [
     "FFIAlp",
 ]
 
+filter_methods = ["eq", "ne", *[f"greater_{i}th_percentile" for i in [10, 50, 90]]]
 
 def main():
     if len(sys.argv) < 2:
@@ -423,14 +424,14 @@ def main():
             method_name: [None] * len(dataset_names)
             for method_name in compression_methods
         }
-        for key in ["eq", "ne", "greater"]
+        for key in filter_methods
     }
     filter_materialize_throughput_data: dict[str, dict[str, List[Optional[float]]]] = {
         key: {
             method_name: [None] * len(dataset_names)
             for method_name in compression_methods
         }
-        for key in ["eq", "ne", "greater"]
+        for key in filter_methods
     }
 
     # execution times
@@ -451,7 +452,7 @@ def main():
             method_name: [None] * len(dataset_names)
             for method_name in compression_methods
         }
-        for key in ["eq", "ne", "greater"]
+        for key in filter_methods
     }
 
     filter_materialize_execution_times_data: dict[
@@ -461,7 +462,7 @@ def main():
             method_name: [None] * len(dataset_names)
             for method_name in compression_methods
         }
-        for key in ["eq", "ne", "greater"]
+        for key in filter_methods
     }
 
     for dataset_index, dataset_name in enumerate(tqdm(dataset_names)):
@@ -528,7 +529,7 @@ def main():
             max_throughput_data[method_name][dataset_index] = max_throughput
             sum_throughput_data[method_name][dataset_index] = sum_throughput
 
-            for filter_name in ["eq", "ne", "greater"]:
+            for filter_name in filter_methods:
                 uncompressed_size = output["compress"][0]["command_specific"][
                     "uncompressed_size"
                 ]
@@ -585,11 +586,11 @@ def main():
     sum_throughput_df = pl.DataFrame(sum_throughput_data)
     filter_throughput_dfs = {
         key: pl.DataFrame(filter_throughput_data[key])
-        for key in ["eq", "ne", "greater"]
+        for key in filter_methods
     }
     filter_materialize_throughput_dfs = {
         key: pl.DataFrame(filter_materialize_throughput_data[key])
-        for key in ["eq", "ne", "greater"]
+        for key in filter_methods
     }
 
     # dataset-wise plot_comparison
@@ -642,7 +643,7 @@ def main():
 
         dataset_filter_dir = os.path.join(dataset_out_dir, "filter")
         os.makedirs(dataset_filter_dir, exist_ok=True)
-        for filter_name in ["eq", "ne", "greater"]:
+        for filter_name in filter_methods:
             plot_comparison(
                 filter_throughput_dfs[filter_name].columns,
                 filter_throughput_dfs[filter_name].row(dataset_index),
@@ -734,7 +735,7 @@ def main():
     sum_throughput_df = sum_throughput_df.filter(
         pl.all_horizontal(pl.col("*").is_not_null())
     )
-    for filter_name in ["eq", "ne", "greater"]:
+    for filter_name in filter_methods:
         filter_throughput_dfs[filter_name] = filter_throughput_dfs[filter_name].filter(
             pl.all_horizontal(pl.col("*").is_not_null())
         )
@@ -802,7 +803,7 @@ def main():
 
     os.makedirs(os.path.join(barchart_dir, "filter"), exist_ok=True)
     os.makedirs(os.path.join(boxplot_dir, "filter"), exist_ok=True)
-    for filter_name in ["eq", "ne", "greater"]:
+    for filter_name in filter_methods:
         plot_comparison(
             filter_throughput_dfs[filter_name].columns,
             [
@@ -863,7 +864,7 @@ def main():
         os.path.join(boxplot_dir, "boxplot_sum_throughput.png"),
     )
 
-    for filter_name in ["eq", "ne", "greater"]:
+    for filter_name in filter_methods:
         plot_boxplot(
             filter_throughput_dfs[filter_name],
             f"Boxplot for Average {filter_name.upper()} Filter Throughput (bigger, better)",
@@ -1000,7 +1001,7 @@ def main():
         map(
             lambda x: x[0],
             sorted(
-                zip(labels, np.array(filter_throughput_dfs["greater"].mean().row(0))),
+                zip(labels, np.array(filter_throughput_dfs["greater_10th_percentile"].mean().row(0))),
                 key=lambda x: x[1],
                 reverse=True,
             ),
@@ -1046,7 +1047,7 @@ def main():
     )
     plot_radar_chart(
         filter_greater_throughput_sorted_labels[:5],
-        "Top 5 Filter GREATER Throughput",
+        "Top 5 Filter GREATER then 10 th percentile Throughput",
         os.path.join(
             combined_radar_chart_dir, "top_5_filter_greater_throughput_radar_chart.png"
         ),
