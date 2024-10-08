@@ -84,12 +84,38 @@ def main():
 
     results = load_json_files_from_directory(path)
 
+    execution_times_prec8 = {
+        128: {
+            method_name: results["matrix_128_8"][method_name][
+                "matmul_elapsed_time_nano_secs"
+            ]
+            for method_name in compression_methods
+        },
+        512: {
+            method_name: results["matrix_512_8"][method_name][
+                "matmul_elapsed_time_nano_secs"
+            ]
+            for method_name in compression_methods
+        },
+        1024: {
+            method_name: results["matrix_1024_8"][method_name][
+                "matmul_elapsed_time_nano_secs"
+            ]
+            for method_name in compression_methods
+        },
+    }
     for key, result in tqdm(results.items()):
         execution_times = {}
         for method_name in compression_methods:
-            execution_times[method_name] = result[method_name][
-                "matmul_elapsed_time_nano_secs"
-            ]
+            if method_name not in result:
+                execution_times[method_name] = execution_times_prec8[
+                    int(key.split("_")[1])
+                ][method_name]
+            else:
+                print(f"{key}: {result[method_name]["matmul_elapsed_time_nano_secs"]}")
+                execution_times[method_name] = result[method_name][
+                    "matmul_elapsed_time_nano_secs"
+                ]
 
         execution_times_df = pl.DataFrame(execution_times)
         out_path = out_dir + f"{key}_matmul.png"

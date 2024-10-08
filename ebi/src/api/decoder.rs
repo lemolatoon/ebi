@@ -637,11 +637,8 @@ impl<R: Read + Seek> Decoder<R> {
             }
             for row_index in 0..data_rows {
                 for target_column in target_matrix.chunks_exact(target_rows) {
-                    let result = chunk_reader.dot_product(
-                        offset_in_chunk + row_index * data_columns,
-                        target_column,
-                        &mut timer,
-                    )?;
+                    let result = chunk_reader
+                        .dot_product(offset_in_chunk + row_index * data_columns, target_column)?;
 
                     result_matrices.push(result);
                 }
@@ -649,7 +646,7 @@ impl<R: Read + Seek> Decoder<R> {
             offset_in_chunk += data_rows * data_columns;
         }
         debug_assert!(chunk_reader.is_last_chunk());
-        timer = chunk_reader.segmented_execution_times();
+        timer += chunk_reader.segmented_execution_times();
 
         self.timer = timer;
 

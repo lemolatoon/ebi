@@ -247,13 +247,9 @@ impl<'handle, T: FileMetadataLike, R: Read> GeneralChunkReader<'handle, T, R> {
     /// # Returns
     ///
     /// A `Result` containing the calculated dot product as an `f64` value, or an error if the calculation fails.
-    pub fn dot_product(
-        &mut self,
-        offset_in_chunk: usize,
-        target: &[f64],
-        timer: &mut SegmentedExecutionTimes,
-    ) -> decoder::Result<f64> {
-        self.reader.dot_product(offset_in_chunk, target, timer)
+    pub fn dot_product(&mut self, offset_in_chunk: usize, target: &[f64]) -> decoder::Result<f64> {
+        self.reader
+            .dot_product(offset_in_chunk, target, &mut self.timer)
     }
 }
 
