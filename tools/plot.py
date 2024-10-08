@@ -6,6 +6,7 @@ import numpy as np
 import polars as pl
 import matplotlib.pyplot as plt
 import matplotlib
+from matplotlib.figure import Figure
 from statistics import fmean
 from tqdm import tqdm
 import itertools
@@ -259,6 +260,15 @@ def get_color_exe(label: str) -> tuple[float, float, float, float]:
 
     return color_map[label]
 
+def add_notes_to_plot(
+    fig: Figure,
+    note_str: str | None,
+    x_pos: float = 0.99,
+    y_pos: float = 0.01,
+    fontsize: int = 12,
+):
+    if note_str is not None:
+        fig.text(x_pos, y_pos, note_str, ha="right", va="bottom", fontsize=fontsize)
 
 def plot_stacked_execution_time_ratios_for_methods(
     # methods to dataset to execution times
@@ -267,12 +277,17 @@ def plot_stacked_execution_time_ratios_for_methods(
     dataset_name: str,
     y_label: str,
     output_path: str,
+    note_str: str | None = None,
 ):
     plot_relative_stacked_execution_time_ratios_for_methods(
-        data, dataset_index, dataset_name, output_path
+        data, dataset_index, dataset_name, output_path, note_str=note_str
     )
     plot_absolute_stacked_execution_times_for_methods(
-        data, dataset_index, dataset_name, output_path.replace(".png", "_absolute.png")
+        data,
+        dataset_index,
+        dataset_name,
+        output_path.replace(".png", "_absolute.png"),
+        note_str=note_str,
     )
 
 
@@ -283,6 +298,7 @@ def plot_relative_stacked_execution_time_ratios_for_methods(
     dataset_index: int,
     dataset_name: str,
     output_path: str,
+    note_str: str | None = None,
 ):
     methods = list(data.keys())
     processing_types = list(data[methods[0]][0].keys())
@@ -305,7 +321,8 @@ def plot_relative_stacked_execution_time_ratios_for_methods(
     bar_width = 0.5
     index = np.arange(len(methods))
 
-    plt.figure(figsize=(12, 8))
+    fig = plt.figure(figsize=(12, 8))
+    add_notes_to_plot(fig, note_str)
 
     # Plot the stacked bar chart for each processing type
     bottom = np.zeros(len(methods))
@@ -331,6 +348,8 @@ def plot_relative_stacked_execution_time_ratios_for_methods(
     plt.savefig(output_path)
     plt.close()
 
+    plt.close()
+
 
 def plot_absolute_stacked_execution_times_for_methods(
     # methods to dataset to execution times
@@ -338,6 +357,7 @@ def plot_absolute_stacked_execution_times_for_methods(
     dataset_index: int,
     dataset_name: str,
     output_path: str,
+    note_str: str | None = None,
 ):
     methods = list(data.keys())
     processing_types = list(data[methods[0]][0].keys())
@@ -362,7 +382,8 @@ def plot_absolute_stacked_execution_times_for_methods(
     bar_width = 0.5
     index = np.arange(len(methods))
 
-    plt.figure(figsize=(12, 8))
+    fig = plt.figure(figsize=(12, 8))
+    add_notes_to_plot(fig, note_str)
 
     # Plot the stacked bar chart for each processing type
     bottom = np.zeros(len(methods))
@@ -388,6 +409,8 @@ def plot_absolute_stacked_execution_times_for_methods(
     plt.savefig(output_path)
     plt.close()
 
+    plt.close()
+
 
 def plot_comparison(
     labels: List[str],
@@ -396,6 +419,7 @@ def plot_comparison(
     y_label,
     output_path,
     max_value=None,
+    note_str: str | None = None,
 ):
     # Remove None values
     filtered_labels_data = [
@@ -405,7 +429,8 @@ def plot_comparison(
     # Unzip the filtered list back into labels and data
     filtered_labels, filtered_data = zip(*filtered_labels_data)
 
-    plt.figure(figsize=(12, 8))
+    fig = plt.figure(figsize=(12, 8))
+    add_notes_to_plot(fig, note_str)
     plt.bar(x=filtered_labels, height=filtered_data, color="blue")
     plt.ylim(0, max_value)
     plt.title(title)
@@ -417,11 +442,12 @@ def plot_comparison(
     plt.close()
 
 
-def plot_boxplot(data, title, y_label, output_path):
+def plot_boxplot(data, title, y_label, output_path, note_str: str | None = None):
     if isinstance(data, pl.DataFrame):
         data = data.to_pandas()
     # Plot the boxplot
-    plt.figure(figsize=(10, 6))
+    fig = plt.figure(figsize=(10, 6))
+    add_notes_to_plot(fig, note_str)
     data.boxplot(grid=False)
 
     # Customize the plot
@@ -720,6 +746,7 @@ def main():
                 dataset_out_dir,
                 f"compression_throughputs.png",
             ),
+            note_str="*ALP utilizes SIMD instructions",
         )
 
         plot_stacked_execution_time_ratios_for_methods(
@@ -731,6 +758,7 @@ def main():
                 dataset_out_dir,
                 f"compression_execution_times.png",
             ),
+            note_str="*ALP utilizes SIMD instructions",
         )
         plot_stacked_execution_time_ratios_for_methods(
             decompression_execution_times_data,
@@ -741,6 +769,7 @@ def main():
                 dataset_out_dir,
                 f"decompression_execution_times.png",
             ),
+            note_str="*ALP utilizes SIMD instructions",
         )
 
         dataset_filter_dir = os.path.join(dataset_out_dir, "filter")
@@ -755,6 +784,7 @@ def main():
                     dataset_filter_dir,
                     f"{filter_name}_filter_elapsed_seconds.png",
                 ),
+                note_str="*ALP,Buff utilize SIMD instructions",
             )
             plot_comparison(
                 filter_materialize_throughput_dfs[filter_name].columns,
@@ -765,6 +795,7 @@ def main():
                     dataset_filter_dir,
                     f"{filter_name}_filter_materialize_elapsed_seconds.png",
                 ),
+                note_str="*ALP,Buff utilize SIMD instructions",
             )
 
             plot_stacked_execution_time_ratios_for_methods(
@@ -776,6 +807,7 @@ def main():
                     dataset_filter_dir,
                     f"{filter_name}_filter_execution_times.png",
                 ),
+                note_str="*ALP,Buff utilize SIMD instructions",
             )
             plot_stacked_execution_time_ratios_for_methods(
                 filter_materialize_execution_times_data[filter_name],
@@ -786,6 +818,7 @@ def main():
                     dataset_filter_dir,
                     f"{filter_name}_filter_materialize_execution_times.png",
                 ),
+                note_str="*ALP,Buff utilize SIMD instructions",
             )
 
         plot_comparison(
@@ -797,6 +830,7 @@ def main():
                 dataset_out_dir,
                 f"materialize_elapsed_seconds.png",
             ),
+            note_str="*ALP,Buff utilize SIMD instructions",
         )
 
         plot_comparison(
@@ -808,6 +842,7 @@ def main():
                 dataset_out_dir,
                 f"max_elapsed_seconds.png",
             ),
+            note_str="*ALP utilizes SIMD instructions",
         )
         plot_comparison(
             sum_throughput_df.columns,
@@ -818,6 +853,7 @@ def main():
                 dataset_out_dir,
                 f"sum_elapsed_seconds.png",
             ),
+            note_str="*ALP utilizes SIMD instructions",
         )
 
     # filter for all rows making sure there are no null values
@@ -871,6 +907,7 @@ def main():
         "Average Compression Throughput (bigger, better)",
         "Throughput (GB/s)",
         os.path.join(barchart_dir, "average_compression_throughput.png"),
+        note_str="*ALP utilizes SIMD instructions",
     )
     plot_comparison(
         decompression_throughput_df.columns,
@@ -881,6 +918,7 @@ def main():
         "Average Decompression Throughput (bigger, better)",
         "Throughput (GB/s)",
         os.path.join(barchart_dir, "average_decompression_throughput.png"),
+        note_str="*ALP,Buff utilizes SIMD instructions",
     )
     plot_comparison(
         max_throughput_df.columns,
@@ -888,6 +926,7 @@ def main():
         "Average Max Throughput (bigger, better)",
         "Throughput (GB/s)",
         os.path.join(barchart_dir, "average_max_throughput.png"),
+        note_str="*ALP utilizes SIMD instructions",
     )
     plot_comparison(
         sum_throughput_df.columns,
@@ -895,6 +934,7 @@ def main():
         "Average Sum Throughput (bigger, better)",
         "Throughput (GB/s)",
         os.path.join(barchart_dir, "average_sum_throughput.png"),
+        note_str="*ALP utilizes SIMD instructions",
     )
 
     os.makedirs(os.path.join(barchart_dir, "filter"), exist_ok=True)
@@ -912,6 +952,7 @@ def main():
                 os.path.join(barchart_dir, "filter"),
                 f"average_{filter_name}_filter_throughput.png",
             ),
+            note_str="*ALP,Buff utilize SIMD instructions",
         )
         filter_throughput_without_buff_df = filter_throughput_dfs[filter_name].drop(
             "BUFF"
@@ -928,6 +969,7 @@ def main():
                 os.path.join(barchart_dir, "filter"),
                 f"average_{filter_name}_filter_throughput_without_buff.png",
             ),
+            note_str="*ALP utilizes SIMD instructions",
         )
         plot_comparison(
             filter_materialize_throughput_dfs[filter_name].columns,
@@ -941,6 +983,7 @@ def main():
                 os.path.join(barchart_dir, "filter"),
                 f"average_{filter_name}_filter_materialize_throughput.png",
             ),
+            note_str="*ALP,Buff utilize SIMD instructions",
         )
 
     plot_boxplot(
@@ -954,6 +997,7 @@ def main():
         "Boxplot for Average Compression Throughput (bigger, better)",
         "Throughput (GB/s)",
         os.path.join(boxplot_dir, "boxplot_compression_throughput.png"),
+        note_str="*ALP utilizes SIMD instructions",
     )
 
     plot_boxplot(
@@ -961,6 +1005,7 @@ def main():
         "Boxplot for Average Decompression(Materialize) Throughput (bigger, better)",
         "Throughput (GB/s)",
         os.path.join(boxplot_dir, "boxplot_decompression_throughput.png"),
+        note_str="*ALP,Buff utilize SIMD instructions",
     )
 
     plot_boxplot(
@@ -968,12 +1013,14 @@ def main():
         "Boxplot for Average Max Throughput (bigger, better)",
         "Throughput (GB/s)",
         os.path.join(boxplot_dir, "boxplot_max_throughput.png"),
+        note_str="*ALP utilizes SIMD instructions",
     )
     plot_boxplot(
         sum_throughput_df,
         "Boxplot for Average Sum Throughput (bigger, better)",
         "Throughput (GB/s)",
         os.path.join(boxplot_dir, "boxplot_sum_throughput.png"),
+        note_str="*ALP utilizes SIMD instructions",
     )
 
     for filter_name in filter_methods:
@@ -985,6 +1032,7 @@ def main():
                 os.path.join(boxplot_dir, "filter"),
                 f"boxplot_{filter_name}_filter_throughput.png",
             ),
+            note_str="*ALP,Buff utilize SIMD instructions",
         )
         filter_throughput_without_buff_df = filter_throughput_dfs[filter_name].drop(
             "BUFF"
@@ -997,6 +1045,7 @@ def main():
                 os.path.join(boxplot_dir, "filter"),
                 f"boxplot_{filter_name}_filter_throughput_without_buff.png",
             ),
+            note_str="*ALP utilizes SIMD instructions",
         )
         plot_boxplot(
             filter_materialize_throughput_dfs[filter_name],
@@ -1006,6 +1055,7 @@ def main():
                 os.path.join(boxplot_dir, "filter"),
                 f"boxplot_{filter_name}_filter_materialize_throughput.png",
             ),
+            note_str="*ALP,Buff utilize SIMD instructions",
         )
 
     # Combined Radar Chart
