@@ -913,6 +913,20 @@ def main():
                 f"average_{filter_name}_filter_throughput.png",
             ),
         )
+        filter_throughput_without_buff_df = filter_throughput_dfs[filter_name].drop("BUFF")
+        plot_comparison(
+            filter_throughput_without_buff_df.columns,
+            [
+                filter_throughput_without_buff_df[column].mean()
+                for column in filter_throughput_without_buff_df.columns
+            ],
+            f"Average {filter_name.upper()} Filter Throughput (bigger, better) without BUFF",
+            "Throughput (GB/s)",
+            os.path.join(
+                os.path.join(barchart_dir, "filter"),
+                f"average_{filter_name}_filter_throughput_without_buff.png",
+            ),
+        )
         plot_comparison(
             filter_materialize_throughput_dfs[filter_name].columns,
             [
@@ -969,6 +983,16 @@ def main():
                 os.path.join(boxplot_dir, "filter"),
                 f"boxplot_{filter_name}_filter_throughput.png",
             ),
+        )
+        filter_throughput_without_buff_df = filter_throughput_dfs[filter_name].drop("BUFF")
+        plot_boxplot(
+            filter_throughput_without_buff_df,
+            f"Boxplot for Average {filter_name.upper()} Filter Throughput (bigger, better) without BUFF",
+            f"Throughput (GB/s)",
+            os.path.join(
+                os.path.join(boxplot_dir, "filter"),
+                f"boxplot_{filter_name}_filter_throughput_without_buff.png",
+            )
         )
         plot_boxplot(
             filter_materialize_throughput_dfs[filter_name],
