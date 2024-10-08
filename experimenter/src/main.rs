@@ -26,7 +26,7 @@ use ebi::{
         encoder::{Encoder, EncoderInput, EncoderOutput},
     },
     compressor::CompressorConfig,
-    decoder::query::{Predicate, Range, RangeValue, RoaringBitmap},
+    decoder::query::{Predicate, Range, RangeValue},
     encoder::ChunkOption,
 };
 
@@ -333,8 +333,29 @@ fn main() -> anyhow::Result<()> {
         // Create the directory
         std::fs::create_dir_all(&output_dir)?;
 
-        for precision in tqdm([1, 3, 5, 8]) {
-            for matrix_size in tqdm([128, 1024, 4096, 8192]) {
+        let precisions = [1, 3, 5, 8];
+        for precision in precisions {
+            assert!(
+                10u32.checked_pow(precision).is_some(),
+                "10^{} is too large for u32",
+                precision
+            );
+        }
+        let matrix_sizes = [128, 512, 1024, 4096];
+        for matrix_size in matrix_sizes {
+            match DEFAULT_CHUNK_OPTION {
+                ChunkOption::RecordCount(c) => assert!(
+                    c % (matrix_size * matrix_size) == 0,
+                    "{} % ({} * {}) != 0",
+                    c,
+                    matrix_size,
+                    matrix_size
+                ),
+                ChunkOption::ByteSizeBestEffort(_) | ChunkOption::Full => unreachable!(),
+            }
+        }
+        for precision in tqdm(precisions) {
+            for matrix_size in tqdm(matrix_sizes) {
                 let filename = format!("matrix_{}_{}.json", matrix_size, precision);
                 let output = matrix_command(precision, matrix_size)?;
 
@@ -344,6 +365,8 @@ fn main() -> anyhow::Result<()> {
                 )?;
             }
         }
+
+        return Ok(());
     }
 
     let Some(input) = &cli.input else {
@@ -1097,29 +1120,18 @@ fn create_config_command(
     filename: impl AsRef<Path>,
     output_dir: Option<PathBuf>,
 ) -> anyhow::Result<()> {
-    let encoder_input = EncoderInput::from_file(filename.as_ref()).context(format!(
-        "Failed to create encoder input from input file.: {}",
-        filename.as_ref().display()
-    ))?;
-    let encoder_output = EncoderOutput::from_vec(Vec::new());
-
-    let mut encoder = Encoder::new(
-        encoder_input,
-        encoder_output,
-        ChunkOption::RecordCount(128 * 1024 * 1024 / 8),
-        CompressorConfig::uncompressed().build(),
-    );
-    encoder.encode().context("Failed to encode")?;
-    let mut writer = encoder.into_output().into_inner();
-    writer.seek(io::SeekFrom::Start(0))?;
-    let decoder_input = DecoderInput::from_reader(writer);
-    let mut decoder = Decoder::new(decoder_input)?;
-
-    let sum = decoder
-        .sum(None, None)
-        .context("Failed to get sum value from decoder")?;
-    let avg = sum / decoder.footer().number_of_records() as f64;
-
+    println!("create filter config for {}", filename.as_ref().display());
+    let mut buf = Vec::new();
+    File::open(filename.as_ref())
+        .context(format!(
+            "Failed to create encoder input from input file.: {}",
+            filename.as_ref().display()
+        ))?
+        .read_to_end(&mut buf)
+        .context(format!(
+            "Failed to read input file.: {}",
+            filename.as_ref().display()
+        ))?;
     let base_dir = Path::new(filename.as_ref())
         .file_stem()
         .unwrap()
@@ -1144,20 +1156,41 @@ fn create_config_command(
                 .join(base_dir))
         })?;
 
-    let greater_predicate =
-        Predicate::Range(Range::new(RangeValue::Inclusive(avg), RangeValue::None));
+    let mut floats = buf
+        .chunks_exact(8)
+        .map(|b| f64::from_le_bytes(b.try_into().unwrap()))
+        .collect::<Vec<_>>();
 
-    let mut out_buf = [0u8; 8];
-    let mut out = DecoderOutput::from_writer(&mut out_buf[..]);
-    let number_of_records = decoder.footer().number_of_records();
-    let bitmask = RoaringBitmap::from_iter(iter::once(number_of_records as u32 / 2));
-    decoder
-        .materialize(&mut out, Some(&bitmask), None)
-        .context("Failed to materialize")?;
+    let number_of_records = floats.len() as u64;
 
-    let eq_predicate = Predicate::Eq(f64::from_le_bytes(out_buf));
+    anyhow::ensure!(
+        !floats.iter().any(|&f| f.is_nan()),
+        "Found NaN in the input file"
+    );
+    floats.sort_by(|a, b| {
+        a.partial_cmp(b)
+            .unwrap_or_else(|| panic!("Failed to compare {} and {}", a, b))
+    });
+    let ten_percentile = floats[(number_of_records * 10 / 100) as usize];
+    let half_percentile = floats[(number_of_records / 2) as usize];
+    let ninety_percentile = floats[(number_of_records * 90 / 100) as usize];
 
-    let ne_predicate = Predicate::Ne(f64::from_le_bytes(out_buf));
+    let greater_predicate_ten_percentile = Predicate::Range(Range::new(
+        RangeValue::Exclusive(ten_percentile),
+        RangeValue::None,
+    ));
+    let greater_predicate_half_percentile = Predicate::Range(Range::new(
+        RangeValue::Exclusive(half_percentile),
+        RangeValue::None,
+    ));
+    let greater_predicate_ninety_percentile = Predicate::Range(Range::new(
+        RangeValue::Exclusive(ninety_percentile),
+        RangeValue::None,
+    ));
+
+    let eq_predicate = Predicate::Eq(half_percentile);
+
+    let ne_predicate = Predicate::Ne(half_percentile);
 
     std::fs::create_dir_all(&output_dir).context(format!(
         "Failed to create output directory: {}",
@@ -1167,7 +1200,12 @@ fn create_config_command(
     let mut created_files = Vec::new();
     let mut err = None;
     for (pred, name) in &[
-        (greater_predicate, "greater"),
+        (greater_predicate_ten_percentile, "greater_10th_percentile"),
+        (greater_predicate_half_percentile, "greater_50th_percentile"),
+        (
+            greater_predicate_ninety_percentile,
+            "greater_90th_percentile",
+        ),
         (eq_predicate, "eq"),
         (ne_predicate, "ne"),
     ] {
@@ -2065,13 +2103,13 @@ fn ucr2018_command(
 }
 
 fn matrix_command(
-    precision: usize,
+    precision: u32,
     matrix_size: usize,
 ) -> anyhow::Result<HashMap<String, MatrixResult>> {
-    let scale = 10u64.pow(precision as u32);
-    let seed: u64 = (precision * matrix_size + 42).try_into()?;
+    let scale = 10u32.pow(precision);
+    let seed: u64 = (precision as usize * matrix_size + 42).try_into()?;
     let mut rng = ChaCha20Rng::seed_from_u64(seed);
-    const N_DATA_MATRIX: usize = 50;
+    const N_DATA_MATRIX: usize = 20;
 
     let data_array_size = N_DATA_MATRIX * matrix_size * matrix_size;
     let mut data_matrices = vec![0.0; data_array_size];
@@ -2113,13 +2151,10 @@ fn matrix_command(
         CompressorConfig::snappy().build().into(),
         CompressorConfig::ffi_alp().build().into(),
         CompressorConfig::delta_sprintz()
-            .scale(precision as u32)
+            .scale(scale)
             .build()
             .into(),
-        CompressorConfig::buff()
-            .scale(precision as u32)
-            .build()
-            .into(),
+        CompressorConfig::buff().scale(scale).build().into(),
     ];
     let mut results = HashMap::new();
     for config in tqdm(configs) {
@@ -2156,6 +2191,7 @@ fn matrix_command(
 
         let end_time = chrono::Utc::now();
         let result = MatrixResult {
+            n_data_matrix: N_DATA_MATRIX,
             compression_config: CompressionConfig::new(DEFAULT_CHUNK_OPTION, config),
             compression_elapsed_time_nano_secs: compression_elapsed_time_nano_secs as u64,
             compression_statistics,
