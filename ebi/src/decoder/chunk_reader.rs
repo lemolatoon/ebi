@@ -69,6 +69,13 @@ impl<'handle, T: FileMetadataLike, R: Read> GeneralChunkReader<'handle, T, R> {
         self.timer = SegmentedExecutionTimes::new();
     }
 
+    /// Set the precision of the reader, which is used when materializing.
+    pub fn with_precision(&mut self, precision: u32) {
+        if let GeneralChunkReaderInner::BUFF(buff) = &mut self.reader {
+            buff.with_controlled_precision(precision);
+        }
+    }
+
     pub fn is_last_chunk(&self) -> bool {
         self.handle.is_last_chunk()
     }
@@ -240,13 +247,9 @@ impl<'handle, T: FileMetadataLike, R: Read> GeneralChunkReader<'handle, T, R> {
     /// # Returns
     ///
     /// A `Result` containing the calculated dot product as an `f64` value, or an error if the calculation fails.
-    pub fn dot_product(
-        &mut self,
-        offset_in_chunk: usize,
-        target: &[f64],
-        timer: &mut SegmentedExecutionTimes,
-    ) -> decoder::Result<f64> {
-        self.reader.dot_product(offset_in_chunk, target, timer)
+    pub fn dot_product(&mut self, offset_in_chunk: usize, target: &[f64]) -> decoder::Result<f64> {
+        self.reader
+            .dot_product(offset_in_chunk, target, &mut self.timer)
     }
 }
 
@@ -344,6 +347,20 @@ pub trait Reader {
 
     /// Decompress the whole chunk and return the slice of the decompressed values.
     fn decompress(&mut self, timer: &mut SegmentedExecutionTimes) -> decoder::Result<&[f64]>;
+
+    /// Decompress the whole chunk and return the slice of the decompressed values with the specified precision.
+    /// If the Reader does not support controlled precision, it will simply fall back to [`Reader::decompress`].
+    /// Otherwise, if the Reader supports controlled precision, it will decompress the chunk with the specified precision.
+    /// For example, the original data is `[11.23456789, 20.3456789, 35.456789]` and the precision is `2`.
+    /// The decompressed data will be like `[11.225, 20.348, 35.462]`.
+    /// The original data and the decompressed data must be the same after rounding at the precision.
+    fn decompress_with_precision(
+        &mut self,
+        _precision: u32,
+        timer: &mut SegmentedExecutionTimes,
+    ) -> decoder::Result<&[f64]> {
+        self.decompress(timer)
+    }
 
     fn set_decompress_result(&mut self, data: Vec<f64>) -> &[f64];
 
