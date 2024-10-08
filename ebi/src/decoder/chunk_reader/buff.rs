@@ -1,3 +1,4 @@
+mod controlled_precision;
 mod decode;
 mod filter;
 mod filter_cmp;
@@ -26,6 +27,8 @@ pub struct BUFFReader {
     chunk_size: u64,
     number_of_records: u64,
     bytes: Vec<u8>,
+    /// `None` means full precision, otherwise indicates the precision to be used when materializing
+    precision: Option<u32>,
     decompressed: Option<Vec<f64>>,
 }
 
@@ -44,9 +47,27 @@ impl BUFFReader {
         Self {
             chunk_size,
             number_of_records,
+            precision: None,
             bytes: chunk_in_memory,
             decompressed: None,
         }
+    }
+
+    /// Set the precision to be used when materializing the data
+    pub fn with_controlled_precision(&mut self, precision: u32) {
+        // If the precision is higher than the current precision, we need to clear the cached decompressed data
+        if self.precision.map_or(true, |old_p| old_p < precision) {
+            self.decompressed = None;
+        }
+        self.precision = Some(precision);
+    }
+
+    pub fn is_full_precision(&self) -> bool {
+        self.precision.is_none()
+    }
+
+    pub fn precision(&self) -> Option<u32> {
+        self.precision
     }
 }
 
@@ -66,7 +87,10 @@ impl Reader for BUFFReader {
         }
 
         let bitpacking_timer = timer.start_addition_measurement(SegmentKind::BitPacking);
-        let result = decode::buff_simd256_decode(&self.bytes);
+        let result = match self.precision {
+            Some(precision) => controlled_precision::decode_with_precision(&self.bytes, precision),
+            None => decode::buff_simd256_decode(&self.bytes),
+        };
         bitpacking_timer.stop();
 
         self.decompressed = Some(result);

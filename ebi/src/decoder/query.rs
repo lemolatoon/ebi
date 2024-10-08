@@ -201,6 +201,7 @@ pub trait QueryExecutor: Reader {
     ///
     /// `bitmask`'s index is global to the whole chunks.
     /// That is why `logical_offset` is necessary to access bitmask.
+    #[inline]
     fn materialize<W: Write>(
         &mut self,
         output: &mut W,
@@ -219,6 +220,7 @@ pub trait QueryExecutor: Reader {
     ///
     /// `bitmask`'s index is global to the whole chunks.
     /// That is why `logical_offset` is necessary to access bitmask.
+    #[inline]
     fn filter(
         &mut self,
         predicate: Predicate,
@@ -235,6 +237,7 @@ pub trait QueryExecutor: Reader {
     ///
     /// `bitmask`'s index is global to the whole chunks.
     /// That is why `logical_offset` is necessary to access bitmask.
+    #[inline]
     fn filter_materialize<W: Write>(
         &mut self,
         output: &mut W,
@@ -251,6 +254,7 @@ pub trait QueryExecutor: Reader {
     ///
     /// `bitmask`'s index is global to the whole chunks.
     /// That is why `logical_offset` is necessary to access bitmask.
+    #[inline]
     fn sum(
         &mut self,
         bitmask: Option<&RoaringBitmap>,
@@ -265,6 +269,7 @@ pub trait QueryExecutor: Reader {
     ///
     /// `bitmask`'s index is global to the whole chunks.
     /// That is why `logical_offset` is necessary to access bitmask.
+    #[inline]
     fn min(
         &mut self,
         bitmask: Option<&RoaringBitmap>,
@@ -279,6 +284,7 @@ pub trait QueryExecutor: Reader {
     ///
     /// `bitmask`'s index is global to the whole chunks.
     /// That is why `logical_offset` is necessary to access bitmask.
+    #[inline]
     fn max(
         &mut self,
         bitmask: Option<&RoaringBitmap>,
@@ -303,6 +309,7 @@ pub trait QueryExecutor: Reader {
     ///
     /// A `Result` containing the calculated distance^2 as an `f64` value, or an error if the calculation fails.
     ///
+    #[inline]
     fn distance_squared(
         &mut self,
         offset_in_chunk: usize,
@@ -326,6 +333,7 @@ pub trait QueryExecutor: Reader {
     /// # Returns
     ///
     /// A `Result` containing the calculated dot product as an `f64` value, or an error if the calculation fails.
+    #[inline]
     fn dot_product(
         &mut self,
         offset_in_chunk: usize,

@@ -345,6 +345,20 @@ pub trait Reader {
     /// Decompress the whole chunk and return the slice of the decompressed values.
     fn decompress(&mut self, timer: &mut SegmentedExecutionTimes) -> decoder::Result<&[f64]>;
 
+    /// Decompress the whole chunk and return the slice of the decompressed values with the specified precision.
+    /// If the Reader does not support controlled precision, it will simply fall back to [`Reader::decompress`].
+    /// Otherwise, if the Reader supports controlled precision, it will decompress the chunk with the specified precision.
+    /// For example, the original data is `[11.23456789, 20.3456789, 35.456789]` and the precision is `2`.
+    /// The decompressed data will be like `[11.225, 20.348, 35.462]`.
+    /// The original data and the decompressed data must be the same after rounding at the precision.
+    fn decompress_with_precision(
+        &mut self,
+        _precision: u32,
+        timer: &mut SegmentedExecutionTimes,
+    ) -> decoder::Result<&[f64]> {
+        self.decompress(timer)
+    }
+
     fn set_decompress_result(&mut self, data: Vec<f64>) -> &[f64];
 
     fn decompress_result(&mut self) -> Option<&[f64]>;
