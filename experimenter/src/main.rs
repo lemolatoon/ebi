@@ -341,7 +341,7 @@ fn main() -> anyhow::Result<()> {
                 precision
             );
         }
-        let matrix_sizes = [128, 512, 1024, 4096];
+        let matrix_sizes = [128, 512, 1024];
         for matrix_size in matrix_sizes {
             match DEFAULT_CHUNK_OPTION {
                 ChunkOption::RecordCount(c) => assert!(
@@ -354,10 +354,17 @@ fn main() -> anyhow::Result<()> {
                 ChunkOption::ByteSizeBestEffort(_) | ChunkOption::Full => unreachable!(),
             }
         }
-        for precision in tqdm(precisions) {
-            for matrix_size in tqdm(matrix_sizes) {
+        for precision in tqdm(precisions).desc(Some("Precision")) {
+            for matrix_size in tqdm(matrix_sizes).desc(Some(format!("Matrix Size(p:{precision})")))
+            {
                 let filename = format!("matrix_{}_{}.json", matrix_size, precision);
-                let output = matrix_command(precision, matrix_size)?;
+                let do_with_only_compression_methods_with_controlled_precision_support =
+                    precision != 8;
+                let output = matrix_command(
+                    precision,
+                    matrix_size,
+                    do_with_only_compression_methods_with_controlled_precision_support,
+                )?;
 
                 serde_json::to_writer(
                     BufWriter::new(File::create(output_dir.join(filename))?),
@@ -2105,11 +2112,13 @@ fn ucr2018_command(
 fn matrix_command(
     precision: u32,
     matrix_size: usize,
+    do_with_only_compression_methods_with_controlled_precision_support: bool,
 ) -> anyhow::Result<HashMap<String, MatrixResult>> {
-    let scale = 10u32.pow(precision);
-    let seed: u64 = (precision as usize * matrix_size + 42).try_into()?;
+    let original_data_precision = 8;
+    let scale = 10u32.pow(original_data_precision);
+    let seed: u64 = (original_data_precision as usize * matrix_size + 42).try_into()?;
     let mut rng = ChaCha20Rng::seed_from_u64(seed);
-    const N_DATA_MATRIX: usize = 20;
+    const N_DATA_MATRIX: usize = 40;
 
     let data_array_size = N_DATA_MATRIX * matrix_size * matrix_size;
     let mut data_matrices = vec![0.0; data_array_size];
@@ -2138,26 +2147,31 @@ fn matrix_command(
         ChunkOption::ByteSizeBestEffort(_) | ChunkOption::Full => unreachable!(),
     }
 
-    let configs: Vec<CompressorConfig> = vec![
-        CompressorConfig::uncompressed().build().into(),
-        CompressorConfig::chimp128().build().into(),
-        CompressorConfig::chimp().build().into(),
-        CompressorConfig::elf_on_chimp().build().into(),
-        CompressorConfig::elf().build().into(),
-        CompressorConfig::gorilla().build().into(),
-        CompressorConfig::rle().build().into(),
-        CompressorConfig::zstd().build().into(),
-        CompressorConfig::gzip().build().into(),
-        CompressorConfig::snappy().build().into(),
-        CompressorConfig::ffi_alp().build().into(),
-        CompressorConfig::delta_sprintz()
-            .scale(scale)
-            .build()
-            .into(),
-        CompressorConfig::buff().scale(scale).build().into(),
-    ];
+    // Configs with controlled precision support
+    let mut configs: Vec<CompressorConfig> =
+        vec![CompressorConfig::buff().scale(scale).build().into()];
+
+    if !do_with_only_compression_methods_with_controlled_precision_support {
+        configs.extend_from_slice(&[
+            CompressorConfig::uncompressed().build().into(),
+            CompressorConfig::chimp128().build().into(),
+            CompressorConfig::chimp().build().into(),
+            CompressorConfig::elf_on_chimp().build().into(),
+            CompressorConfig::elf().build().into(),
+            CompressorConfig::gorilla().build().into(),
+            CompressorConfig::rle().build().into(),
+            CompressorConfig::zstd().build().into(),
+            CompressorConfig::gzip().build().into(),
+            CompressorConfig::snappy().build().into(),
+            CompressorConfig::ffi_alp().build().into(),
+            CompressorConfig::delta_sprintz()
+                .scale(scale)
+                .build()
+                .into(),
+        ]);
+    }
     let mut results = HashMap::new();
-    for config in tqdm(configs) {
+    for config in /*tqdm(configs)*/ configs {
         let start_time = chrono::Utc::now();
         let (encoded, compression_elapsed_time_nano_secs) = {
             let input = EncoderInput::from_f64_slice(&data_matrices);
@@ -2177,6 +2191,7 @@ fn matrix_command(
 
         let decoder_input = DecoderInput::from_reader(Cursor::new(&encoded[..]));
         let mut decoder = Decoder::new(decoder_input)?;
+        decoder.with_precision(precision);
 
         let compression_statistics = get_compress_statistics(&decoder)?;
 

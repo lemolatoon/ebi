@@ -69,6 +69,13 @@ impl<'handle, T: FileMetadataLike, R: Read> GeneralChunkReader<'handle, T, R> {
         self.timer = SegmentedExecutionTimes::new();
     }
 
+    /// Set the precision of the reader, which is used when materializing.
+    pub fn with_precision(&mut self, precision: u32) {
+        if let GeneralChunkReaderInner::BUFF(buff) = &mut self.reader {
+            buff.with_controlled_precision(precision);
+        }
+    }
+
     pub fn is_last_chunk(&self) -> bool {
         self.handle.is_last_chunk()
     }

@@ -4,22 +4,28 @@ use crate::compression_common::buff::{bit_packing::BitPack, precision_bound::PRE
 
 pub fn decode_with_precision(bytes: &[u8], precision: u32) -> Vec<f64> {
     let mut bitpack = BitPack::<&[u8]>::new(bytes);
-    let ubase_int = bitpack.read(32).unwrap();
-    let base_int = unsafe { mem::transmute::<u32, i32>(ubase_int) };
-    println!("base integer: {}", base_int);
+
+    let lower = bitpack.read_u32().unwrap();
+    let higher = bitpack.read_u32().unwrap();
+    let base_fixed64_bits = (lower as u64) | ((higher as u64) << 32);
+    let base_int = unsafe { mem::transmute::<u64, i64>(base_fixed64_bits) };
+
     // Number of records
     let len = bitpack.read_u32().unwrap();
-    println!("total vector size:{}", len);
+
     // Fixed Repr bits length
-    let dlen = bitpack.read_u32().unwrap();
+    let fixed_bits_length = bitpack.read_u32().unwrap();
+
     // Fractional part bits length
-    let ilen = bitpack.read_u32().unwrap();
-    println!("bit packing length:{}", ilen);
+    let dlen = bitpack.read_u32().unwrap();
+
+    let ilen = fixed_bits_length - dlen;
+
     // check integer part and update bitmap;
     let mut cur;
 
     let mut expected_datapoints: Vec<f64> = Vec::new();
-    let mut int_vec: Vec<i32> = Vec::new();
+    let mut int_vec: Vec<i64> = Vec::new();
     let mut dec_vec = Vec::new();
     let mut cur_intf;
     let mut remain;
@@ -30,14 +36,10 @@ pub fn decode_with_precision(bytes: &[u8], precision: u32) -> Vec<f64> {
             cur = bitpack.read(ilen as usize).unwrap();
             expected_datapoints.push(cur as f64);
         }
-        println!(
-            "Number of precision scan items:{}",
-            expected_datapoints.len()
-        );
         expected_datapoints
     } else {
         let bits_needed = PRECISION_MAP[precision as usize] as u32;
-        assert!(dlen >= bits_needed);
+        assert!(dlen >= bits_needed, "{} < {}", dlen, bits_needed);
         remain = bits_needed;
         let dec_byte = dlen / 8;
         let mut byte_needed = bits_needed / 8;
@@ -46,21 +48,17 @@ pub fn decode_with_precision(bytes: &[u8], precision: u32) -> Vec<f64> {
             byte_needed += 1;
             remain = byte_needed * 8;
         }
-        println!("adjusted dec bits to decode:{}", remain);
 
         for _ in 0..len {
             cur = bitpack.read(ilen as usize).unwrap();
-            int_vec.push(cur as i32 + base_int);
+            int_vec.push(cur as i64 + base_int);
         }
 
-        let mut dec_scl: f64 = 2.0f64.powi(dlen as i32);
-        println!("Scale for decimal:{}", dec_scl);
+        let mut dec_scl: f64;
 
-        let mut bytec = 0;
         let mut chunk;
 
         if remain >= 8 {
-            bytec += 1;
             remain -= 8;
             processed += 8;
             dec_scl = 2.0f64.powi(processed);
@@ -82,10 +80,8 @@ pub fn decode_with_precision(bytes: &[u8], precision: u32) -> Vec<f64> {
                     dec_vec.push(((*x) as u32) << remain)
                 }
             }
-            println!("read the {}th byte of dec", bytec);
         }
         while remain >= 8 {
-            bytec += 1;
             remain -= 8;
             processed += 8;
             dec_scl = 2.0f64.powi(processed);
@@ -113,18 +109,10 @@ pub fn decode_with_precision(bytes: &[u8], precision: u32) -> Vec<f64> {
                     .map(|x| x | ((*(it.next().unwrap()) as u32) << remain))
                     .collect();
             }
-
-            println!("read the {}th byte of dec", bytec);
         }
         if remain > 0 {
             // let mut j =0;
             // bitpack.finish_read_byte();
-            println!("read remaining {} bits of dec", remain);
-            println!(
-                "length for int:{} and length for dec: {}",
-                int_vec.len(),
-                dec_vec.len()
-            );
             processed += remain as i32;
             dec_scl = 2.0f64.powi(processed);
             for (int_comp, dec_comp) in int_vec.iter().zip(dec_vec.iter()) {
@@ -141,10 +129,6 @@ pub fn decode_with_precision(bytes: &[u8], precision: u32) -> Vec<f64> {
                 );
             }
         }
-        println!(
-            "Number of precision scan items:{}",
-            expected_datapoints.len()
-        );
         expected_datapoints
     }
 }

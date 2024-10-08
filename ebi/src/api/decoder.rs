@@ -120,6 +120,13 @@ pub struct Decoder<R: Read + Seek> {
     input: DecoderInput<R>,
     file_metadata_ref: Arc<Metadata>,
     chunk_handles: Box<[GeneralChunkHandle<Arc<Metadata>>]>,
+    /// The precision used when materializing the values. If the compression method does not support controlled precision,
+    /// this field will be simply ignored.
+    ///
+    /// If this field is `Some(n)`, the materialized values rounded by `n + 1` decimal places must be equal to the original values.
+    /// For example, if the original value is `1.2345` and `n = 2`, the materialized value can be `1.228`.
+    /// `round_at(1.228, 2 + 1) == 1.23 == round_at(1.2345, 2 + 1)`.
+    precision: Option<u32>,
     timer: SegmentedExecutionTimes,
 }
 
@@ -140,9 +147,15 @@ impl<R: Read + Seek> Decoder<R> {
         Ok(Self {
             input,
             file_metadata_ref,
+            precision: None,
             chunk_handles,
             timer: SegmentedExecutionTimes::new(),
         })
+    }
+
+    /// Sets the precision used when materializing the values.
+    pub fn with_precision(&mut self, precision: u32) {
+        self.precision = Some(precision);
     }
 
     /// Returns the segmented execution times of the previous operation.
@@ -210,7 +223,8 @@ impl<R: Read + Seek> Decoder<R> {
                 continue;
             }
 
-            let mut chunk_reader = Self::chunk_reader_from_handle(input, chunk_handle)?;
+            let mut chunk_reader =
+                Self::chunk_reader_from_handle(input, chunk_handle, self.precision)?;
 
             chunk_reader.materialize(output.writer_mut(), bitmask)?;
 
@@ -251,7 +265,8 @@ impl<R: Read + Seek> Decoder<R> {
                 continue;
             }
 
-            let mut chunk_reader = Self::chunk_reader_from_handle(input, chunk_handle)?;
+            let mut chunk_reader =
+                Self::chunk_reader_from_handle(input, chunk_handle, self.precision)?;
 
             let filtered = chunk_reader.filter(predicate, bitmask)?;
 
@@ -290,7 +305,8 @@ impl<R: Read + Seek> Decoder<R> {
                 continue;
             }
 
-            let mut chunk_reader = Self::chunk_reader_from_handle(input, chunk_handle)?;
+            let mut chunk_reader =
+                Self::chunk_reader_from_handle(input, chunk_handle, self.precision)?;
 
             chunk_reader.filter_materialize(output.writer_mut(), predicate, bitmask)?;
 
@@ -329,7 +345,8 @@ impl<R: Read + Seek> Decoder<R> {
                 continue;
             }
 
-            let mut chunk_reader = Self::chunk_reader_from_handle(input, chunk_handle)?;
+            let mut chunk_reader =
+                Self::chunk_reader_from_handle(input, chunk_handle, self.precision)?;
 
             result += chunk_reader.sum(bitmask)?;
 
@@ -368,7 +385,8 @@ impl<R: Read + Seek> Decoder<R> {
                 continue;
             }
 
-            let mut chunk_reader = Self::chunk_reader_from_handle(input, chunk_handle)?;
+            let mut chunk_reader =
+                Self::chunk_reader_from_handle(input, chunk_handle, self.precision)?;
 
             result = result.min(chunk_reader.min(bitmask)?);
 
@@ -407,7 +425,8 @@ impl<R: Read + Seek> Decoder<R> {
                 continue;
             }
 
-            let mut chunk_reader = Self::chunk_reader_from_handle(input, chunk_handle)?;
+            let mut chunk_reader =
+                Self::chunk_reader_from_handle(input, chunk_handle, self.precision)?;
 
             result = result.max(chunk_reader.max(bitmask)?);
 
@@ -468,7 +487,8 @@ impl<R: Read + Seek> Decoder<R> {
         for chunk_handle in chunk_handles.iter_mut() {
             let mut offset = 0;
             let chunk_number_of_records = chunk_handle.number_of_records() as usize;
-            let mut chunk_reader = Self::chunk_reader_from_handle(input, chunk_handle)?;
+            let mut chunk_reader =
+                Self::chunk_reader_from_handle(input, chunk_handle, self.precision)?;
 
             if remaining_records != 0 {
                 // If the vector is not fully processed, continue processing it with the partial distance of the previous chunk.
@@ -646,15 +666,20 @@ impl<R: Read + Seek> Decoder<R> {
             ..
         } = self;
 
-        Self::chunk_reader_from_handle(input, &mut chunk_handles[chunk_id.index()])
+        Self::chunk_reader_from_handle(input, &mut chunk_handles[chunk_id.index()], self.precision)
     }
 
     fn chunk_reader_from_handle<'a>(
         input: &'a mut DecoderInput<R>,
         chunk_handle: &'a mut GeneralChunkHandle<Arc<Metadata>>,
+        precision: Option<u32>,
     ) -> decoder::Result<GeneralChunkReader<'a, Arc<Metadata>, &'a mut R>> {
         chunk_handle.seek_to_chunk(input.reader_mut())?;
-        let chunk_reader = chunk_handle.make_chunk_reader(input.reader_mut())?;
+        let mut chunk_reader = chunk_handle.make_chunk_reader(input.reader_mut())?;
+
+        if let Some(precision) = precision {
+            chunk_reader.with_precision(precision);
+        }
 
         Ok(chunk_reader)
     }
