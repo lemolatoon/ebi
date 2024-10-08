@@ -272,7 +272,10 @@ enum Commands {
     Max(ConfigPath),
     Sum(ConfigPath),
     All(AllArgs),
-    UCR2018(ConfigPath),
+    UCR2018 {
+        #[arg(long, short('o'))]
+        output_dir: PathBuf,
+    },
     Matrix {
         #[arg(long, short('o'))]
         output_dir: PathBuf,
@@ -411,23 +414,41 @@ fn main() -> anyhow::Result<()> {
         return Ok(());
     }
 
-    if let Commands::UCR2018(args) = &cli.command {
-        let args = args.clone();
+    if let Commands::UCR2018 { output_dir } = &cli.command {
         let input_dir = Path::new(input);
+        let output_dir = output_dir.join("result").join("1nn_ucr2018");
         anyhow::ensure!(
             input_dir.is_dir(),
             "Input directory does not exist or not directory: {}",
             input_dir.display()
         );
-        let config: UCR2018Config = args.read()?;
-        anyhow::ensure!(
-            config.k == 1,
-            "Currently only k=1 is supported, but got k={}",
-            config.k
-        );
+
+        std::fs::create_dir_all(&output_dir)?;
+
+        let precisions = [1, 3, 5, 8];
+        for precision in precisions {
+            assert!(
+                10u32.checked_pow(precision).is_some(),
+                "10^{} is too large for u32",
+                precision
+            );
+        }
+
         let save_dir = input_dir.parent().unwrap().join("result").join("ucr2018");
-        let output = ucr2018_command(input_dir, config)?;
-        save_ucr2018_json(output, save_dir)?;
+        // Determine the next available directory name
+        let mut dir_number = 0;
+        let unique_output_dir = loop {
+            let output_dirname = save_dir.join(format!("{:03}", dir_number));
+            if !output_dirname.exists() {
+                break output_dirname;
+            }
+            dir_number += 1;
+        };
+
+        for precision in tqdm(precisions).desc(Some("Precision")) {
+            let output = ucr2018_command(input_dir, 5, 1, precision as i32)?;
+            save_ucr2018_json(output, &unique_output_dir, Some(precision))?;
+        }
 
         return Ok(());
     }
@@ -562,26 +583,18 @@ fn save_output_json(output: Output, save_dir: impl AsRef<Path>) -> anyhow::Resul
 fn save_ucr2018_json(
     output: UCR2018ForAllCompressionMethodsResult,
     save_dir: impl AsRef<Path>,
+    precision: Option<u32>,
 ) -> anyhow::Result<()> {
     // Create the directory if it doesn't exist
     std::fs::create_dir_all(&save_dir)?;
 
-    // Determine the next available directory name
-    let mut dir_number = 0;
-    let output_dir = loop {
-        let output_dirname = save_dir.as_ref().join(format!("{:03}", dir_number));
-        if !output_dirname.exists() {
-            break output_dirname;
-        }
-        dir_number += 1;
-    };
-
-    // Create the directory
-    std::fs::create_dir_all(&output_dir)?;
-
     // Write the output to JSON
     for (dataset, result) in output.results.into_iter() {
-        let output_file = output_dir.join(format!("{}.json", dataset));
+        let filename = match precision {
+            Some(precision) => format!("{}_{}.json", dataset, precision),
+            None => format!("{}.json", dataset),
+        };
+        let output_file = save_dir.as_ref().join(filename);
         write_output_json(result, output_file)?;
     }
 
@@ -1887,10 +1900,11 @@ pub fn slurp_file(file: impl AsRef<Path>, prec: i32) -> Vec<LabelPixel> {
 /// Return `compression_method -> dataset_name -> [output]`
 fn ucr2018_command(
     input_dir: impl AsRef<Path>,
-    ucr2018config: UCR2018Config,
+    n: usize,
+    k: usize,
+    precision: i32,
 ) -> anyhow::Result<UCR2018ForAllCompressionMethodsResult> {
     let start_time = chrono::Utc::now();
-    let UCR2018Config { n, precision, k } = ucr2018config.clone();
     anyhow::ensure!(k == 1, "k must be 1");
     anyhow::ensure!(
         precision >= -1,
@@ -1947,21 +1961,21 @@ fn ucr2018_command(
     dbg!(&dataset_scales);
 
     let configs: Vec<CompressorConfig> = vec![
-        CompressorConfig::uncompressed().build().into(),
-        CompressorConfig::chimp128().build().into(),
-        CompressorConfig::chimp().build().into(),
-        CompressorConfig::elf_on_chimp().build().into(),
-        CompressorConfig::elf().build().into(),
-        CompressorConfig::gorilla().build().into(),
-        CompressorConfig::rle().build().into(),
-        CompressorConfig::zstd().build().into(),
-        CompressorConfig::gzip().build().into(),
-        CompressorConfig::snappy().build().into(),
-        CompressorConfig::ffi_alp().build().into(),
-        CompressorConfig::delta_sprintz()
-            .scale(precision as u32)
-            .build()
-            .into(),
+        // CompressorConfig::uncompressed().build().into(),
+        // CompressorConfig::chimp128().build().into(),
+        // CompressorConfig::chimp().build().into(),
+        // CompressorConfig::elf_on_chimp().build().into(),
+        // CompressorConfig::elf().build().into(),
+        // CompressorConfig::gorilla().build().into(),
+        // CompressorConfig::rle().build().into(),
+        // CompressorConfig::zstd().build().into(),
+        // CompressorConfig::gzip().build().into(),
+        // CompressorConfig::snappy().build().into(),
+        // CompressorConfig::ffi_alp().build().into(),
+        // CompressorConfig::delta_sprintz()
+        //     .scale(precision as u32)
+        //     .build()
+        //     .into(),
         CompressorConfig::buff()
             .scale(precision as u32)
             .build()
@@ -1987,12 +2001,10 @@ fn ucr2018_command(
                 &dataset_name,
                 config.compression_scheme()
             );
-            let config = if precision == -1 {
+            let config = {
                 // set scale if precision is -1 (auto detect)
                 let mut config = config;
                 config.set_scale(dataset_scales[&dataset_name]);
-                config
-            } else {
                 config
             };
             let train_file = dataset_entry.join(format!("{}_TRAIN.tsv", dataset_name));
@@ -2049,6 +2061,12 @@ fn ucr2018_command(
                     let mut decoder = Decoder::new(decoder_input)
                         .context(format!("Failed to create decoder for {}", dataset_name))?;
 
+                    if precision >= 0 {
+                        let original_precision =
+                            (dataset_scales[&dataset_name] as f64).log10().round() as u32;
+                        decoder.with_precision((precision as u32).min(original_precision));
+                    }
+
                     let start = std::time::Instant::now();
                     let knn_result = decoder.knn1(&test_vector[..])?;
                     let elapsed_time_nano = start.elapsed().as_nanos();
@@ -2072,7 +2090,11 @@ fn ucr2018_command(
             let compression_config = CompressionConfig::new(DEFAULT_CHUNK_OPTION, config);
             let result = UCR2018ResultForOneDataset {
                 dataset_name: dataset_name.clone(),
-                config: ucr2018config.clone(),
+                config: UCR2018Config {
+                    n,
+                    precision: precision as isize,
+                    k,
+                },
                 compression_config,
                 elapsed_time_nanos,
                 execution_times: segmented_execution_times,
