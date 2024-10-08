@@ -913,7 +913,9 @@ def main():
                 f"average_{filter_name}_filter_throughput.png",
             ),
         )
-        filter_throughput_without_buff_df = filter_throughput_dfs[filter_name].drop("BUFF")
+        filter_throughput_without_buff_df = filter_throughput_dfs[filter_name].drop(
+            "BUFF"
+        )
         plot_comparison(
             filter_throughput_without_buff_df.columns,
             [
@@ -984,7 +986,9 @@ def main():
                 f"boxplot_{filter_name}_filter_throughput.png",
             ),
         )
-        filter_throughput_without_buff_df = filter_throughput_dfs[filter_name].drop("BUFF")
+        filter_throughput_without_buff_df = filter_throughput_dfs[filter_name].drop(
+            "BUFF"
+        )
         plot_boxplot(
             filter_throughput_without_buff_df,
             f"Boxplot for Average {filter_name.upper()} Filter Throughput (bigger, better) without BUFF",
@@ -992,7 +996,7 @@ def main():
             os.path.join(
                 os.path.join(boxplot_dir, "filter"),
                 f"boxplot_{filter_name}_filter_throughput_without_buff.png",
-            )
+            ),
         )
         plot_boxplot(
             filter_materialize_throughput_dfs[filter_name],
