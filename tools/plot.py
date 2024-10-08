@@ -8,8 +8,18 @@ import matplotlib.pyplot as plt
 import matplotlib
 from statistics import fmean
 from tqdm import tqdm
+import itertools
 
-from typing_extensions import Any, Generic, Mapping, TypeVar, TypedDict, List, Optional, Dict
+from typing_extensions import (
+    Any,
+    Generic,
+    Mapping,
+    TypeVar,
+    TypedDict,
+    List,
+    Optional,
+    Dict,
+)
 from datetime import datetime
 
 
@@ -41,13 +51,16 @@ class MaterializeConfig(TypedDict):
     chunk_id: Optional[int]
     bitmask: Optional[List[int]]
 
+
 class MaxConfig(TypedDict):
     chunk_id: Optional[int]
     bitmask: Optional[List[int]]
 
+
 class SumConfig(TypedDict):
     chunk_id: Optional[int]
     bitmask: Optional[List[int]]
+
 
 class CompressStatistics(TypedDict):
     compression_elapsed_time_nano_secs: int
@@ -128,11 +141,109 @@ class AllOutput(TypedDict):
     __root__: Dict[str, Dict[str, AllOutputInner]]
 
 
+default_mapping = {
+    "io_read_nanos": ["IO Read"],
+    "io_write_nanos": ["IO Write"],
+    "xor_nanos": ["XOR"],
+    "others": ["Others"],
+    "bit_packing_nanos": ["Bit Packing"],
+    "decompression_nanos": ["Decompression"],
+    "compare_insert_nanos": ["Compare"],
+    "delta_nanos": ["Delta"],
+    "bit_packing_nanos": ["Bit Packing"],
+    "quantization_nanos": ["Quantization"],
+    "sum_nanos": ["Sum"],
+}
+xor_patch = {
+    "xor_nanos": ["XOR", "Bit Packing"],
+}
+segment_mapping = {
+    "Uncompressed": {
+        **default_mapping,
+    },
+    "RLE": {
+        **default_mapping,
+    },
+    "Gorilla": {
+        **default_mapping,
+        **xor_patch,
+    },
+    "Chimp": {
+        **default_mapping,
+        **xor_patch,
+    },
+    "Chimp128": {
+        **default_mapping,
+        **xor_patch,
+    },
+    "ElfOnChimp": {
+        **default_mapping,
+        **xor_patch,
+    },
+    "Elf": {
+        **default_mapping,
+        **xor_patch,
+    },
+    "BUFF": {
+        **default_mapping,
+        "bit_packing_nanos": ["Bit Packing", "Quantization", "Delta"],
+        "compare_insert_nanos": ["Compare", "Bit Packing", "Quantization", "Delta"],
+        "sum_nanos": ["Sum", "Bit Packing", "Quantization", "Delta"],
+    },
+    "DeltaSprintz": {
+        **default_mapping,
+        "decompression": ["Bit Packing", "ZigZag", "Quantization", "Delta"],
+        "compare_insert_nanos": [
+            "Compare",
+            "Bit Packing",
+            "ZigZag",
+            "Quantization",
+            "Delta",
+        ],
+    },
+    "Zstd": {
+        **default_mapping,
+    },
+    "Gzip": {
+        **default_mapping,
+    },
+    "Snappy": {
+        **default_mapping,
+    },
+    "FFIAlp": {
+        **default_mapping,
+    },
+}
+compression_methods = [
+    "Uncompressed",
+    "RLE",
+    "Gorilla",
+    "Chimp",
+    "Chimp128",
+    "ElfOnChimp",
+    "Elf",
+    "BUFF",
+    "DeltaSprintz",
+    "Zstd",
+    "Gzip",
+    "Snappy",
+    "FFIAlp",
+]
+mapped_processing_types = set(
+    "+".join(mapping)
+    for method in compression_methods
+    for mapping in segment_mapping[method].values()
+)
+
+
 # Function to calculate the ratios for each process
-def calculate_ratios(data: Dict[str, Any], total_time: float) -> Dict[str, float]:
-    ratios = {}
+def calculate_ratios(
+    method: str, data: Dict[str, Any], total_time: float
+) -> Dict[str, float]:
+    ratios = {key: 0.0 for key in mapped_processing_types}
     for key, value in data.items():
-        ratios[key] = (value / total_time) * 100  # Express as a percentage
+        key_mapped = "+".join(segment_mapping[method][key])
+        ratios[key_mapped] = (value / total_time) * 100  # Express as a percentage
     return ratios
 
 
@@ -181,12 +292,12 @@ def plot_relative_stacked_execution_time_ratios_for_methods(
     for method in methods:
         total_time = sum(data[method][dataset_index].values())
         ratios_by_method[method] = calculate_ratios(
-            data[method][dataset_index], total_time
+            method, data[method][dataset_index], total_time
         )
 
     # Identify processing types that are non-zero across all methods
     valid_processing_types = []
-    for processing_type in processing_types:
+    for processing_type in mapped_processing_types:
         if any(ratios_by_method[method][processing_type] > 0 for method in methods):
             valid_processing_types.append(processing_type)
 
@@ -218,6 +329,7 @@ def plot_relative_stacked_execution_time_ratios_for_methods(
     plt.legend(title="Processing Types", bbox_to_anchor=(1.05, 1), loc="upper left")
     plt.tight_layout()
     plt.savefig(output_path)
+    plt.close()
 
 
 def plot_absolute_stacked_execution_times_for_methods(
@@ -233,11 +345,16 @@ def plot_absolute_stacked_execution_times_for_methods(
     # Calculate the absolute time for each compression method
     times_by_method = {}
     for method in methods:
-        times_by_method[method] = data[method][dataset_index]
+        times_by_method[method] = {key: 0.0 for key in mapped_processing_types}
+        for processing_type in processing_types:
+            mapped_key = "+".join(segment_mapping[method][processing_type])
+            times_by_method[method][mapped_key] = data[method][dataset_index][
+                processing_type
+            ]
 
     # Identify processing types that are non-zero across all methods
     valid_processing_types = []
-    for processing_type in processing_types:
+    for processing_type in mapped_processing_types:
         if any(times_by_method[method][processing_type] > 0 for method in methods):
             valid_processing_types.append(processing_type)
 
@@ -269,6 +386,7 @@ def plot_absolute_stacked_execution_times_for_methods(
     plt.legend(title="Processing Types", bbox_to_anchor=(1.05, 1), loc="upper left")
     plt.tight_layout()
     plt.savefig(output_path)
+    plt.close()
 
 
 def plot_comparison(
@@ -369,23 +487,8 @@ def plot_combined_radar_chart(data_dict, title, labels, output_path):
     plt.close()
 
 
-compression_methods = [
-    "Uncompressed",
-    "RLE",
-    "Gorilla",
-    "Chimp",
-    "Chimp128",
-    "ElfOnChimp",
-    "Elf",
-    "BUFF",
-    "DeltaSprintz",
-    "Zstd",
-    "Gzip",
-    "Snappy",
-    "FFIAlp",
-]
-
 filter_methods = ["eq", "ne", *[f"greater_{i}th_percentile" for i in [10, 50, 90]]]
+
 
 def main():
     if len(sys.argv) < 2:
@@ -585,8 +688,7 @@ def main():
     max_throughput_df = pl.DataFrame(max_throughput_data)
     sum_throughput_df = pl.DataFrame(sum_throughput_data)
     filter_throughput_dfs = {
-        key: pl.DataFrame(filter_throughput_data[key])
-        for key in filter_methods
+        key: pl.DataFrame(filter_throughput_data[key]) for key in filter_methods
     }
     filter_materialize_throughput_dfs = {
         key: pl.DataFrame(filter_materialize_throughput_data[key])
@@ -782,20 +884,14 @@ def main():
     )
     plot_comparison(
         max_throughput_df.columns,
-        [
-            max_throughput_df[column].mean()
-            for column in max_throughput_df.columns
-        ],
+        [max_throughput_df[column].mean() for column in max_throughput_df.columns],
         "Average Max Throughput (bigger, better)",
         "Throughput (GB/s)",
         os.path.join(barchart_dir, "average_max_throughput.png"),
     )
     plot_comparison(
         sum_throughput_df.columns,
-        [
-            sum_throughput_df[column].mean()
-            for column in sum_throughput_df.columns
-        ],
+        [sum_throughput_df[column].mean() for column in sum_throughput_df.columns],
         "Average Sum Throughput (bigger, better)",
         "Throughput (GB/s)",
         os.path.join(barchart_dir, "average_sum_throughput.png"),
@@ -1001,7 +1097,12 @@ def main():
         map(
             lambda x: x[0],
             sorted(
-                zip(labels, np.array(filter_throughput_dfs["greater_10th_percentile"].mean().row(0))),
+                zip(
+                    labels,
+                    np.array(
+                        filter_throughput_dfs["greater_10th_percentile"].mean().row(0)
+                    ),
+                ),
                 key=lambda x: x[1],
                 reverse=True,
             ),
