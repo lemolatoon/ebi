@@ -213,6 +213,7 @@ def main():
                 dataset_out_dir,
                 f"throughput_per_target_vector.png",
             ),
+            note_str="*ALP utilizes SIMD instructions"
         )
 
         plot_comparison(
@@ -224,6 +225,7 @@ def main():
                 dataset_out_dir,
                 f"throughput_per_all_target_vectors.png",
             ),
+            note_str="*ALP utilizes SIMD instructions"
         )
 
     barchart_dir = os.path.join(out_dir, "barchart")
@@ -239,6 +241,7 @@ def main():
         "1-NN Average Throughput per Target Vector",
         "Throughput (GB/s)",
         os.path.join(barchart_dir, "average_throughput_per_target_vector.png"),
+        note_str="*ALP utilizes SIMD instructions"
     )
 
     plot_comparison(
@@ -250,6 +253,7 @@ def main():
         "1-NN Average Throughput per All Target Vectors",
         "Throughput (GB/s)",
         os.path.join(barchart_dir, "average_throughput_per_all_target_vectors.png"),
+        note_str="*ALP utilizes SIMD instructions"
     )
 
     plot_boxplot(
@@ -257,6 +261,7 @@ def main():
         "1-NN Throughput per Target Vector",
         "Throughput (GB/s)",
         os.path.join(boxplot_dir, "throughput_per_target_vector.png"),
+        note_str="*ALP utilizes SIMD instructions"
     )
 
     plot_boxplot(
@@ -264,6 +269,7 @@ def main():
         "1-NN Throughput per All Target Vectors",
         "Throughput (GB/s)",
         os.path.join(boxplot_dir, "throughput_per_all_target_vectors.png"),
+        note_str="*ALP utilizes SIMD instructions"
     )
 
     plot_boxplot(
@@ -271,6 +277,7 @@ def main():
         "Normalized Throughput per Target Vector",
         "Throughput * Vector Length (GB/s)",
         os.path.join(boxplot_dir, "normalized_throughput_per_target_vector.png"),
+        note_str="*ALP utilizes SIMD instructions"
     )
 
     plot_boxplot(
@@ -278,6 +285,7 @@ def main():
         "Accuracy",
         "Accuracy",
         os.path.join(boxplot_dir, "accuracy.png"),
+        note_str="*ALP utilizes SIMD instructions"
     )
 
     plot_boxplot(
@@ -285,6 +293,7 @@ def main():
         "Accuracy on Buff's Different Precision",
         "Accuracy",
         os.path.join(boxplot_dir, "accuracy_on_buffs_different_precision.png"),
+        note_str="*ALP utilizes SIMD instructions"
     )
 
     for precision in set(dataset_to_precision.values()):
@@ -295,6 +304,7 @@ def main():
             os.path.join(
                 boxplot_dir, f"throughput_per_target_vector_precision_{precision}.png"
             ),
+            note_str="*ALP utilizes SIMD instructions"
         )
 
 
