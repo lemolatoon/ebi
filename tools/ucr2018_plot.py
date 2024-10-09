@@ -103,6 +103,10 @@ def main():
         for method_name in compression_methods_with_precision
     }
 
+    accuracy_per_methods: Dict[str, List[float]] = {
+        method_name: [] for method_name in compression_methods_with_precision
+    }
+
     dataset_to_precision = {
         dataset_name: int(
             math.log10(
@@ -177,6 +181,8 @@ def main():
                 dataset_to_precision[dataset_name]
             ][method_name].append(average_throughput_per_target_vector)
 
+            accuracy_per_methods[method_name].append(dataset_result["accuracy"])
+
             # print(f"Average elapsed time: {average_elapsed_time} ns")
 
             # print()
@@ -188,6 +194,7 @@ def main():
         knn1_throughput_per_all_target_vectors_data
     )
     normalized_throughput_per_method_df = pl.DataFrame(normalized_throughput_per_method)
+    accuracy_per_methods_df = pl.DataFrame(accuracy_per_methods)
 
     average_throughput_per_target_vector_df_per_precision = {
         precision: pl.DataFrame(data)
@@ -264,6 +271,20 @@ def main():
         "Normalized Throughput per Target Vector",
         "Throughput * Vector Length (GB/s)",
         os.path.join(boxplot_dir, "normalized_throughput_per_target_vector.png"),
+    )
+
+    plot_boxplot(
+        accuracy_per_methods_df,
+        "Accuracy",
+        "Accuracy",
+        os.path.join(boxplot_dir, "accuracy.png"),
+    )
+
+    plot_boxplot(
+        accuracy_per_methods_df.select(["BUFF", *[f"BUFF_{p}" for p in precisions]]),
+        "Accuracy on Buff's Different Precision",
+        "Accuracy",
+        os.path.join(boxplot_dir, "accuracy_on_buffs_different_precision.png"),
     )
 
     for precision in set(dataset_to_precision.values()):
