@@ -2174,12 +2174,17 @@ fn matrix_command(
 
     rng.fill(&mut target_matrix[..]);
 
+    /// Map value from [0, 1) to [-4, 4)
+    fn map_value(x: f64) -> f64 {
+        (x - 0.5) * 8.0
+    }
+
     data_matrices
         .iter_mut()
-        .for_each(|x| *x = round_by_scale(*x, scale as usize));
+        .for_each(|x| *x = round_by_scale(map_value(*x), scale as usize));
     target_matrix
         .iter_mut()
-        .for_each(|x| *x = round_by_scale(*x, scale as usize));
+        .for_each(|x| *x = round_by_scale(map_value(*x), scale as usize));
 
     match DEFAULT_CHUNK_OPTION {
         ChunkOption::RecordCount(c) => assert!(
