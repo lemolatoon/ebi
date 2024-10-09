@@ -1,7 +1,9 @@
+import copy
 import json
 import os
 from pathlib import Path
 import sys
+from typing import Callable
 import numpy as np
 import polars as pl
 import matplotlib.pyplot as plt
@@ -14,6 +16,7 @@ import itertools
 from typing_extensions import (
     Any,
     Generic,
+    Literal,
     Mapping,
     TypeVar,
     TypedDict,
@@ -142,7 +145,37 @@ class AllOutput(TypedDict):
     __root__: Dict[str, Dict[str, AllOutputInner]]
 
 
-default_mapping = {
+CompressionMethodKeys = Literal[
+    "Uncompressed",
+    "RLE",
+    "Gorilla",
+    "Chimp",
+    "Chimp128",
+    "ElfOnChimp",
+    "Elf",
+    "BUFF",
+    "DeltaSprintz",
+    "Zstd",
+    "Gzip",
+    "Snappy",
+    "FFIAlp",
+]
+
+
+class SegmentLabelMapping(TypedDict):
+    io_read_nanos: List[str]
+    io_write_nanos: List[str]
+    xor_nanos: List[str]
+    others: List[str]
+    bit_packing_nanos: List[str]
+    decompression_nanos: List[str]
+    compare_insert_nanos: List[str]
+    delta_nanos: List[str]
+    quantization_nanos: List[str]
+    sum_nanos: List[str]
+
+
+default_mapping: SegmentLabelMapping = {
     "io_read_nanos": ["IO Read"],
     "io_write_nanos": ["IO Write"],
     "xor_nanos": ["XOR"],
@@ -158,7 +191,7 @@ default_mapping = {
 xor_patch = {
     "xor_nanos": ["XOR", "Bit Packing"],
 }
-segment_mapping = {
+segment_mapping: Dict[CompressionMethodKeys, SegmentLabelMapping] = {
     "Uncompressed": {
         **default_mapping,
     },
@@ -193,7 +226,7 @@ segment_mapping = {
     },
     "DeltaSprintz": {
         **default_mapping,
-        "decompression": ["Bit Packing", "ZigZag", "Quantization", "Delta"],
+        "decompression_nanos": ["Bit Packing", "ZigZag", "Quantization", "Delta"],
         "compare_insert_nanos": [
             "Compare",
             "Bit Packing",
@@ -214,8 +247,8 @@ segment_mapping = {
     "FFIAlp": {
         **default_mapping,
     },
-}
-compression_methods = [
+}  # type: ignore
+compression_methods: List[CompressionMethodKeys] = [
     "Uncompressed",
     "RLE",
     "Gorilla",
@@ -231,18 +264,19 @@ compression_methods = [
     "FFIAlp",
 ]
 mapped_processing_types = set(
-    "+".join(mapping)
+    "+".join(segment_mapping[method][mapping_key])
     for method in compression_methods
-    for mapping in segment_mapping[method].values()
+    for mapping_key in segment_mapping[method]
 )
 
 
 # Function to calculate the ratios for each process
 def calculate_ratios(
-    method: str, data: Dict[str, Any], total_time: float
+    method: str, data: ExecutionTimesWithOthers, total_time: float
 ) -> Dict[str, float]:
     ratios = {key: 0.0 for key in mapped_processing_types}
-    for key, value in data.items():
+    for key in data.keys():
+        value = data[key]
         key_mapped = "+".join(segment_mapping[method][key])
         ratios[key_mapped] = (value / total_time) * 100  # Express as a percentage
     return ratios
@@ -260,6 +294,7 @@ def get_color_exe(label: str) -> tuple[float, float, float, float]:
 
     return color_map[label]
 
+
 def add_notes_to_plot(
     fig: Figure,
     note_str: str | None,
@@ -269,6 +304,7 @@ def add_notes_to_plot(
 ):
     if note_str is not None:
         fig.text(x_pos, y_pos, note_str, ha="right", va="bottom", fontsize=fontsize)
+
 
 def plot_stacked_execution_time_ratios_for_methods(
     # methods to dataset to execution times
@@ -358,16 +394,24 @@ def plot_absolute_stacked_execution_times_for_methods(
     dataset_name: str,
     output_path: str,
     note_str: str | None = None,
+    patch_label_mapping: Callable[
+        [Dict[CompressionMethodKeys, SegmentLabelMapping]], Any
+    ]
+    | None = None,
 ):
-    methods = list(data.keys())
+    methods: List[CompressionMethodKeys] = list(data.keys())  # type: ignore
     processing_types = list(data[methods[0]][0].keys())
+    patched_segment_mapping = copy.deepcopy(segment_mapping)
+    if patch_label_mapping is not None:
+        patch_label_mapping(patched_segment_mapping)
 
     # Calculate the absolute time for each compression method
     times_by_method = {}
     for method in methods:
         times_by_method[method] = {key: 0.0 for key in mapped_processing_types}
         for processing_type in processing_types:
-            mapped_key = "+".join(segment_mapping[method][processing_type])
+            labels = patched_segment_mapping[method][processing_type]
+            mapped_key = "+".join(labels)
             times_by_method[method][mapped_key] = data[method][dataset_index][
                 processing_type
             ]
@@ -401,7 +445,7 @@ def plot_absolute_stacked_execution_times_for_methods(
 
     # Add chart decorations
     plt.xlabel("Compression Methods")
-    plt.ylabel("Execution Time (seconds)")  # y-axis now reflects absolute time
+    plt.ylabel("Execution Time (ns)")  # y-axis now reflects absolute time
     plt.title(f"Execution Times for {dataset_name} by Compression Method")
     plt.xticks(index, methods, rotation=45)
     plt.legend(title="Processing Types", bbox_to_anchor=(1.05, 1), loc="upper left")

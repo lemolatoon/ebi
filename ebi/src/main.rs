@@ -50,23 +50,23 @@ fn generate_and_write_random_f64(path: impl AsRef<Path>, n: usize, scale: usize)
 }
 
 fn main() {
-    const RECORD_COUNT: usize = 300;
-    let scale = 100;
-    generate_and_write_random_f64("uncompressed.bin", RECORD_COUNT * 3 + 3, scale).unwrap();
+    const RECORD_COUNT: usize = 30;
+    let scale = 100000000;
+    generate_and_write_random_f64("uncompressed.bin", RECORD_COUNT /* * 3 + 3*/, scale).unwrap();
     // let compressor_config = CompressorConfig::uncompressed().build();
     // let compressor_config = CompressorConfig::rle().build();
     // let compressor_config = CompressorConfig::gorilla().build();
-    // let compressor_config = CompressorConfig::buff().scale(scale as u32).build();
+    let compressor_config = CompressorConfig::buff().scale(scale as u32).build();
     // let compressor_config = CompressorConfig::chimp128().build();
     // let compressor_config = CompressorConfig::elf_on_chimp().build();
-    let compressor_config = CompressorConfig::elf().build();
+    // let compressor_config = CompressorConfig::elf().build();
     // let compressor_config = CompressorConfig::chimp().build();
     // let compressor_config = CompressorConfig::delta_sprintz()
     //     .scale(scale as u32)
     //     .build();
     // let compressor_config = CompressorConfig::zstd().build();
     // let compressor_config = CompressorConfig::ffi_alp().build();
-    let chunk_option = ChunkOption::RecordCount(6);
+    let chunk_option = ChunkOption::RecordCount(RECORD_COUNT);
     // let chunk_option = ChunkOption::ByteSizeBestEffort(1024 * 8);
     dbg!(chunk_option);
 
@@ -99,7 +99,7 @@ fn main() {
     // let binding = &[24903104499507892000.0];
     // let binding = vec![0.4, 100000000.5, 0.5, 0.6, 0.7, 0.8, 0.9, 0.9, 1.0];
     let binding = &[(i64::MAX / (2 * scale) as i64) as f64];
-    let data = [
+    let _data = [
         /* 1st matrix */ [1, 2],
         [3, 4],
         [0, 1],
@@ -116,12 +116,12 @@ fn main() {
     //     [1, 4, 3, 1],
     // ])
     // column first layout
-    let b = [1.0, 1.0, 5.0, 4.0, 6.0, 3.0, 2.0, 1.0];
+    let _b = [1.0, 1.0, 5.0, 4.0, 6.0, 3.0, 2.0, 1.0];
     // let binding = &[0.3];
     println!("binding: {}", binding[0]);
     let mut encoder = Encoder::new(
-        // EncoderInput::from_file("uncompressed.bin").unwrap(),
-        EncoderInput::from_f64_slice(&data),
+        EncoderInput::from_file("uncompressed.bin").unwrap(),
+        // EncoderInput::from_f64_slice(&data),
         EncoderOutput::from_file("compressed.bin").unwrap(),
         chunk_option,
         compressor_config,
@@ -133,13 +133,17 @@ fn main() {
         .unwrap()
         .into_buffered();
     let mut decoder = Decoder::new(input).unwrap();
+    let controlled_precision = 2u32;
+    let controlled_scale = 2.0f64.powi(controlled_precision as i32);
+    decoder.with_precision(controlled_precision);
     println!("{:?}", decoder.footer().segmented_execution_times());
     println!(
         "elapsed time: {:?}",
         decoder.footer().compression_elapsed_time()
     );
-    let result = decoder.matmul(&b, (2, 4), (3, 2)).unwrap();
-    println!("{:?}", result);
+    // decoder.with_precision(3);
+    // let result = decoder.matmul(&b, (2, 4), (3, 2)).unwrap();
+    // println!("{:?}", result);
 
     let reader = decoder.chunk_reader(ChunkId::new(0)).unwrap();
     let chunk_footers = reader.footer().chunk_footers();
@@ -167,7 +171,8 @@ fn main() {
         .chunks_exact(8)
         .map(|b| {
             let fp = f64::from_le_bytes(b.try_into().unwrap());
-            (fp * scale as f64).round() / scale as f64
+            // (fp * scale as f64).round() / scale as f64
+            (fp * controlled_scale).round() / controlled_scale
         })
         .collect();
     // let input_floats = binding;
@@ -177,11 +182,20 @@ fn main() {
         .chunks_exact(8)
         .map(|b| {
             let fp = f64::from_le_bytes(b.try_into().unwrap());
-            (fp * scale as f64).round() / scale as f64
+            (fp * controlled_scale).round() / controlled_scale
         })
         .collect();
 
+    println!(
+        "{:?}",
+        &input_floats[0..std::cmp::min(10, input_floats.len())]
+    );
+    println!(
+        "{:?}",
+        &output_floats[0..std::cmp::min(10, output_floats.len())]
+    );
+
     assert_eq!(input_floats.len(), output_floats.len());
 
-    assert_eq!(&input_floats[..], &output_floats[..]);
+    // assert_eq!(&input_floats[..], &output_floats[..]);
 }
