@@ -97,6 +97,7 @@ def main():
         method_name: [None] * n_dataset
         for method_name in compression_methods_with_precision
     }
+
     knn1_throughput_per_all_target_vectors_data: dict[str, Optional[float]] = {
         method_name: [None] * n_dataset
         for method_name in compression_methods_with_precision
@@ -109,6 +110,15 @@ def main():
             )
         )
         for (dataset_name, dataset_result) in results["BUFF"]["results"].items()
+    }
+
+    knn1_throughput_per_target_vector_data_per_precision: Dict[
+        int, Dict[str, List[Optional[float]]]
+    ] = {
+        precision: {
+            method_name: [] for method_name in compression_methods_with_precision
+        }
+        for precision in set(dataset_to_precision.values())
     }
 
     # throughput_per_vector * vector_length
@@ -163,6 +173,10 @@ def main():
                 average_throughput_per_all_vector
             )
 
+            knn1_throughput_per_target_vector_data_per_precision[
+                dataset_to_precision[dataset_name]
+            ][method_name].append(average_throughput_per_target_vector)
+
             # print(f"Average elapsed time: {average_elapsed_time} ns")
 
             # print()
@@ -174,6 +188,11 @@ def main():
         knn1_throughput_per_all_target_vectors_data
     )
     normalized_throughput_per_method_df = pl.DataFrame(normalized_throughput_per_method)
+
+    average_throughput_per_target_vector_df_per_precision = {
+        precision: pl.DataFrame(data)
+        for precision, data in knn1_throughput_per_target_vector_data_per_precision.items()
+    }
 
     for dataset_index, dataset_name in enumerate(tqdm(dataset_names)):
         dataset_out_dir = os.path.join(out_dir, dataset_name)
@@ -246,6 +265,16 @@ def main():
         "Throughput * Vector Length (GB/s)",
         os.path.join(boxplot_dir, "normalized_throughput_per_target_vector.png"),
     )
+
+    for precision in set(dataset_to_precision.values()):
+        plot_boxplot(
+            average_throughput_per_target_vector_df_per_precision[precision],
+            f"1-NN Throughput per Target Vector (Precision: {precision})",
+            "Throughput (GB/s)",
+            os.path.join(
+                boxplot_dir, f"throughput_per_target_vector_precision_{precision}.png"
+            ),
+        )
 
 
 if __name__ == "__main__":
