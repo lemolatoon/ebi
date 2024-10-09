@@ -11,8 +11,13 @@ from tqdm import tqdm
 from plot import (
     CompressionConfig,
     ExecutionTimes,
+    ExecutionTimesWithOthers,
+    SegmentLabelMapping,
+    CompressionMethodKeys,
     compression_methods,
+    plot_absolute_stacked_execution_times_for_methods,
     plot_boxplot,
+    execution_times_keys,
     plot_comparison,
 )
 import polars as pl
@@ -98,12 +103,20 @@ def main():
         for method_name in compression_methods_with_precision
     }
 
+    knn1_elapsed_time_per_target_vector_data: dict[str, List[Optional[float]]] = {
+        method_name: [None] * n_dataset
+        for method_name in compression_methods_with_precision
+    }
+
     knn1_throughput_per_all_target_vectors_data: dict[str, Optional[float]] = {
         method_name: [None] * n_dataset
         for method_name in compression_methods_with_precision
     }
 
     accuracy_per_methods: Dict[str, List[float]] = {
+        method_name: [] for method_name in compression_methods_with_precision
+    }
+    execution_times_per_methods: Dict[str, List[ExecutionTimesWithOthers]] = {
         method_name: [] for method_name in compression_methods_with_precision
     }
 
@@ -135,12 +148,13 @@ def main():
 
     for method_name, result in results.items():
         print(f"Method: {method_name}")
-        print(f"Start time: {result['start_time']}")
-        print(f"End time: {result['end_time']}")
+        # print(f"Start time: {result['start_time']}")
+        # print(f"End time: {result['end_time']}")
         # print(f"Scale fallbacked datasets: {result['scale_fallbacked_dataset']}")
         # print()
 
-        for i, (dataset_name, dataset_result) in enumerate(result["results"].items()):
+        for i, dataset_name in enumerate(dataset_names):
+            dataset_result = result["results"][dataset_name]
             # print(f"Dataset: {dataset_name}, precision: {dataset_to_precision[dataset_name]}")
             # print(f"Config: {dataset_result['config']}")
             # print(f"Compression config: {dataset_result['compression_config']}")
@@ -156,6 +170,10 @@ def main():
             )
             average_elapsed_time_per_all_vector = fmean(
                 [sum(times) for times in dataset_result["elapsed_time_nanos"]]
+            )
+
+            knn1_elapsed_time_per_target_vector_data[method_name][i] = (
+                average_elapsed_time_per_vector
             )
 
             average_throughput_per_target_vector = (
@@ -183,15 +201,26 @@ def main():
 
             accuracy_per_methods[method_name].append(dataset_result["accuracy"])
 
-            # print(f"Average elapsed time: {average_elapsed_time} ns")
+            knn1_execution_times: ExecutionTimesWithOthers = {}  # type: ignore
+            for key in execution_times_keys:
+                knn1_execution_times[key] = fmean(
+                    fmean(map(lambda time: time[key], times))
+                    for times in dataset_result["execution_times"]
+                )
 
-            # print()
+            knn1_execution_times["others"] = average_elapsed_time_per_vector - sum(
+                knn1_execution_times.values()
+            )
+            execution_times_per_methods[method_name].append(knn1_execution_times)
 
     average_throughput_per_target_vector_df = pl.DataFrame(
         knn1_throughput_per_target_vector_data
     )
     average_throughput_per_all_target_vectors_df = pl.DataFrame(
         knn1_throughput_per_all_target_vectors_data
+    )
+    average_elapsed_time_per_vector_df = pl.DataFrame(
+        knn1_elapsed_time_per_target_vector_data
     )
     normalized_throughput_per_method_df = pl.DataFrame(normalized_throughput_per_method)
     accuracy_per_methods_df = pl.DataFrame(accuracy_per_methods)
@@ -213,7 +242,7 @@ def main():
                 dataset_out_dir,
                 f"throughput_per_target_vector.png",
             ),
-            note_str="*ALP utilizes SIMD instructions"
+            note_str="*ALP utilizes SIMD instructions",
         )
 
         plot_comparison(
@@ -225,7 +254,36 @@ def main():
                 dataset_out_dir,
                 f"throughput_per_all_target_vectors.png",
             ),
-            note_str="*ALP utilizes SIMD instructions"
+            note_str="*ALP utilizes SIMD instructions",
+        )
+
+        plot_comparison(
+            average_elapsed_time_per_vector_df.columns,
+            average_elapsed_time_per_vector_df.row(dataset_index),
+            f"{dataset_name}: 1-NN Average Elapsed Time per Target Vector",
+            "Elapsed Time (ns)",
+            os.path.join(
+                dataset_out_dir,
+                f"elapsed_time_per_target_vector.png",
+            ),
+            note_str="*ALP utilizes SIMD instructions",
+        )
+
+        def patch_label_mapping(d: Dict[CompressionMethodKeys, SegmentLabelMapping]):
+            d["BUFF"]["sum_nanos"] = ["Sum"]
+            for precision in precisions:
+                d[f"BUFF_{precision}"] = d["BUFF"]  # type: ignore
+
+        plot_absolute_stacked_execution_times_for_methods(
+            execution_times_per_methods,
+            dataset_index,
+            dataset_name,
+            os.path.join(
+                dataset_out_dir,
+                f"stacked_execution_times.png",
+            ),
+            patch_label_mapping=patch_label_mapping,
+            note_str="*ALP utilizes SIMD instructions",
         )
 
     barchart_dir = os.path.join(out_dir, "barchart")
@@ -241,7 +299,7 @@ def main():
         "1-NN Average Throughput per Target Vector",
         "Throughput (GB/s)",
         os.path.join(barchart_dir, "average_throughput_per_target_vector.png"),
-        note_str="*ALP utilizes SIMD instructions"
+        note_str="*ALP utilizes SIMD instructions",
     )
 
     plot_comparison(
@@ -253,7 +311,7 @@ def main():
         "1-NN Average Throughput per All Target Vectors",
         "Throughput (GB/s)",
         os.path.join(barchart_dir, "average_throughput_per_all_target_vectors.png"),
-        note_str="*ALP utilizes SIMD instructions"
+        note_str="*ALP utilizes SIMD instructions",
     )
 
     plot_boxplot(
@@ -261,7 +319,7 @@ def main():
         "1-NN Throughput per Target Vector",
         "Throughput (GB/s)",
         os.path.join(boxplot_dir, "throughput_per_target_vector.png"),
-        note_str="*ALP utilizes SIMD instructions"
+        note_str="*ALP utilizes SIMD instructions",
     )
 
     plot_boxplot(
@@ -269,7 +327,7 @@ def main():
         "1-NN Throughput per All Target Vectors",
         "Throughput (GB/s)",
         os.path.join(boxplot_dir, "throughput_per_all_target_vectors.png"),
-        note_str="*ALP utilizes SIMD instructions"
+        note_str="*ALP utilizes SIMD instructions",
     )
 
     plot_boxplot(
@@ -277,7 +335,7 @@ def main():
         "Normalized Throughput per Target Vector",
         "Throughput * Vector Length (GB/s)",
         os.path.join(boxplot_dir, "normalized_throughput_per_target_vector.png"),
-        note_str="*ALP utilizes SIMD instructions"
+        note_str="*ALP utilizes SIMD instructions",
     )
 
     plot_boxplot(
@@ -285,7 +343,7 @@ def main():
         "Accuracy",
         "Accuracy",
         os.path.join(boxplot_dir, "accuracy.png"),
-        note_str="*ALP utilizes SIMD instructions"
+        note_str="*ALP utilizes SIMD instructions",
     )
 
     plot_boxplot(
@@ -293,7 +351,7 @@ def main():
         "Accuracy on Buff's Different Precision",
         "Accuracy",
         os.path.join(boxplot_dir, "accuracy_on_buffs_different_precision.png"),
-        note_str="*ALP utilizes SIMD instructions"
+        note_str="*ALP utilizes SIMD instructions",
     )
 
     for precision in set(dataset_to_precision.values()):
@@ -304,7 +362,7 @@ def main():
             os.path.join(
                 boxplot_dir, f"throughput_per_target_vector_precision_{precision}.png"
             ),
-            note_str="*ALP utilizes SIMD instructions"
+            note_str="*ALP utilizes SIMD instructions",
         )
 
 
