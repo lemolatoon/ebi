@@ -108,6 +108,8 @@ pub struct UCR2018ForAllCompressionMethodsResult {
     pub start_time: chrono::DateTime<chrono::Utc>,
     /// End time of the experiment
     pub end_time: chrono::DateTime<chrono::Utc>,
+    pub dataset_to_vector_length: HashMap<String, usize>,
+    pub dataset_to_scale: HashMap<String, u32>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

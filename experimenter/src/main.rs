@@ -1982,6 +1982,27 @@ fn ucr2018_command(
             .into(),
     ];
 
+    let mut dataset_to_vector_length = HashMap::new();
+
+    for dataset_entry in tqdm(dataset_entries.iter()).desc(Some("dataset")) {
+        if !dataset_entry.is_dir() {
+            continue;
+        }
+
+        let dataset_name = dataset_entry
+            .file_name()
+            .unwrap()
+            .to_string_lossy()
+            .to_string();
+        let test_file = dataset_entry.join(format!("{}_TEST.tsv", dataset_name));
+        let test_data = slurp_file(&test_file, dataset_scales[&dataset_name] as i32);
+        let test_vectors = test_data
+            .iter()
+            .map(|x| x.pixels.clone())
+            .collect::<Vec<_>>();
+        dataset_to_vector_length.insert(dataset_name.clone(), test_vectors[0].len());
+    }
+
     let mut results_for_all_ucr2018 = HashMap::new();
     for config in tqdm(configs).desc(Some("compression_method")) {
         let start_time = chrono::Utc::now();
@@ -2124,6 +2145,8 @@ fn ucr2018_command(
     let end_time = chrono::Utc::now();
     let result_for_all = UCR2018ForAllCompressionMethodsResult {
         results: results_for_all_ucr2018,
+        dataset_to_vector_length,
+        dataset_to_scale: dataset_scales,
         start_time,
         end_time,
     };

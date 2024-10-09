@@ -1,4 +1,5 @@
 import json
+import math
 import os
 from pathlib import Path
 from statistics import fmean
@@ -7,13 +8,21 @@ from typing import TypedDict, List, Dict, Optional
 from datetime import datetime
 
 from tqdm import tqdm
-from plot import CompressionConfig, ExecutionTimes, compression_methods, plot_boxplot, plot_comparison
+from plot import (
+    CompressionConfig,
+    ExecutionTimes,
+    compression_methods,
+    plot_boxplot,
+    plot_comparison,
+)
 import polars as pl
+
 
 class UCR2018Config(TypedDict):
     n: int
     precision: int
     k: int
+
 
 class CompressStatistics(TypedDict):
     compression_elapsed_time_nano_secs: int
@@ -22,6 +31,7 @@ class CompressStatistics(TypedDict):
     compressed_size_chunk_only: int
     compression_ratio: float
     compression_ratio_chunk_only: float
+
 
 class UCR2018ResultForOneDataset(TypedDict):
     dataset_name: str
@@ -32,11 +42,13 @@ class UCR2018ResultForOneDataset(TypedDict):
     accuracy: float
     compression_statistics: CompressStatistics
 
+
 class UCR2018Result(TypedDict):
     results: Dict[str, UCR2018ResultForOneDataset]
     scale_fallbacked_dataset: Optional[List[str]]
     start_time: datetime
     end_time: datetime
+
 
 def load_json_files_from_directory(directory_path: str) -> Dict[str, UCR2018Result]:
     if not os.path.isdir(directory_path):
@@ -47,12 +59,20 @@ def load_json_files_from_directory(directory_path: str) -> Dict[str, UCR2018Resu
     for filename in os.listdir(directory_path):
         if filename.endswith(".json"):
             file_path = os.path.join(directory_path, filename)
-            with open(file_path, 'r') as file:
+            with open(file_path, "r") as file:
                 data = json.load(file)
                 key = os.path.splitext(filename)[0]  # Remove the .json extension
                 results[key] = data
 
     return results
+
+
+precisions = [1, 3, 5, 8]
+compression_methods_with_precision = [
+    *compression_methods,
+    *[f"BUFF_{p}" for p in precisions],
+]
+
 
 def main():
     if len(sys.argv) < 2:
@@ -69,14 +89,35 @@ def main():
     n_dataset: Optional[int] = None
     dataset_names: Optional[List[str]] = None
     for method_name, result in results.items():
-        dataset_names = list(result['results'].keys())
+        dataset_names = list(result["results"].keys())
         n_dataset = len(dataset_names)
         break
 
     knn1_throughput_per_target_vector_data: dict[str, List[Optional[float]]] = {
-        method_name: [None] * n_dataset for method_name in compression_methods
+        method_name: [None] * n_dataset
+        for method_name in compression_methods_with_precision
     }
-    knn1_throughput_per_all_target_vectors_data: dict[str, Optional[float]] = {method_name: [None] * n_dataset for method_name in compression_methods}
+    knn1_throughput_per_all_target_vectors_data: dict[str, Optional[float]] = {
+        method_name: [None] * n_dataset
+        for method_name in compression_methods_with_precision
+    }
+
+    dataset_to_precision = {
+        dataset_name: int(
+            math.log10(
+                dataset_result["compression_config"]["compressor_config"]["scale"]
+            )
+        )
+        for (dataset_name, dataset_result) in results["BUFF"]["results"].items()
+    }
+
+    # throughput_per_vector * vector_length
+    normalized_throughput_per_method: Dict[str, List[float]] = {
+        method_name: [] for method_name in compression_methods_with_precision
+    }
+
+    with open("dataset_to_vector_length.json", "r") as json_file:
+        dataset_to_vector_length: Dict[str, int] = json.load(json_file)
 
     for method_name, result in results.items():
         print(f"Method: {method_name}")
@@ -85,31 +126,54 @@ def main():
         # print(f"Scale fallbacked datasets: {result['scale_fallbacked_dataset']}")
         # print()
 
-        for i, (dataset_name, dataset_result) in enumerate(result['results'].items()):
-            # print(f"Dataset: {dataset_name}")
+        for i, (dataset_name, dataset_result) in enumerate(result["results"].items()):
+            # print(f"Dataset: {dataset_name}, precision: {dataset_to_precision[dataset_name]}")
             # print(f"Config: {dataset_result['config']}")
             # print(f"Compression config: {dataset_result['compression_config']}")
             # print(f"Accuracy: {dataset_result['accuracy']}")
             # print(f"Compression statistics: {dataset_result['compression_statistics']}")
 
-            original_dataset_size = dataset_result['compression_statistics']['uncompressed_size']
+            original_dataset_size = dataset_result["compression_statistics"][
+                "uncompressed_size"
+            ]
 
-            average_elapsed_time_per_vector = fmean([fmean(times) for times in dataset_result['elapsed_time_nanos']])
-            average_elapsed_time_per_all_vector = fmean([sum(times) for times in dataset_result['elapsed_time_nanos']])
+            average_elapsed_time_per_vector = fmean(
+                [fmean(times) for times in dataset_result["elapsed_time_nanos"]]
+            )
+            average_elapsed_time_per_all_vector = fmean(
+                [sum(times) for times in dataset_result["elapsed_time_nanos"]]
+            )
 
-            average_throughput_per_target_vector = original_dataset_size / average_elapsed_time_per_vector 
-            average_throughput_per_all_vector = original_dataset_size / average_elapsed_time_per_all_vector
+            average_throughput_per_target_vector = (
+                original_dataset_size / average_elapsed_time_per_vector
+            )
+            average_throughput_per_all_vector = (
+                original_dataset_size / average_elapsed_time_per_all_vector
+            )
 
+            normalized_throughput_per_method[method_name].append(
+                average_throughput_per_target_vector
+                * dataset_to_vector_length[dataset_name]
+            )
 
-            knn1_throughput_per_target_vector_data[method_name][i] = average_throughput_per_target_vector
-            knn1_throughput_per_all_target_vectors_data[method_name][i] = average_throughput_per_all_vector
+            knn1_throughput_per_target_vector_data[method_name][i] = (
+                average_throughput_per_target_vector
+            )
+            knn1_throughput_per_all_target_vectors_data[method_name][i] = (
+                average_throughput_per_all_vector
+            )
 
             # print(f"Average elapsed time: {average_elapsed_time} ns")
 
             # print()
-        
-    average_throughput_per_target_vector_df = pl.DataFrame(knn1_throughput_per_target_vector_data)
-    average_throughput_per_all_target_vectors_df = pl.DataFrame(knn1_throughput_per_all_target_vectors_data)
+
+    average_throughput_per_target_vector_df = pl.DataFrame(
+        knn1_throughput_per_target_vector_data
+    )
+    average_throughput_per_all_target_vectors_df = pl.DataFrame(
+        knn1_throughput_per_all_target_vectors_data
+    )
+    normalized_throughput_per_method_df = pl.DataFrame(normalized_throughput_per_method)
 
     for dataset_index, dataset_name in enumerate(tqdm(dataset_names)):
         dataset_out_dir = os.path.join(out_dir, dataset_name)
@@ -176,7 +240,12 @@ def main():
         os.path.join(boxplot_dir, "throughput_per_all_target_vectors.png"),
     )
 
-    
+    plot_boxplot(
+        normalized_throughput_per_method_df,
+        "Normalized Throughput per Target Vector",
+        "Throughput * Vector Length (GB/s)",
+        os.path.join(boxplot_dir, "normalized_throughput_per_target_vector.png"),
+    )
 
 
 if __name__ == "__main__":
