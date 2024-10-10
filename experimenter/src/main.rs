@@ -2,7 +2,7 @@ use either::Either;
 use experimenter::{
     get_appropriate_scale, AllOutput, AllOutputInner, CompressStatistics, CompressionConfig,
     FilterConfig, FilterFamilyOutput, FilterMaterializeConfig, MaterializeConfig, MatrixResult,
-    MaxConfig, Output, OutputWrapper, SumConfig, UCR2018Config,
+    MaxConfig, Output, OutputWrapper, SumConfig, UCR2018Config, UCR2018DecompressionResult,
     UCR2018ForAllCompressionMethodsResult, UCR2018Result, UCR2018ResultForOneDataset,
 };
 use glob::glob;
@@ -28,6 +28,7 @@ use ebi::{
     compressor::CompressorConfig,
     decoder::query::{Predicate, Range, RangeValue},
     encoder::ChunkOption,
+    time::SerializableSegmentedExecutionTimes,
 };
 
 #[derive(Parser, Debug, Clone)]
@@ -445,8 +446,12 @@ fn main() -> anyhow::Result<()> {
             dir_number += 1;
         };
 
+        // without controlled precision support
+        let output = ucr2018_command(input_dir, 5, 1, -1, false)?;
+        save_ucr2018_json(output, &unique_output_dir, None)?;
+
         for precision in tqdm(precisions).desc(Some("Precision")) {
-            let output = ucr2018_command(input_dir, 5, 1, precision as i32)?;
+            let output = ucr2018_command(input_dir, 5, 1, precision as i32, true)?;
             save_ucr2018_json(output, &unique_output_dir, Some(precision))?;
         }
 
@@ -1903,12 +1908,17 @@ fn ucr2018_command(
     n: usize,
     k: usize,
     precision: i32,
+    do_with_only_compression_methods_with_controlled_precision_support: bool,
 ) -> anyhow::Result<UCR2018ForAllCompressionMethodsResult> {
     let start_time = chrono::Utc::now();
     anyhow::ensure!(k == 1, "k must be 1");
     anyhow::ensure!(
         precision >= -1,
         "precision must be greater than or equal to -1"
+    );
+    anyhow::ensure!(
+        do_with_only_compression_methods_with_controlled_precision_support || precision == -1,
+        "precision must be -1 if do_with_only_compression_methods_with_controlled_precision_support is false"
     );
     if precision == -1 {
         println!("Precision is -1, It means the precision will be automatically detected.");
@@ -1960,27 +1970,30 @@ fn ucr2018_command(
     }
     dbg!(&dataset_scales);
 
-    let configs: Vec<CompressorConfig> = vec![
-        // CompressorConfig::uncompressed().build().into(),
-        // CompressorConfig::chimp128().build().into(),
-        // CompressorConfig::chimp().build().into(),
-        // CompressorConfig::elf_on_chimp().build().into(),
-        // CompressorConfig::elf().build().into(),
-        // CompressorConfig::gorilla().build().into(),
-        // CompressorConfig::rle().build().into(),
-        // CompressorConfig::zstd().build().into(),
-        // CompressorConfig::gzip().build().into(),
-        // CompressorConfig::snappy().build().into(),
-        // CompressorConfig::ffi_alp().build().into(),
-        // CompressorConfig::delta_sprintz()
-        //     .scale(precision as u32)
-        //     .build()
-        //     .into(),
-        CompressorConfig::buff()
-            .scale(precision as u32)
-            .build()
-            .into(),
-    ];
+    let mut configs: Vec<CompressorConfig> = vec![CompressorConfig::buff()
+        .scale(0) // scale will be set later
+        .build()
+        .into()];
+
+    if !do_with_only_compression_methods_with_controlled_precision_support {
+        configs.extend(&[
+            CompressorConfig::uncompressed().build().into(),
+            CompressorConfig::chimp128().build().into(),
+            CompressorConfig::chimp().build().into(),
+            CompressorConfig::elf_on_chimp().build().into(),
+            CompressorConfig::elf().build().into(),
+            CompressorConfig::gorilla().build().into(),
+            CompressorConfig::rle().build().into(),
+            CompressorConfig::zstd().build().into(),
+            CompressorConfig::gzip().build().into(),
+            CompressorConfig::snappy().build().into(),
+            CompressorConfig::ffi_alp().build().into(),
+            CompressorConfig::delta_sprintz()
+                .scale(0) // scale will be set later
+                .build()
+                .into(),
+        ]);
+    }
 
     let mut dataset_to_vector_length = HashMap::new();
 
@@ -2058,13 +2071,55 @@ fn ucr2018_command(
                 encoder.into_output().into_inner().into_inner()
             };
 
-            let compression_statistics = {
-                let decoder_input =
-                    DecoderInput::from_reader(Cursor::new(&train_vectors_encoded[..]));
-                let decoder = Decoder::new(decoder_input)
-                    .context(format!("Failed to create decoder for {}", dataset_name))?;
-                get_compress_statistics(&decoder)
-            }?;
+            let (compression_statistics, decompression_result) = {
+                let n = 5;
+                let mut statistics = None;
+                let mut elapsed_time_nanos = Vec::with_capacity(n);
+                let mut segmented_execution_times = Vec::with_capacity(n);
+                let mut result_string = Vec::with_capacity(n);
+                for _ in 0..n {
+                    let decoder_input =
+                        DecoderInput::from_reader(Cursor::new(&train_vectors_encoded[..]));
+                    let mut decoder = Decoder::new(decoder_input)
+                        .context(format!("Failed to create decoder for {}", dataset_name))?;
+                    statistics = Some(get_compress_statistics(&decoder)?);
+                    if precision >= 0
+                        && do_with_only_compression_methods_with_controlled_precision_support
+                    {
+                        let original_precision =
+                            (dataset_scales[&dataset_name] as f64).log10().round() as u32;
+                        decoder.with_precision((precision as u32).min(original_precision));
+                    }
+
+                    let start = std::time::Instant::now();
+                    let mut output = DecoderOutput::from_vec(Vec::new());
+                    decoder.materialize(&mut output, None, None)?;
+                    let elapsed_time_nano = start.elapsed().as_nanos();
+                    let segmented_execution_time: SerializableSegmentedExecutionTimes =
+                        decoder.segmented_execution_times().into();
+                    let result_str = format!(
+                        "{:?}",
+                        output
+                            .into_writer()
+                            .into_inner()
+                            .chunks(8)
+                            .take(5)
+                            .map(|x| f64::from_le_bytes(x.try_into().unwrap()))
+                            .collect::<Vec<_>>()
+                    );
+                    elapsed_time_nanos.push(elapsed_time_nano.try_into().unwrap_or(u64::MAX));
+                    segmented_execution_times.push(segmented_execution_time);
+                    result_string.push(result_str);
+                }
+
+                let decompression_result = UCR2018DecompressionResult {
+                    n,
+                    elapsed_time_nanos,
+                    execution_times: segmented_execution_times,
+                    result_string,
+                };
+                (statistics.unwrap(), decompression_result)
+            };
 
             let mut n_correct = 0;
             let n_test_vectors = test_vectors.len();
@@ -2082,7 +2137,9 @@ fn ucr2018_command(
                     let mut decoder = Decoder::new(decoder_input)
                         .context(format!("Failed to create decoder for {}", dataset_name))?;
 
-                    if precision >= 0 {
+                    if precision >= 0
+                        && do_with_only_compression_methods_with_controlled_precision_support
+                    {
                         let original_precision =
                             (dataset_scales[&dataset_name] as f64).log10().round() as u32;
                         decoder.with_precision((precision as u32).min(original_precision));
@@ -2121,6 +2178,7 @@ fn ucr2018_command(
                 execution_times: segmented_execution_times,
                 accuracy,
                 compression_statistics,
+                decompression_result,
             };
 
             results.insert(dataset_name, result);
