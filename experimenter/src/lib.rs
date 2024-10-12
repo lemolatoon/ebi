@@ -81,6 +81,14 @@ pub struct UCR2018Config {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UCR2018DecompressionResult {
+    pub n: usize,
+    pub elapsed_time_nanos: Vec<u64>,
+    pub execution_times: Vec<SerializableSegmentedExecutionTimes>,
+    pub result_string: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UCR2018ResultForOneDataset {
     pub dataset_name: String,
     pub config: UCR2018Config,
@@ -89,6 +97,7 @@ pub struct UCR2018ResultForOneDataset {
     pub execution_times: Vec<Vec<SerializableSegmentedExecutionTimes>>,
     pub accuracy: f64,
     pub compression_statistics: CompressStatistics,
+    pub decompression_result: UCR2018DecompressionResult,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
