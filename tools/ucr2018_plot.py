@@ -15,6 +15,7 @@ from plot import (
     SegmentLabelMapping,
     CompressionMethodKeys,
     compression_methods,
+    skip_methods,
     plot_absolute_stacked_execution_times_for_methods,
     plot_boxplot,
     execution_times_keys,
@@ -37,6 +38,11 @@ class CompressStatistics(TypedDict):
     compression_ratio: float
     compression_ratio_chunk_only: float
 
+class UCR2018DecompressionResult(TypedDict):
+    n: int
+    elapsed_time_nanos: List[int]
+    execution_times: List[ExecutionTimes]
+    result_string: List[str]
 
 class UCR2018ResultForOneDataset(TypedDict):
     dataset_name: str
@@ -46,13 +52,20 @@ class UCR2018ResultForOneDataset(TypedDict):
     execution_times: List[List[ExecutionTimes]]
     accuracy: float
     compression_statistics: CompressStatistics
-
+    decompression_result: UCR2018DecompressionResult
 
 class UCR2018Result(TypedDict):
     results: Dict[str, UCR2018ResultForOneDataset]
     scale_fallbacked_dataset: Optional[List[str]]
     start_time: datetime
     end_time: datetime
+
+class UCR2018ForAllCompressionMethodsResult(TypedDict):
+    results: Dict[str, UCR2018Result]
+    start_time: datetime
+    end_time: datetime
+    dataset_to_vector_length: Dict[str, int]
+    dataset_to_scale: Dict[str, int]
 
 
 def load_json_files_from_directory(directory_path: str) -> Dict[str, UCR2018Result]:
@@ -143,11 +156,23 @@ def main():
         method_name: [] for method_name in compression_methods_with_precision
     }
 
+    compression_ratio_per_method: Dict[str, List[float]] = {
+        method_name: [] for method_name in compression_methods
+    }
+    compression_throughput_per_method: Dict[str, List[float]] = {
+        method_name: [] for method_name in compression_methods
+    }
+    decompression_throughput_per_method: Dict[str, List[float]] = {
+        method_name: [] for method_name in compression_methods_with_precision
+    }
+
     with open("dataset_to_vector_length.json", "r") as json_file:
         dataset_to_vector_length: Dict[str, int] = json.load(json_file)
 
     for method_name, result in results.items():
         print(f"Method: {method_name}")
+        if method_name in skip_methods:
+            continue
         # print(f"Start time: {result['start_time']}")
         # print(f"End time: {result['end_time']}")
         # print(f"Scale fallbacked datasets: {result['scale_fallbacked_dataset']}")
@@ -161,9 +186,25 @@ def main():
             # print(f"Accuracy: {dataset_result['accuracy']}")
             # print(f"Compression statistics: {dataset_result['compression_statistics']}")
 
+
             original_dataset_size = dataset_result["compression_statistics"][
                 "uncompressed_size"
             ]
+
+            if dataset_name == "FaceFour":
+                compression_throughput = original_dataset_size / dataset_result["compression_statistics"]["compression_elapsed_time_nano_secs"]
+                time = dataset_result["compression_statistics"]["compression_elapsed_time_nano_secs"] / (10 ** 9)
+                print(f"Original dataset size: {original_dataset_size}, Time: {time}, Compression throughput: {compression_throughput}")
+
+            if method_name in compression_methods:
+                compression_ratio = dataset_result["compression_statistics"]["compressed_size"] / original_dataset_size
+                compression_ratio_per_method[method_name].append(compression_ratio)
+                compression_throughput = original_dataset_size / dataset_result["compression_statistics"]["compression_elapsed_time_nano_secs"]
+                compression_throughput_per_method[method_name].append(compression_throughput)
+
+            decompression_throughput = original_dataset_size / fmean(dataset_result["decompression_result"]["elapsed_time_nanos"])
+
+            decompression_throughput_per_method[method_name].append(decompression_throughput)
 
             average_elapsed_time_per_vector = fmean(
                 [fmean(times) for times in dataset_result["elapsed_time_nanos"]]
@@ -230,6 +271,10 @@ def main():
         for precision, data in knn1_throughput_per_target_vector_data_per_precision.items()
     }
 
+    compression_ratio_per_method_df = pl.DataFrame(compression_ratio_per_method)
+    compression_throughput_per_method_df = pl.DataFrame(compression_throughput_per_method)
+    decompression_throughput_per_method_df = pl.DataFrame(decompression_throughput_per_method)
+
     for dataset_index, dataset_name in enumerate(tqdm(dataset_names)):
         dataset_out_dir = os.path.join(out_dir, dataset_name)
         os.makedirs(dataset_out_dir, exist_ok=True)
@@ -288,8 +333,50 @@ def main():
 
     barchart_dir = os.path.join(out_dir, "barchart")
     boxplot_dir = os.path.join(out_dir, "boxplot")
+    compression_dir = os.path.join(out_dir, "compression")
     os.makedirs(barchart_dir, exist_ok=True)
     os.makedirs(boxplot_dir, exist_ok=True)
+    os.makedirs(compression_dir, exist_ok=True)
+
+    # Compression 
+
+    plot_comparison(
+        compression_ratio_per_method_df.columns,
+        [
+            compression_ratio_per_method_df[column].mean()
+            for column in compression_ratio_per_method_df.columns
+        ],
+        "Compression Ratio",
+        "Compression Ratio",
+        os.path.join(compression_dir, "compression_ratio.png"),
+    )
+
+    plot_comparison(
+        compression_throughput_per_method_df.columns,
+        [
+            compression_throughput_per_method_df[column].mean()
+            for column in compression_throughput_per_method_df.columns
+        ],
+        "Compression Throughput",
+        "Throughput (GB/s)",
+        os.path.join(compression_dir, "compression_throughput.png"),
+        note_str="*ALP utilizes SIMD instructions",
+    )
+
+    plot_comparison(
+        decompression_throughput_per_method_df.columns,
+        [
+            decompression_throughput_per_method_df[column].mean()
+            for column in decompression_throughput_per_method_df.columns
+        ],
+        "Decompression Throughput",
+        "Throughput (GB/s)",
+        os.path.join(compression_dir, "decompression_throughput.png"),
+        note_str="*ALP utilizes SIMD instructions",
+    )
+
+    # Compression End
+
     plot_comparison(
         average_throughput_per_target_vector_df.columns,
         [
@@ -313,6 +400,33 @@ def main():
         os.path.join(barchart_dir, "average_throughput_per_all_target_vectors.png"),
         note_str="*ALP utilizes SIMD instructions",
     )
+
+    # Compression
+
+    plot_boxplot(
+        compression_ratio_per_method_df,
+        "Average Compression Ratio",
+        "Compression Ratio",
+        os.path.join(compression_dir, "boxplot_compression_ratio.png"),
+    )
+
+    plot_boxplot(
+        compression_throughput_per_method_df,
+        "Average Compression Throughput",
+        "Throughput (GB/s)",
+        os.path.join(compression_dir, "boxplot_compression_throughput.png"),
+        note_str="*ALP utilizes SIMD instructions",
+    )
+
+    plot_boxplot(
+        decompression_throughput_per_method_df,
+        "Average Decompression Throughput",
+        "Throughput (GB/s)",
+        os.path.join(compression_dir, "boxplot_decompression_throughput.png"),
+        note_str="*ALP utilizes SIMD instructions",
+    )
+
+    # Compression End
 
     plot_boxplot(
         average_throughput_per_target_vector_df,

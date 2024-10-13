@@ -263,6 +263,16 @@ compression_methods: List[CompressionMethodKeys] = [
     "Snappy",
     "FFIAlp",
 ]
+skip_methods = set(["RLE"])
+for method in skip_methods:
+    compression_methods.remove(method)
+method_mapping = {
+    **{method: method for method in compression_methods},
+    **{f"BUFF_{i}": f"Buff_{i}" for i in [1, 3, 5, 8]},
+    "BUFF": "Buff",
+}
+def map_method(methods: List[str]) -> List[str]:
+    return [method_mapping[method] for method in methods]
 mapped_processing_types = set(
     "+".join(segment_mapping[method][mapping_key])
     for method in compression_methods
@@ -305,6 +315,7 @@ def add_notes_to_plot(
     if note_str is not None:
         fig.text(x_pos, y_pos, note_str, ha="right", va="bottom", fontsize=fontsize)
 
+omit_title = True
 
 def plot_stacked_execution_time_ratios_for_methods(
     # methods to dataset to execution times
@@ -377,7 +388,8 @@ def plot_relative_stacked_execution_time_ratios_for_methods(
     # Add chart decorations
     plt.xlabel("Compression Methods")
     plt.ylabel("Execution Time Percentage (%)")
-    plt.title(f"Execution Time Ratios for {dataset_name} by Compression Method")
+    if not omit_title:
+        plt.title(f"Execution Time Ratios for {dataset_name} by Compression Method")
     plt.xticks(index, methods, rotation=45)
     plt.legend(title="Processing Types", bbox_to_anchor=(1.05, 1), loc="upper left")
     plt.tight_layout()
@@ -446,8 +458,9 @@ def plot_absolute_stacked_execution_times_for_methods(
     # Add chart decorations
     plt.xlabel("Compression Methods")
     plt.ylabel("Execution Time (ns)")  # y-axis now reflects absolute time
-    plt.title(f"Execution Times for {dataset_name} by Compression Method")
-    plt.xticks(index, methods, rotation=45)
+    if not omit_title:
+        plt.title(f"Execution Times for {dataset_name} by Compression Method")
+    plt.xticks(index, map_method(methods), rotation=45)
     plt.legend(title="Processing Types", bbox_to_anchor=(1.05, 1), loc="upper left")
     plt.tight_layout()
     plt.savefig(output_path)
@@ -475,9 +488,10 @@ def plot_comparison(
 
     fig = plt.figure(figsize=(12, 8))
     add_notes_to_plot(fig, note_str)
-    plt.bar(x=filtered_labels, height=filtered_data, color="blue")
+    plt.bar(x=map_method(filtered_labels), height=filtered_data, color="blue")
     plt.ylim(0, max_value)
-    plt.title(title)
+    if not omit_title:
+        plt.title(title)
     plt.xlabel("Compression Method")
     plt.ylabel(y_label)
     plt.xticks(rotation=45, ha="right")
@@ -489,13 +503,15 @@ def plot_comparison(
 def plot_boxplot(data, title, y_label, output_path, note_str: str | None = None):
     if isinstance(data, pl.DataFrame):
         data = data.to_pandas()
+    data = data.rename(columns=method_mapping)
     # Plot the boxplot
     fig = plt.figure(figsize=(10, 6))
     add_notes_to_plot(fig, note_str)
     data.boxplot(grid=False)
 
     # Customize the plot
-    plt.title(title)
+    if not omit_title:
+        plt.title(title)
     plt.ylabel(y_label)
     plt.xticks(rotation=45, ha="right")
 
@@ -536,7 +552,7 @@ def plot_combined_radar_chart(data_dict, title, labels, output_path):
     for i, label in enumerate(labels):
         values = [normalized_data_dict[metric][i] for metric in metrics]
         values += values[:1]  # Repeat the first value to close the polygon
-        ax.plot(angles, values, color=get_color(label), label=label, linewidth=2)
+        ax.plot(angles, values, color=get_color(method_mapping[label]), label=method_mapping[label], linewidth=2)
 
     ax.set_xticks(angles[:-1])
     # ax.set_xticklabels(metrics)
@@ -544,7 +560,8 @@ def plot_combined_radar_chart(data_dict, title, labels, output_path):
         metrics, fontsize=12, fontweight="bold", horizontalalignment="center"
     )
 
-    plt.title(title, size=15, color="black", y=1.1)
+    if not omit_title:
+        plt.title(title, size=15, color="black", y=1.1)
 
     # Adjust legend to be split into two rows if there are many labels
     ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.1), ncol=4)
@@ -643,6 +660,8 @@ def main():
         if dataset_name == "command_type":
             continue
         for method_name in tqdm(methods, leave=False):
+            if  method_name in skip_methods:
+                continue
             output: AllOutputInner = methods[method_name]
             ratio = fmean(
                 compress["command_specific"]["compression_ratio"]
@@ -1231,11 +1250,15 @@ def main():
         )
     )
     for unnecessary_label in ["Uncompressed", "RLE"]:
-        compression_ratios_sorted_labels.remove(unnecessary_label)
-        compression_throughput_sorted_labels.remove(unnecessary_label)
-        filter_greater_throughput_sorted_labels.remove(unnecessary_label)
-        max_throughput_sorted_labels.remove(unnecessary_label)
-        sum_throughput_sorted_labels.remove(unnecessary_label)
+        try:
+            compression_ratios_sorted_labels.remove(unnecessary_label)
+            compression_throughput_sorted_labels.remove(unnecessary_label)
+            filter_greater_throughput_sorted_labels.remove(unnecessary_label)
+            max_throughput_sorted_labels.remove(unnecessary_label)
+            sum_throughput_sorted_labels.remove(unnecessary_label)
+        except ValueError:
+            print(f"{unnecessary_label} not found in labels list")
+            pass
 
     plot_radar_chart(
         compression_ratios_sorted_labels[:5],
