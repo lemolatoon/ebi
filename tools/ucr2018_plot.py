@@ -457,7 +457,6 @@ def main():
         "Accuracy",
         "Accuracy",
         os.path.join(boxplot_dir, "accuracy.png"),
-        note_str="*ALP utilizes SIMD instructions",
     )
 
     plot_boxplot(

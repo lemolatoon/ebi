@@ -296,13 +296,13 @@ color_map_exe: dict[str, tuple[float, float, float, float]] = {}
 
 
 def get_color_exe(label: str) -> tuple[float, float, float, float]:
-    global color_map
-    if label in color_map:
-        return color_map[label]
-    next_index = len(color_map)
-    color_map[label] = matplotlib.colormaps["tab20"](next_index)
+    global color_map_exe
+    if label in color_map_exe:
+        return color_map_exe[label]
+    next_index = len(color_map_exe)
+    color_map_exe[label] = matplotlib.colormaps["tab20"](next_index)
 
-    return color_map[label]
+    return color_map_exe[label]
 
 
 def add_notes_to_plot(
@@ -1139,7 +1139,7 @@ def main():
         key: df.mean() for key, df in filter_materialize_throughput_dfs.items()
     }
 
-    def plot_radar_chart(pred: pl.Expr | List[str], title: str, output_path: str):
+    def plot_radar_chart(pred: pl.Expr | List[str], title: str, output_path: str, kind: Literal["all", "comp", "db-query", "without-filter-mat"]="all"):
         data_dict = {
             "Compression Ratios": np.array(compression_ratios_avg.select(pred).row(0))
             ** -1,
@@ -1153,31 +1153,47 @@ def main():
             "Sum Throughput": np.array(sum_throughput_avg.select(pred).row(0)),
         }
 
-        for key in filter_throughput_avg:
-            data_dict[f"Filter Throughput ({key})"] = np.array(
-                filter_throughput_avg[key].select(pred).row(0)
-            )
+        match kind:
+            case "all":
+                pass
+            case "comp":
+                data_dict.pop("Max Throughput")
+                data_dict.pop("Sum Throughput")
+            case "db-query":
+                data_dict.pop("Compression Ratios")
+                data_dict.pop("Compression Throughput")
+                data_dict.pop("Decompression Throughput")
 
-        for key in filter_materialize_throughput_avg:
-            data_dict[f"Filter Materialize Throughput ({key})"] = np.array(
-                filter_materialize_throughput_avg[key].select(pred).row(0)
-            )
+        if kind != "comp":
+            for key in filter_throughput_avg:
+                data_dict[f"Filter Throughput \n({key})"] = np.array(
+                    filter_throughput_avg[key].select(pred).row(0)
+                )
+
+            if kind != "without-filter-mat":
+                for key in filter_materialize_throughput_avg:
+                    data_dict[f"Filter Materialize Throughput \n({key})"] = np.array(
+                        filter_materialize_throughput_avg[key].select(pred).row(0)
+                    )
 
         labels = compression_ratios_df.select(pred).columns
 
         plot_combined_radar_chart(data_dict, title, labels, output_path)
 
-    plot_radar_chart(
-        pl.all().exclude("Uncompressed", "RLE"),
-        "Average Performance Radar Chart All",
-        os.path.join(combined_radar_chart_dir, "all_radar_chart.png"),
-    )
-    # Xor Family
-    plot_radar_chart(
-        ["Gorilla", "Chimp", "Chimp128", "ElfOnChimp", "Elf"],
-        "Average Performance Radar Chart Xor Family",
-        os.path.join(combined_radar_chart_dir, "xor_family_radar_chart.png"),
-    )
+    for kind in ["all", "comp", "db-query", "without-filter-mat"]:
+        plot_radar_chart(
+            pl.all().exclude("Uncompressed", "RLE"),
+            "Average Performance Radar Chart All",
+            os.path.join(combined_radar_chart_dir, f"all_radar_chart_{kind}.png"),
+            kind=kind
+        )
+        # Xor Family
+        plot_radar_chart(
+            ["Gorilla", "Chimp", "Chimp128", "ElfOnChimp", "Elf"],
+            "Average Performance Radar Chart Xor Family",
+            os.path.join(combined_radar_chart_dir, f"xor_family_radar_chart_{kind}.png"),
+            kind=kind
+        )
     labels = compression_ratios_df.columns
     # Top 5 Compression Ratios
     compression_ratios_sorted_labels = list(
@@ -1260,44 +1276,51 @@ def main():
             print(f"{unnecessary_label} not found in labels list")
             pass
 
-    plot_radar_chart(
-        compression_ratios_sorted_labels[:5],
-        "Top 5 Compression Ratios",
-        os.path.join(
-            combined_radar_chart_dir, "top_5_compression_ratios_radar_chart.png"
-        ),
-    )
-    plot_radar_chart(
-        compression_throughput_sorted_labels[:5],
-        "Top 5 Compression Throughput",
-        os.path.join(
-            combined_radar_chart_dir, "top_5_compression_throughput_radar_chart.png"
-        ),
-    )
-    plot_radar_chart(
-        decompressin_throughput_sorted_labels[:5],
-        "Top 5 Decompression Throughput",
-        os.path.join(
-            combined_radar_chart_dir, "top_5_decompression_throughput_radar_chart.png"
-        ),
-    )
-    plot_radar_chart(
-        max_throughput_sorted_labels[:5],
-        "Top 5 Max Throughput",
-        os.path.join(combined_radar_chart_dir, "top_5_max_throughput_radar_chart.png"),
-    )
-    plot_radar_chart(
-        sum_throughput_sorted_labels[:5],
-        "Top 5 Sum Throughput",
-        os.path.join(combined_radar_chart_dir, "top_5_sum_throughput_radar_chart.png"),
-    )
-    plot_radar_chart(
-        filter_greater_throughput_sorted_labels[:5],
-        "Top 5 Filter GREATER then 10 th percentile Throughput",
-        os.path.join(
-            combined_radar_chart_dir, "top_5_filter_greater_throughput_radar_chart.png"
-        ),
-    )
+    for kind in ["all", "comp", "db-query", "without-filter-mat"]:
+        plot_radar_chart(
+            compression_ratios_sorted_labels[:5],
+            "Top 5 Compression Ratios",
+            os.path.join(
+                combined_radar_chart_dir, f"top_5_compression_ratios_radar_chart_{kind}.png"
+            ),
+            kind=kind,
+        )
+        plot_radar_chart(
+            compression_throughput_sorted_labels[:5],
+            "Top 5 Compression Throughput",
+            os.path.join(
+                combined_radar_chart_dir, f"top_5_compression_throughput_radar_chart_{kind}.png"
+            ),
+            kind=kind
+        )
+        plot_radar_chart(
+            decompressin_throughput_sorted_labels[:5],
+            "Top 5 Decompression Throughput",
+            os.path.join(
+                combined_radar_chart_dir, f"top_5_decompression_throughput_radar_chart_{kind}.png"
+            ),
+            kind=kind
+        )
+        plot_radar_chart(
+            max_throughput_sorted_labels[:5],
+            "Top 5 Max Throughput",
+            os.path.join(combined_radar_chart_dir, f"top_5_max_throughput_radar_chart_{kind}.png"),
+            kind=kind
+        )
+        plot_radar_chart(
+            sum_throughput_sorted_labels[:5],
+            "Top 5 Sum Throughput",
+            os.path.join(combined_radar_chart_dir, f"top_5_sum_throughput_radar_chart_{kind}.png"),
+            kind=kind
+        )
+        plot_radar_chart(
+            filter_greater_throughput_sorted_labels[:5],
+            "Top 5 Filter GREATER then 10 th percentile Throughput",
+            os.path.join(
+                combined_radar_chart_dir, f"top_5_filter_greater_throughput_radar_chart_{kind}.png"
+            ),
+            kind=kind
+        )
 
 
 if __name__ == "__main__":
