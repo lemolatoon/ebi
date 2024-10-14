@@ -122,6 +122,23 @@ pub struct UCR2018ForAllCompressionMethodsResult {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SimpleCompressionPerformanceForOneDataset {
+    pub n: usize,
+    pub dataset_name: String,
+
+    pub compression_config: CompressionConfig,
+    pub compression_elapsed_time_nanos: Vec<u64>,
+    pub compression_segmented_execution_times: Vec<SerializableSegmentedExecutionTimes>,
+    pub compression_statistics: Vec<CompressStatistics>,
+    pub compression_result_string: Vec<String>,
+
+    pub decompression_elapsed_time_nanos: Vec<u64>,
+    pub decompression_segmented_execution_times: Vec<SerializableSegmentedExecutionTimes>,
+    pub decompression_result_string: Vec<String>,
+    pub precision: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MatrixResult {
     pub n_data_matrix: usize,
     pub compression_config: CompressionConfig,
@@ -320,6 +337,8 @@ pub enum Output {
     All(AllOutput),
     #[quick_impl(impl From)]
     UCR2018(UCR2018Result),
+    #[quick_impl(impl From)]
+    Embedding(HashMap<String, HashMap<String, SimpleCompressionPerformanceForOneDataset>>),
 }
 
 /// # Examples
