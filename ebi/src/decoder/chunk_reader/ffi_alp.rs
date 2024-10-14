@@ -35,7 +35,8 @@ pub type FFIAlpDecompressIterator<'a> = iter::Map<slice::Iter<'a, f64>, F>;
 impl<R: Read> Reader for FFIAlpReader<R> {
     type NativeHeader = ();
 
-    type DecompressIterator<'a> = FFIAlpDecompressIterator<'a>
+    type DecompressIterator<'a>
+        = FFIAlpDecompressIterator<'a>
     where
         Self: 'a;
 

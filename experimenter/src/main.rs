@@ -1,6 +1,6 @@
 use either::Either;
 use experimenter::{
-    get_appropriate_scale, AllOutput, AllOutputInner, CompressStatistics, CompressionConfig,
+    get_appropriate_precision, AllOutput, AllOutputInner, CompressStatistics, CompressionConfig,
     FilterConfig, FilterFamilyOutput, FilterMaterializeConfig, MaterializeConfig, MatrixResult,
     MaxConfig, Output, OutputWrapper, SumConfig, UCR2018Config, UCR2018DecompressionResult,
     UCR2018ForAllCompressionMethodsResult, UCR2018Result, UCR2018ResultForOneDataset,
@@ -1062,7 +1062,10 @@ fn create_default_compressor_config(
         filename.as_ref().display()
     ))?);
     println!("get scale for {}", filename.as_ref().display());
-    let scale = get_appropriate_scale(reader, ',');
+    let prec = get_appropriate_precision(reader, ',')?;
+    let scale = 10u64
+        .checked_pow(prec)
+        .context("Failed to get appropriate scale")?;
     let mut configs: Vec<(&'static str, CompressorConfig)> = vec![
         (
             "uncompressed",
@@ -1082,25 +1085,14 @@ fn create_default_compressor_config(
         ("snappy", CompressorConfig::snappy().build().into()),
         ("ffi_alp", CompressorConfig::ffi_alp().build().into()),
     ];
-    match scale {
-        Ok(scale) => {
-            configs.push((
-                "delta_sprintz",
-                CompressorConfig::delta_sprintz()
-                    .scale(scale)
-                    .build()
-                    .into(),
-            ));
-            configs.push(("buff", CompressorConfig::buff().scale(scale).build().into()));
-        }
-        Err(e) => {
-            println!(
-                "Failed to get appropriate scale for {}\n{}",
-                filename.as_ref().display(),
-                e
-            );
-        }
-    }
+    configs.push((
+        "delta_sprintz",
+        CompressorConfig::delta_sprintz()
+            .scale(scale)
+            .build()
+            .into(),
+    ));
+    configs.push(("buff", CompressorConfig::buff().scale(scale).build().into()));
     let configs = configs.into_iter().map(|(name, config)| {
         (
             name,
@@ -1939,7 +1931,7 @@ fn ucr2018_command(
     dbg!(&dataset_entries);
 
     let mut dataset_scales = HashMap::new();
-    let mut scale_fallbacked_datasets = Vec::new();
+    let scale_fallbacked_datasets = Vec::new();
     for dataset_entry in tqdm(dataset_entries.iter()) {
         if !dataset_entry.is_dir() {
             continue;
@@ -1955,17 +1947,14 @@ fn ucr2018_command(
             File::open(&train_file)
                 .context(format!("Failed to open file.: {}", train_file.display()))?,
         );
-        let scale = match get_appropriate_scale(train_file_reader, '\t') {
-            Ok(scale) => scale,
-            Err(_) => {
-                println!(
-                    "Failed to get appropriate scale for {}, Fallback to precision 9, scale: 10^9",
-                    dataset_name
-                );
-                scale_fallbacked_datasets.push(dataset_name.clone());
-                10u32.pow(9)
-            }
-        };
+        let prec = get_appropriate_precision(train_file_reader, '\t').context(format!(
+            "Failed to get appropriate prec for {}, Fallback to precision 9, scale: 10^9",
+            &dataset_name
+        ))?;
+        let scale = 10u64.checked_pow(prec).context(format!(
+            "Failed to calculate scale for {} with precision {}",
+            &dataset_name, prec
+        ))?;
         dataset_scales.insert(dataset_name, scale);
     }
     dbg!(&dataset_scales);
@@ -2218,7 +2207,7 @@ fn matrix_command(
     do_with_only_compression_methods_with_controlled_precision_support: bool,
 ) -> anyhow::Result<HashMap<String, MatrixResult>> {
     let original_data_precision = 8;
-    let scale = 10u32.pow(original_data_precision);
+    let scale = 10u64.pow(original_data_precision);
     let seed: u64 = (original_data_precision as usize * matrix_size + 42).try_into()?;
     let mut rng = ChaCha20Rng::seed_from_u64(seed);
     const N_DATA_MATRIX: usize = 40;

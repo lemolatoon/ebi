@@ -289,7 +289,7 @@ impl CompressorConfig {
         CompressionScheme::from(self)
     }
 
-    pub fn set_scale(&mut self, scale: u32) {
+    pub fn set_scale(&mut self, scale: u64) {
         match self {
             CompressorConfig::BUFF(c) => c.set_scale(scale),
             CompressorConfig::DeltaSprintz(c) => c.set_scale(scale),

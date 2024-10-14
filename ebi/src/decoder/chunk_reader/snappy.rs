@@ -33,7 +33,8 @@ pub type SnappyDecompressIterator<'a> = iter::Map<slice::Iter<'a, f64>, F>;
 impl<R: Read> Reader for SnappyReader<R> {
     type NativeHeader = ();
 
-    type DecompressIterator<'a> = SnappyDecompressIterator<'a>
+    type DecompressIterator<'a>
+        = SnappyDecompressIterator<'a>
     where
         Self: 'a;
 

@@ -15,13 +15,13 @@ use super::Compressor;
 pub struct BUFFCompressor {
     total_bytes_in: usize,
     data: Vec<f64>,
-    scale: u32,
+    scale: u64,
     compressed: Option<Vec<u8>>,
     timer: SegmentedExecutionTimes,
 }
 
 impl BUFFCompressor {
-    pub fn new(scale: u32) -> Self {
+    pub fn new(scale: u64) -> Self {
         Self {
             total_bytes_in: 0,
             data: Vec::new(),
@@ -86,11 +86,11 @@ impl Compressor for BUFFCompressor {
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[repr(C, packed)]
 pub struct BUFFCompressorConfig {
-    scale: u32,
+    scale: u64,
 }
 
 serialize::impl_to_le!(BUFFCompressorConfig, scale);
-deserialize::impl_from_le_bytes!(BUFFCompressorConfig, buff, (scale, u32));
+deserialize::impl_from_le_bytes!(BUFFCompressorConfig, buff, (scale, u64));
 
 impl From<BUFFCompressorConfig> for BUFFCompressor {
     fn from(c: BUFFCompressorConfig) -> Self {
@@ -107,7 +107,7 @@ impl BUFFCompressorConfigBuilder {
 }
 
 impl BUFFCompressorConfig {
-    pub fn set_scale(&mut self, scale: u32) {
+    pub fn set_scale(&mut self, scale: u64) {
         self.scale = scale;
     }
 }

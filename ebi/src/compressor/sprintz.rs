@@ -22,7 +22,7 @@ pub struct DeltaSprintzCompressorImpl<W: BitWrite> {
     w: W,
     /// Used for temporarily store delta_zigzag_encoded quantized floats
     buffer: Vec<u64>,
-    scale: u32,
+    scale: u64,
     total_bytes_in: usize,
     timer: SegmentedExecutionTimes,
 }
@@ -34,14 +34,14 @@ pub struct DeltaSprintzCompressorImpl<W: BitWrite> {
 pub struct DeltaSprintzCompressorConfig {
     #[builder(setter(into), default)]
     capacity: Capacity,
-    scale: u32,
+    scale: u64,
 }
 serialize::impl_to_le!(DeltaSprintzCompressorConfig, capacity, scale);
 deserialize::impl_from_le_bytes!(
     DeltaSprintzCompressorConfig,
     delta_sprintz,
     (capacity, Capacity),
-    (scale, u32)
+    (scale, u64)
 );
 
 impl DeltaSprintzCompressorConfigBuilder {
@@ -63,13 +63,13 @@ impl From<DeltaSprintzCompressorConfig> for DeltaSprintzCompressorImpl<BitWriter
 }
 
 impl DeltaSprintzCompressorConfig {
-    pub fn set_scale(&mut self, scale: u32) {
+    pub fn set_scale(&mut self, scale: u64) {
         self.scale = scale;
     }
 }
 
 impl<W: BitWrite> DeltaSprintzCompressorImpl<W> {
-    pub fn new(bit_writer: W, scale: u32) -> Self {
+    pub fn new(bit_writer: W, scale: u64) -> Self {
         Self {
             w: bit_writer,
             buffer: Vec::new(),
@@ -137,7 +137,7 @@ mod delta_impl {
     /// Caller must ensure buffer is empty.
     pub fn delta_sprintz_compress_impl<W: BitWrite>(
         input: &[f64],
-        scale: u32,
+        scale: u64,
         buffer: &mut Vec<u64>,
         mut w: W,
     ) -> SegmentedExecutionTimes {

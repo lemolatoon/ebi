@@ -58,7 +58,8 @@ pub type GeneralXorDecompressIterator<'a, T> =
 impl<T: XorDecoder> Reader for GeneralXorReader<T> {
     type NativeHeader = ();
 
-    type DecompressIterator<'a> = GeneralXorDecompressIterator<'a, T>
+    type DecompressIterator<'a>
+        = GeneralXorDecompressIterator<'a, T>
     where
         T: 'a;
 

@@ -56,7 +56,7 @@ fn main() {
     // let compressor_config = CompressorConfig::uncompressed().build();
     // let compressor_config = CompressorConfig::rle().build();
     // let compressor_config = CompressorConfig::gorilla().build();
-    let compressor_config = CompressorConfig::buff().scale(scale as u32).build();
+    let compressor_config = CompressorConfig::buff().scale(scale as u64).build();
     // let compressor_config = CompressorConfig::chimp128().build();
     // let compressor_config = CompressorConfig::elf_on_chimp().build();
     // let compressor_config = CompressorConfig::elf().build();
