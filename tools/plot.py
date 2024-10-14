@@ -279,6 +279,7 @@ mapped_processing_types = set(
     for mapping_key in segment_mapping[method]
 )
 
+fontsize = 15
 
 # Function to calculate the ratios for each process
 def calculate_ratios(
@@ -369,7 +370,7 @@ def plot_relative_stacked_execution_time_ratios_for_methods(
     index = np.arange(len(methods))
 
     fig = plt.figure(figsize=(12, 8))
-    add_notes_to_plot(fig, note_str)
+    add_notes_to_plot(fig, note_str, fontsize=fontsize)
 
     # Plot the stacked bar chart for each processing type
     bottom = np.zeros(len(methods))
@@ -386,16 +387,14 @@ def plot_relative_stacked_execution_time_ratios_for_methods(
         bottom += values
 
     # Add chart decorations
-    plt.xlabel("Compression Methods")
-    plt.ylabel("Execution Time Percentage (%)")
+    plt.xlabel("Compression Methods", fontsize=fontsize)
+    plt.ylabel("Execution Time Percentage (%)", fontsize=fontsize)
     if not omit_title:
-        plt.title(f"Execution Time Ratios for {dataset_name} by Compression Method")
-    plt.xticks(index, methods, rotation=45)
-    plt.legend(title="Processing Types", bbox_to_anchor=(1.05, 1), loc="upper left")
+        plt.title(f"Execution Time Ratios for {dataset_name} by Compression Method", fontsize=fontsize)
+    plt.xticks(index, methods, rotation=45, fontsize=fontsize)
+    plt.legend(title="Processing Types", bbox_to_anchor=(1.05, 1), loc="upper left", fontsize=fontsize)
     plt.tight_layout()
     plt.savefig(output_path)
-    plt.close()
-
     plt.close()
 
 
@@ -410,6 +409,7 @@ def plot_absolute_stacked_execution_times_for_methods(
         [Dict[CompressionMethodKeys, SegmentLabelMapping]], Any
     ]
     | None = None,
+    y_label: str = "Execution Time (ns)",
 ):
     methods: List[CompressionMethodKeys] = list(data.keys())  # type: ignore
     processing_types = list(data[methods[0]][0].keys())
@@ -439,7 +439,7 @@ def plot_absolute_stacked_execution_times_for_methods(
     index = np.arange(len(methods))
 
     fig = plt.figure(figsize=(12, 8))
-    add_notes_to_plot(fig, note_str)
+    add_notes_to_plot(fig, note_str, fontsize=fontsize)
 
     # Plot the stacked bar chart for each processing type
     bottom = np.zeros(len(methods))
@@ -456,16 +456,14 @@ def plot_absolute_stacked_execution_times_for_methods(
         bottom += values
 
     # Add chart decorations
-    plt.xlabel("Compression Methods")
-    plt.ylabel("Execution Time (ns)")  # y-axis now reflects absolute time
+    plt.xlabel("Compression Methods", fontsize=fontsize)
+    plt.ylabel(y_label, fontsize=fontsize)  # y-axis now reflects absolute time
     if not omit_title:
-        plt.title(f"Execution Times for {dataset_name} by Compression Method")
-    plt.xticks(index, map_method(methods), rotation=45)
-    plt.legend(title="Processing Types", bbox_to_anchor=(1.05, 1), loc="upper left")
+        plt.title(f"Execution Times for {dataset_name} by Compression Method", fontsize=fontsize)
+    plt.xticks(index, map_method(methods), rotation=45, fontsize=fontsize)
+    plt.legend(title="Processing Types", bbox_to_anchor=(1.05, 1), loc="upper left", fontsize=fontsize)
     plt.tight_layout()
     plt.savefig(output_path)
-    plt.close()
-
     plt.close()
 
 
@@ -487,14 +485,14 @@ def plot_comparison(
     filtered_labels, filtered_data = zip(*filtered_labels_data)
 
     fig = plt.figure(figsize=(12, 8))
-    add_notes_to_plot(fig, note_str)
+    add_notes_to_plot(fig, note_str, fontsize=fontsize)
     plt.bar(x=map_method(filtered_labels), height=filtered_data, color="blue")
     plt.ylim(0, max_value)
     if not omit_title:
-        plt.title(title)
-    plt.xlabel("Compression Method")
-    plt.ylabel(y_label)
-    plt.xticks(rotation=45, ha="right")
+        plt.title(title, fontsize=fontsize)
+    plt.xlabel("Compression Method", fontsize=fontsize)   
+    plt.ylabel(y_label, fontsize=fontsize)
+    plt.xticks(rotation=45, ha="right", fontsize=fontsize)
     plt.tight_layout()
     plt.savefig(output_path)
     plt.close()
@@ -506,14 +504,14 @@ def plot_boxplot(data, title, y_label, output_path, note_str: str | None = None)
     data = data.rename(columns=method_mapping)
     # Plot the boxplot
     fig = plt.figure(figsize=(10, 6))
-    add_notes_to_plot(fig, note_str)
-    data.boxplot(grid=False)
+    add_notes_to_plot(fig, note_str, fontsize=fontsize)
+    data.boxplot(grid=False, fontsize=fontsize)
 
     # Customize the plot
     if not omit_title:
-        plt.title(title)
-    plt.ylabel(y_label)
-    plt.xticks(rotation=45, ha="right")
+        plt.title(title, fontsize=fontsize)
+    plt.ylabel(y_label, fontsize=fontsize)
+    plt.xticks(rotation=45, ha="right", fontsize=fontsize)
 
     # Save the plot
     plt.tight_layout()
@@ -552,7 +550,7 @@ def plot_combined_radar_chart(data_dict, title, labels, output_path):
     for i, label in enumerate(labels):
         values = [normalized_data_dict[metric][i] for metric in metrics]
         values += values[:1]  # Repeat the first value to close the polygon
-        ax.plot(angles, values, color=get_color(method_mapping[label]), label=method_mapping[label], linewidth=2)
+        ax.plot(angles, values, color=get_color(method_mapping[label]), label=method_mapping[label], linewidth=2, fontsize=fontsize)
 
     ax.set_xticks(angles[:-1])
     # ax.set_xticklabels(metrics)
@@ -561,10 +559,10 @@ def plot_combined_radar_chart(data_dict, title, labels, output_path):
     )
 
     if not omit_title:
-        plt.title(title, size=15, color="black", y=1.1)
+        plt.title(title, size=15, color="black", y=1.1, fontsize=fontsize)
 
     # Adjust legend to be split into two rows if there are many labels
-    ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.1), ncol=4)
+    ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.1), ncol=4, fontsize=fontsize)
 
     # Add padding around the chart to prevent clipping
     # plt.subplots_adjust(left=0.2, right=0.8, top=0.8, bottom=0.3)
@@ -635,6 +633,9 @@ def main():
     ] = {
         method_name: [None] * len(dataset_names) for method_name in compression_methods
     }
+    decompression_execution_times_ratio_data: Dict[str, List[Dict[str, float]]] = {
+        method_name: [None] * len(dataset_names) for method_name in compression_methods
+    }
     filter_execution_times_data: dict[
         str, dict[str, List[Optional[ExecutionTimesWithOthers]]]
     ] = {
@@ -687,6 +688,7 @@ def main():
 
             compression_execution_times: ExecutionTimesWithOthers = {}  # type: ignore
             decompression_execution_times: ExecutionTimesWithOthers = {}  # type: ignore
+            decompression_execution_times_ratios: Dict[str, float] = {}
             for key in execution_times_keys:
                 compression_execution_times[key] = fmean(
                     compress["execution_times"][key] for compress in output["compress"]
@@ -699,16 +701,22 @@ def main():
                     materialize["execution_times"][key]
                     for materialize in output["materialize"]
                 )
-                decompression_execution_times["others"] = fmean(
+                entiere_decompression_time = fmean(
                     materialize["elapsed_time_nanos"]
                     for materialize in output["materialize"]
-                ) - sum(decompression_execution_times.values())
+                )
+                decompression_execution_times["others"] = entiere_decompression_time - sum(decompression_execution_times.values())
+
+                decompression_execution_times_ratios[key] = decompression_execution_times[key] / entiere_decompression_time
 
             compression_execution_times_data[method_name][dataset_index] = (
                 compression_execution_times
             )
             decompression_execution_times_data[method_name][dataset_index] = (
                 decompression_execution_times
+            )
+            decompression_execution_times_ratio_data[method_name][dataset_index] = (
+                decompression_execution_times_ratios
             )
 
             compression_ratios_data[method_name][dataset_index] = ratio
@@ -945,9 +953,29 @@ def main():
                 filter_name
             ].filter(pl.all_horizontal(pl.col("*").is_not_null()))
         )
+    
 
+    decompression_execution_times_throughput: Dict[str, List[Dict[str, float]]] = {
+        method: [
+            {
+                key: fmean([d[key] for d in decompression_execution_times_ratio_data[method]]) / fmean(decompression_throughput_data[method])
+                for key in decompression_execution_times_ratio_data[method][0].keys()
+            }
+        ]
+        for method in decompression_execution_times_ratio_data
+    }
     barchart_dir = os.path.join(out_dir, "barchart")
     boxplot_dir = os.path.join(out_dir, "boxplot")
+
+    plot_absolute_stacked_execution_times_for_methods(
+        decompression_execution_times_throughput,
+        0,
+        "Decompression Throughput",
+        os.path.join(barchart_dir, "stacked_decompression_throughput.png"),
+        note_str="*ALP utilize SIMD instructions",
+        y_label="Average Execution Times (s/GB)",
+    )
+
     os.makedirs(barchart_dir, exist_ok=True)
     os.makedirs(boxplot_dir, exist_ok=True)
     plot_comparison(
