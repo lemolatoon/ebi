@@ -2377,19 +2377,21 @@ fn embedding_command(
     input_dir: impl AsRef<Path>,
     // dataaset_name -> method_name -> result
 ) -> anyhow::Result<HashMap<String, HashMap<String, SimpleCompressionPerformanceForOneDataset>>> {
-    let datasets_exclude = vec!["Cohere_wikipedia-22-12-simple-embeddings"];
+    let datasets_exclude = vec!["Cohere_wikipedia-22-12-simple-embeddings_emb"];
 
-    let dataset_entry_iter = entry_dir_iter(input_dir.as_ref())?.filter(|entry| {
-        let dataset_name = entry.file_name().unwrap().to_string_lossy();
-        let ext = entry.as_path().extension().unwrap().to_string_lossy();
-        !datasets_exclude.contains(&dataset_name.as_ref()) && ext == "bin"
-    });
+    let dataset_entries = entry_file_iter(input_dir.as_ref())?
+        .filter(|entry| {
+            let dataset_name = entry.file_stem().unwrap().to_string_lossy();
+            let ext = entry.as_path().extension().unwrap().to_string_lossy();
+            !datasets_exclude.contains(&dataset_name.as_ref()) && ext == "bin"
+        })
+        .collect::<Vec<_>>();
 
     let precision_map: HashMap<String, f64> = serde_json::from_reader(
-        File::open(input_dir.as_ref().join("precision_map.json"))
-            .context("Failed to open precision_map.json")?,
+        File::open(input_dir.as_ref().join("precision_data.json"))
+            .context("Failed to open precision_data.json")?,
     )
-    .context("Failed to parse precision_map.json")?;
+    .context("Failed to parse precision_data.json")?;
     let precision_map: HashMap<String, u64> = precision_map
         .into_iter()
         .map(|(k, v)| (k, v.round() as u64))
@@ -2425,18 +2427,21 @@ fn embedding_command(
     ];
 
     let mut results = HashMap::new();
-    let n = 5;
-    for dataset_entry in dataset_entry_iter {
-        let dataset_name = dataset_entry.file_name().unwrap().to_string_lossy();
-        let dataset_name = dataset_name.to_string();
-        let scale = scale_map[&dataset_name];
+    let n = 10;
+    for dataset_entry in tqdm(dataset_entries) {
+        let dataset_key = dataset_entry
+            .file_stem()
+            .unwrap()
+            .to_string_lossy()
+            .to_string();
+        let scale = scale_map[&dataset_key];
 
         // encode
         let mut input_in_memory = Vec::new();
         BufReader::new(File::open(dataset_entry.as_path())?).read_to_end(&mut input_in_memory)?;
 
         let mut results_of_this_dataset = HashMap::new();
-        for config in configs.clone() {
+        for config in tqdm(configs.clone()) {
             let config = {
                 let mut config = config;
                 config.set_scale(scale);
@@ -2499,7 +2504,7 @@ fn embedding_command(
 
             let result = SimpleCompressionPerformanceForOneDataset {
                 n,
-                dataset_name: dataset_name.clone(),
+                dataset_name: dataset_key.clone(),
                 compression_config: CompressionConfig::new(DEFAULT_CHUNK_OPTION, config),
                 compression_elapsed_time_nanos,
                 compression_segmented_execution_times,
@@ -2508,13 +2513,13 @@ fn embedding_command(
                 decompression_elapsed_time_nanos,
                 decompression_segmented_execution_times,
                 decompression_result_string,
-                precision: precision_map[&dataset_name],
+                precision: precision_map[&dataset_key],
             };
 
             results_of_this_dataset.insert(format!("{:?}", config.compression_scheme()), result);
         }
 
-        results.insert(dataset_name.clone(), results_of_this_dataset);
+        results.insert(dataset_key.clone(), results_of_this_dataset);
     }
 
     Ok(results)

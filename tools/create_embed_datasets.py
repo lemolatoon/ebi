@@ -30,10 +30,11 @@ def calculate_precision_and_dump_to_json(dataset_metas, output_dir):
             
             precisions = [calculate_precision(x) for array in column_data for x in array]
             n = np.percentile(precisions, 90)
-            precision_data[dataset_name] = n
+            dataset_key = f"{dataset_name.replace('/', '_')}_{column_name}"
+            precision_data[dataset_key] = n
             
             # Write the embedding data to a binary file
-            output_path = os.path.join(output_dir, f"{dataset_name.replace('/', '_')}.bin")
+            output_path = os.path.join(output_dir, f"{dataset_key}.bin")
             with open(output_path, "wb") as bin_file:
                 np.array(column_data, dtype=np.float64).tofile(bin_file)
             
