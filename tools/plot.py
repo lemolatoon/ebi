@@ -901,7 +901,7 @@ def main():
                 dataset_out_dir,
                 f"materialize_elapsed_seconds.png",
             ),
-            note_str="*ALP,Buff utilize SIMD instructions",
+            note_str="*ALP utilize SIMD instructions",
         )
 
         plot_comparison(
@@ -1009,7 +1009,7 @@ def main():
         "Average Decompression Throughput (bigger, better)",
         "Throughput (GB/s)",
         os.path.join(barchart_dir, "average_decompression_throughput.png"),
-        note_str="*ALP,Buff utilizes SIMD instructions",
+        note_str="*ALP utilizes SIMD instructions",
     )
     plot_comparison(
         max_throughput_df.columns,
@@ -1096,7 +1096,7 @@ def main():
         "Boxplot for Average Decompression(Materialize) Throughput (bigger, better)",
         "Throughput (GB/s)",
         os.path.join(boxplot_dir, "boxplot_decompression_throughput.png"),
-        note_str="*ALP,Buff utilize SIMD instructions",
+        note_str="*ALP utilize SIMD instructions",
     )
 
     plot_boxplot(
