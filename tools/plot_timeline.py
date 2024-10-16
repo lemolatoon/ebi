@@ -48,7 +48,7 @@ def draw_timeline(title, compression_methods, out_dir: str = "results", fontsize
         # Create the first wave path
         pp = (0, d1, 0, -d1)
         px = np.array([wave_symbol_position + pp[i % 4] for i in range(wn)])
-        py = np.linspace(-0.5, 2.6, wn)  # Extended height
+        py = np.linspace(-0.5, 4.3, wn)  # Extended height
         wave_path1 = Path(list(zip(px, py)), [Path.MOVETO] + [Path.CURVE3] * (wn - 1))
 
         # Create the second wave path with a slight offset
@@ -73,7 +73,7 @@ def draw_timeline(title, compression_methods, out_dir: str = "results", fontsize
     for i, (year, methods) in enumerate(year_to_methods.items()):
         display_year = display_years[i]
         n = len(methods)
-        offset_range = 0.4 if n < 4 else 0.6
+        offset_range = 0.4 if n < 3 else 0.6
         start_offset = -offset_range / 2
         step = offset_range / max(n - 1, 1)  # Step size for label distribution
 
@@ -83,14 +83,14 @@ def draw_timeline(title, compression_methods, out_dir: str = "results", fontsize
         # Add labels with horizontal offsets
         for j, name in enumerate(methods):
             x_offset = display_year + start_offset + j * step
-            ax.text(x_offset, 1.1, name, ha='center', va='bottom', rotation=90, fontsize=fontsize, fontfamily='monospace')
+            ax.text(x_offset, 1.3, name, ha='center', va='bottom', rotation=90, fontsize=fontsize, fontfamily='monospace')
 
     # Configure the axis and layout
     ax.set_xticks(display_years)
     ax.set_xticklabels([str(y) if y != replaced_year else '1977' for y in display_years], fontsize=fontsize)
     ax.set_yticks([])
     ax.set_xlim(display_years[0] - 1, display_years[-1] + 1)
-    ax.set_ylim(-0.2, 2.4)  # Adjusted for extended height
+    ax.set_ylim(-0.2, 4.0)  # Adjusted for extended height
 
     # Adjust layout to prevent overlap
     plt.tight_layout()
@@ -108,7 +108,9 @@ compression_methods = [
     ("Sprintz", 2018),
     ("Buff", 2021),
     ("Chimp", 2022),
+    ("Patas", 2022),
     ("Elf", 2023),
+    ("BtrBlocks", 2023),
     ("ALP", 2023),
 ]
 
