@@ -461,7 +461,8 @@ def plot_absolute_stacked_execution_times_for_methods(
     if not omit_title:
         plt.title(f"Execution Times for {dataset_name} by Compression Method", fontsize=fontsize)
     plt.xticks(index, map_method(methods), rotation=45, fontsize=fontsize)
-    plt.legend(title="Processing Types", bbox_to_anchor=(1.05, 1), loc="upper left", fontsize=fontsize)
+    # plt.legend(title="Processing Types", bbox_to_anchor=(1.05, 1), loc="upper left", fontsize=fontsize)
+    plt.legend(title="Processing Types", loc="upper right", fontsize=fontsize)
     plt.tight_layout()
     plt.savefig(output_path)
     plt.close()
@@ -550,13 +551,28 @@ def plot_combined_radar_chart(data_dict, title, labels, output_path):
     for i, label in enumerate(labels):
         values = [normalized_data_dict[metric][i] for metric in metrics]
         values += values[:1]  # Repeat the first value to close the polygon
-        ax.plot(angles, values, color=get_color(method_mapping[label]), label=method_mapping[label], linewidth=2, fontsize=fontsize)
+        ax.plot(angles, values, color=get_color(method_mapping[label]), label=method_mapping[label], linewidth=2, zorder=2)
 
-    ax.set_xticks(angles[:-1])
+    empty_strs = [""] * len(metrics)
+    ax.set_xticks(angles[:-1], labels=empty_strs)
     # ax.set_xticklabels(metrics)
-    ax.set_xticklabels(
-        metrics, fontsize=12, fontweight="bold", horizontalalignment="center"
-    )
+    # ax.set_xticklabels(
+    #     metrics, fontsize=fontsize + 2, fontweight="bold", horizontalalignment="center"
+    # )
+    # Adjust each label position by adding some offset in polar coordinates
+    distance_idx = 1
+    distances = [1.1, 1.2]
+    for i, (metric, angle) in enumerate(zip(metrics, angles[:-1])):
+        ha = 'center'
+        if distance_idx == 0:
+            distance_idx = 1
+        else:
+            distance_idx = 0
+        distance = 1.25 if metric == "Compression\nRatios" else distances[distance_idx]
+        # Adjust the position using ax.text
+        ax.text(angle, distance, metric, size=fontsize + 2, horizontalalignment=ha, fontweight="bold", verticalalignment="center", zorder=1)
+
+
 
     if not omit_title:
         plt.title(title, size=15, color="black", y=1.1, fontsize=fontsize)
@@ -566,7 +582,7 @@ def plot_combined_radar_chart(data_dict, title, labels, output_path):
 
     # Add padding around the chart to prevent clipping
     # plt.subplots_adjust(left=0.2, right=0.8, top=0.8, bottom=0.3)
-    plt.subplots_adjust(left=0.15, right=0.85, top=0.85, bottom=0.15)
+    plt.subplots_adjust(left=0.17, right=0.85, top=0.95, bottom=0.16)
 
     plt.savefig(output_path, format="png", dpi=300)
     plt.close()
@@ -967,6 +983,9 @@ def main():
     barchart_dir = os.path.join(out_dir, "barchart")
     boxplot_dir = os.path.join(out_dir, "boxplot")
 
+    os.makedirs(barchart_dir, exist_ok=True)
+    os.makedirs(boxplot_dir, exist_ok=True)
+
     plot_absolute_stacked_execution_times_for_methods(
         decompression_execution_times_throughput,
         0,
@@ -975,9 +994,6 @@ def main():
         note_str="*ALP utilize SIMD instructions",
         y_label="Average Execution Times (s/GB)",
     )
-
-    os.makedirs(barchart_dir, exist_ok=True)
-    os.makedirs(boxplot_dir, exist_ok=True)
     plot_comparison(
         compression_ratios_df.columns,
         [
@@ -1168,8 +1184,9 @@ def main():
     }
 
     def plot_radar_chart(pred: pl.Expr | List[str], title: str, output_path: str, kind: Literal["all", "comp", "db-query", "without-filter-mat"]="all"):
+        cr_key = "Compression\nRatios"
         data_dict = {
-            "Compression Ratios": np.array(compression_ratios_avg.select(pred).row(0))
+            cr_key: np.array(compression_ratios_avg.select(pred).row(0))
             ** -1,
             "Compression Throughput": np.array(
                 compression_throughput_avg.select(pred).row(0)
@@ -1180,6 +1197,13 @@ def main():
             "Max Throughput": np.array(max_throughput_avg.select(pred).row(0)),
             "Sum Throughput": np.array(sum_throughput_avg.select(pred).row(0)),
         }
+        key_map = {
+            "greater_10th_percentile": "> 10th Percentile",
+            "greater_50th_percentile": "> 50th Percentile",
+            "greater_90th_percentile": "> 90th Percentile",
+            "eq": "==",
+            "ne": "!=",
+        }
 
         match kind:
             case "all":
@@ -1188,19 +1212,19 @@ def main():
                 data_dict.pop("Max Throughput")
                 data_dict.pop("Sum Throughput")
             case "db-query":
-                data_dict.pop("Compression Ratios")
+                data_dict.pop(cr_key)
                 data_dict.pop("Compression Throughput")
                 data_dict.pop("Decompression Throughput")
 
         if kind != "comp":
             for key in filter_throughput_avg:
-                data_dict[f"Filter Throughput \n({key})"] = np.array(
+                data_dict[f"Filter Throughput \n({key_map[key]})"] = np.array(
                     filter_throughput_avg[key].select(pred).row(0)
                 )
 
             if kind != "without-filter-mat":
                 for key in filter_materialize_throughput_avg:
-                    data_dict[f"Filter Materialize Throughput \n({key})"] = np.array(
+                    data_dict[f"Filter Materialize Throughput \n({key_map[key]})"] = np.array(
                         filter_materialize_throughput_avg[key].select(pred).row(0)
                     )
 
