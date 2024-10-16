@@ -263,12 +263,23 @@ compression_methods: List[CompressionMethodKeys] = [
     "Snappy",
     "FFIAlp",
 ]
+skip_methods = set(["RLE"])
+for method in skip_methods:
+    compression_methods.remove(method)
+method_mapping = {
+    **{method: method for method in compression_methods},
+    **{f"BUFF_{i}": f"Buff_{i}" for i in [1, 3, 5, 8]},
+    "BUFF": "Buff",
+}
+def map_method(methods: List[str]) -> List[str]:
+    return [method_mapping[method] for method in methods]
 mapped_processing_types = set(
     "+".join(segment_mapping[method][mapping_key])
     for method in compression_methods
     for mapping_key in segment_mapping[method]
 )
 
+fontsize = 15
 
 # Function to calculate the ratios for each process
 def calculate_ratios(
@@ -286,13 +297,13 @@ color_map_exe: dict[str, tuple[float, float, float, float]] = {}
 
 
 def get_color_exe(label: str) -> tuple[float, float, float, float]:
-    global color_map
-    if label in color_map:
-        return color_map[label]
-    next_index = len(color_map)
-    color_map[label] = matplotlib.colormaps["tab20"](next_index)
+    global color_map_exe
+    if label in color_map_exe:
+        return color_map_exe[label]
+    next_index = len(color_map_exe)
+    color_map_exe[label] = matplotlib.colormaps["tab20"](next_index)
 
-    return color_map[label]
+    return color_map_exe[label]
 
 
 def add_notes_to_plot(
@@ -305,6 +316,7 @@ def add_notes_to_plot(
     if note_str is not None:
         fig.text(x_pos, y_pos, note_str, ha="right", va="bottom", fontsize=fontsize)
 
+omit_title = True
 
 def plot_stacked_execution_time_ratios_for_methods(
     # methods to dataset to execution times
@@ -358,7 +370,7 @@ def plot_relative_stacked_execution_time_ratios_for_methods(
     index = np.arange(len(methods))
 
     fig = plt.figure(figsize=(12, 8))
-    add_notes_to_plot(fig, note_str)
+    add_notes_to_plot(fig, note_str, fontsize=fontsize)
 
     # Plot the stacked bar chart for each processing type
     bottom = np.zeros(len(methods))
@@ -375,15 +387,14 @@ def plot_relative_stacked_execution_time_ratios_for_methods(
         bottom += values
 
     # Add chart decorations
-    plt.xlabel("Compression Methods")
-    plt.ylabel("Execution Time Percentage (%)")
-    plt.title(f"Execution Time Ratios for {dataset_name} by Compression Method")
-    plt.xticks(index, methods, rotation=45)
-    plt.legend(title="Processing Types", bbox_to_anchor=(1.05, 1), loc="upper left")
+    plt.xlabel("Compression Methods", fontsize=fontsize)
+    plt.ylabel("Execution Time Percentage (%)", fontsize=fontsize)
+    if not omit_title:
+        plt.title(f"Execution Time Ratios for {dataset_name} by Compression Method", fontsize=fontsize)
+    plt.xticks(index, methods, rotation=45, fontsize=fontsize)
+    plt.legend(title="Processing Types", bbox_to_anchor=(1.05, 1), loc="upper left", fontsize=fontsize)
     plt.tight_layout()
     plt.savefig(output_path)
-    plt.close()
-
     plt.close()
 
 
@@ -398,6 +409,7 @@ def plot_absolute_stacked_execution_times_for_methods(
         [Dict[CompressionMethodKeys, SegmentLabelMapping]], Any
     ]
     | None = None,
+    y_label: str = "Execution Time (ns)",
 ):
     methods: List[CompressionMethodKeys] = list(data.keys())  # type: ignore
     processing_types = list(data[methods[0]][0].keys())
@@ -427,7 +439,7 @@ def plot_absolute_stacked_execution_times_for_methods(
     index = np.arange(len(methods))
 
     fig = plt.figure(figsize=(12, 8))
-    add_notes_to_plot(fig, note_str)
+    add_notes_to_plot(fig, note_str, fontsize=fontsize)
 
     # Plot the stacked bar chart for each processing type
     bottom = np.zeros(len(methods))
@@ -444,15 +456,15 @@ def plot_absolute_stacked_execution_times_for_methods(
         bottom += values
 
     # Add chart decorations
-    plt.xlabel("Compression Methods")
-    plt.ylabel("Execution Time (ns)")  # y-axis now reflects absolute time
-    plt.title(f"Execution Times for {dataset_name} by Compression Method")
-    plt.xticks(index, methods, rotation=45)
-    plt.legend(title="Processing Types", bbox_to_anchor=(1.05, 1), loc="upper left")
+    plt.xlabel("Compression Methods", fontsize=fontsize)
+    plt.ylabel(y_label, fontsize=fontsize)  # y-axis now reflects absolute time
+    if not omit_title:
+        plt.title(f"Execution Times for {dataset_name} by Compression Method", fontsize=fontsize)
+    plt.xticks(index, map_method(methods), rotation=45, fontsize=fontsize)
+    # plt.legend(title="Processing Types", bbox_to_anchor=(1.05, 1), loc="upper left", fontsize=fontsize)
+    plt.legend(title="Processing Types", loc="upper right", fontsize=fontsize)
     plt.tight_layout()
     plt.savefig(output_path)
-    plt.close()
-
     plt.close()
 
 
@@ -474,13 +486,14 @@ def plot_comparison(
     filtered_labels, filtered_data = zip(*filtered_labels_data)
 
     fig = plt.figure(figsize=(12, 8))
-    add_notes_to_plot(fig, note_str)
-    plt.bar(x=filtered_labels, height=filtered_data, color="blue")
+    add_notes_to_plot(fig, note_str, fontsize=fontsize)
+    plt.bar(x=map_method(filtered_labels), height=filtered_data, color="blue")
     plt.ylim(0, max_value)
-    plt.title(title)
-    plt.xlabel("Compression Method")
-    plt.ylabel(y_label)
-    plt.xticks(rotation=45, ha="right")
+    if not omit_title:
+        plt.title(title, fontsize=fontsize)
+    plt.xlabel("Compression Method", fontsize=fontsize)   
+    plt.ylabel(y_label, fontsize=fontsize)
+    plt.xticks(rotation=45, ha="right", fontsize=fontsize)
     plt.tight_layout()
     plt.savefig(output_path)
     plt.close()
@@ -489,15 +502,17 @@ def plot_comparison(
 def plot_boxplot(data, title, y_label, output_path, note_str: str | None = None):
     if isinstance(data, pl.DataFrame):
         data = data.to_pandas()
+    data = data.rename(columns=method_mapping)
     # Plot the boxplot
     fig = plt.figure(figsize=(10, 6))
-    add_notes_to_plot(fig, note_str)
-    data.boxplot(grid=False)
+    add_notes_to_plot(fig, note_str, fontsize=fontsize)
+    data.boxplot(grid=False, fontsize=fontsize)
 
     # Customize the plot
-    plt.title(title)
-    plt.ylabel(y_label)
-    plt.xticks(rotation=45, ha="right")
+    if not omit_title:
+        plt.title(title, fontsize=fontsize)
+    plt.ylabel(y_label, fontsize=fontsize)
+    plt.xticks(rotation=45, ha="right", fontsize=fontsize)
 
     # Save the plot
     plt.tight_layout()
@@ -536,22 +551,38 @@ def plot_combined_radar_chart(data_dict, title, labels, output_path):
     for i, label in enumerate(labels):
         values = [normalized_data_dict[metric][i] for metric in metrics]
         values += values[:1]  # Repeat the first value to close the polygon
-        ax.plot(angles, values, color=get_color(label), label=label, linewidth=2)
+        ax.plot(angles, values, color=get_color(method_mapping[label]), label=method_mapping[label], linewidth=2, zorder=2)
 
-    ax.set_xticks(angles[:-1])
+    empty_strs = [""] * len(metrics)
+    ax.set_xticks(angles[:-1], labels=empty_strs)
     # ax.set_xticklabels(metrics)
-    ax.set_xticklabels(
-        metrics, fontsize=12, fontweight="bold", horizontalalignment="center"
-    )
+    # ax.set_xticklabels(
+    #     metrics, fontsize=fontsize + 2, fontweight="bold", horizontalalignment="center"
+    # )
+    # Adjust each label position by adding some offset in polar coordinates
+    distance_idx = 1
+    distances = [1.1, 1.2]
+    for i, (metric, angle) in enumerate(zip(metrics, angles[:-1])):
+        ha = 'center'
+        if distance_idx == 0:
+            distance_idx = 1
+        else:
+            distance_idx = 0
+        distance = 1.25 if metric == "Compression\nRatios" else distances[distance_idx]
+        # Adjust the position using ax.text
+        ax.text(angle, distance, metric, size=fontsize + 2, horizontalalignment=ha, fontweight="bold", verticalalignment="center", zorder=1)
 
-    plt.title(title, size=15, color="black", y=1.1)
+
+
+    if not omit_title:
+        plt.title(title, size=15, color="black", y=1.1, fontsize=fontsize)
 
     # Adjust legend to be split into two rows if there are many labels
-    ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.1), ncol=4)
+    ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.1), ncol=4, fontsize=fontsize)
 
     # Add padding around the chart to prevent clipping
     # plt.subplots_adjust(left=0.2, right=0.8, top=0.8, bottom=0.3)
-    plt.subplots_adjust(left=0.15, right=0.85, top=0.85, bottom=0.15)
+    plt.subplots_adjust(left=0.17, right=0.85, top=0.95, bottom=0.16)
 
     plt.savefig(output_path, format="png", dpi=300)
     plt.close()
@@ -618,6 +649,9 @@ def main():
     ] = {
         method_name: [None] * len(dataset_names) for method_name in compression_methods
     }
+    decompression_execution_times_ratio_data: Dict[str, List[Dict[str, float]]] = {
+        method_name: [None] * len(dataset_names) for method_name in compression_methods
+    }
     filter_execution_times_data: dict[
         str, dict[str, List[Optional[ExecutionTimesWithOthers]]]
     ] = {
@@ -643,6 +677,8 @@ def main():
         if dataset_name == "command_type":
             continue
         for method_name in tqdm(methods, leave=False):
+            if  method_name in skip_methods:
+                continue
             output: AllOutputInner = methods[method_name]
             ratio = fmean(
                 compress["command_specific"]["compression_ratio"]
@@ -668,6 +704,7 @@ def main():
 
             compression_execution_times: ExecutionTimesWithOthers = {}  # type: ignore
             decompression_execution_times: ExecutionTimesWithOthers = {}  # type: ignore
+            decompression_execution_times_ratios: Dict[str, float] = {}
             for key in execution_times_keys:
                 compression_execution_times[key] = fmean(
                     compress["execution_times"][key] for compress in output["compress"]
@@ -680,16 +717,22 @@ def main():
                     materialize["execution_times"][key]
                     for materialize in output["materialize"]
                 )
-                decompression_execution_times["others"] = fmean(
+                entiere_decompression_time = fmean(
                     materialize["elapsed_time_nanos"]
                     for materialize in output["materialize"]
-                ) - sum(decompression_execution_times.values())
+                )
+                decompression_execution_times["others"] = entiere_decompression_time - sum(decompression_execution_times.values())
+
+                decompression_execution_times_ratios[key] = decompression_execution_times[key] / entiere_decompression_time
 
             compression_execution_times_data[method_name][dataset_index] = (
                 compression_execution_times
             )
             decompression_execution_times_data[method_name][dataset_index] = (
                 decompression_execution_times
+            )
+            decompression_execution_times_ratio_data[method_name][dataset_index] = (
+                decompression_execution_times_ratios
             )
 
             compression_ratios_data[method_name][dataset_index] = ratio
@@ -874,7 +917,7 @@ def main():
                 dataset_out_dir,
                 f"materialize_elapsed_seconds.png",
             ),
-            note_str="*ALP,Buff utilize SIMD instructions",
+            note_str="*ALP utilize SIMD instructions",
         )
 
         plot_comparison(
@@ -926,11 +969,31 @@ def main():
                 filter_name
             ].filter(pl.all_horizontal(pl.col("*").is_not_null()))
         )
+    
 
+    decompression_execution_times_throughput: Dict[str, List[Dict[str, float]]] = {
+        method: [
+            {
+                key: fmean([d[key] for d in decompression_execution_times_ratio_data[method]]) / fmean(decompression_throughput_data[method])
+                for key in decompression_execution_times_ratio_data[method][0].keys()
+            }
+        ]
+        for method in decompression_execution_times_ratio_data
+    }
     barchart_dir = os.path.join(out_dir, "barchart")
     boxplot_dir = os.path.join(out_dir, "boxplot")
+
     os.makedirs(barchart_dir, exist_ok=True)
     os.makedirs(boxplot_dir, exist_ok=True)
+
+    plot_absolute_stacked_execution_times_for_methods(
+        decompression_execution_times_throughput,
+        0,
+        "Decompression Throughput",
+        os.path.join(barchart_dir, "stacked_decompression_throughput.png"),
+        note_str="*ALP utilize SIMD instructions",
+        y_label="Average Execution Times (s/GB)",
+    )
     plot_comparison(
         compression_ratios_df.columns,
         [
@@ -962,7 +1025,7 @@ def main():
         "Average Decompression Throughput (bigger, better)",
         "Throughput (GB/s)",
         os.path.join(barchart_dir, "average_decompression_throughput.png"),
-        note_str="*ALP,Buff utilizes SIMD instructions",
+        note_str="*ALP utilizes SIMD instructions",
     )
     plot_comparison(
         max_throughput_df.columns,
@@ -1049,7 +1112,7 @@ def main():
         "Boxplot for Average Decompression(Materialize) Throughput (bigger, better)",
         "Throughput (GB/s)",
         os.path.join(boxplot_dir, "boxplot_decompression_throughput.png"),
-        note_str="*ALP,Buff utilize SIMD instructions",
+        note_str="*ALP utilize SIMD instructions",
     )
 
     plot_boxplot(
@@ -1120,9 +1183,10 @@ def main():
         key: df.mean() for key, df in filter_materialize_throughput_dfs.items()
     }
 
-    def plot_radar_chart(pred: pl.Expr | List[str], title: str, output_path: str):
+    def plot_radar_chart(pred: pl.Expr | List[str], title: str, output_path: str, kind: Literal["all", "comp", "db-query", "without-filter-mat"]="all"):
+        cr_key = "Compression\nRatios"
         data_dict = {
-            "Compression Ratios": np.array(compression_ratios_avg.select(pred).row(0))
+            cr_key: np.array(compression_ratios_avg.select(pred).row(0))
             ** -1,
             "Compression Throughput": np.array(
                 compression_throughput_avg.select(pred).row(0)
@@ -1133,32 +1197,55 @@ def main():
             "Max Throughput": np.array(max_throughput_avg.select(pred).row(0)),
             "Sum Throughput": np.array(sum_throughput_avg.select(pred).row(0)),
         }
+        key_map = {
+            "greater_10th_percentile": "> 10th Percentile",
+            "greater_50th_percentile": "> 50th Percentile",
+            "greater_90th_percentile": "> 90th Percentile",
+            "eq": "==",
+            "ne": "!=",
+        }
 
-        for key in filter_throughput_avg:
-            data_dict[f"Filter Throughput ({key})"] = np.array(
-                filter_throughput_avg[key].select(pred).row(0)
-            )
+        match kind:
+            case "all":
+                pass
+            case "comp":
+                data_dict.pop("Max Throughput")
+                data_dict.pop("Sum Throughput")
+            case "db-query":
+                data_dict.pop(cr_key)
+                data_dict.pop("Compression Throughput")
+                data_dict.pop("Decompression Throughput")
 
-        for key in filter_materialize_throughput_avg:
-            data_dict[f"Filter Materialize Throughput ({key})"] = np.array(
-                filter_materialize_throughput_avg[key].select(pred).row(0)
-            )
+        if kind != "comp":
+            for key in filter_throughput_avg:
+                data_dict[f"Filter Throughput \n({key_map[key]})"] = np.array(
+                    filter_throughput_avg[key].select(pred).row(0)
+                )
+
+            if kind != "without-filter-mat":
+                for key in filter_materialize_throughput_avg:
+                    data_dict[f"Filter Materialize Throughput \n({key_map[key]})"] = np.array(
+                        filter_materialize_throughput_avg[key].select(pred).row(0)
+                    )
 
         labels = compression_ratios_df.select(pred).columns
 
         plot_combined_radar_chart(data_dict, title, labels, output_path)
 
-    plot_radar_chart(
-        pl.all().exclude("Uncompressed", "RLE"),
-        "Average Performance Radar Chart All",
-        os.path.join(combined_radar_chart_dir, "all_radar_chart.png"),
-    )
-    # Xor Family
-    plot_radar_chart(
-        ["Gorilla", "Chimp", "Chimp128", "ElfOnChimp", "Elf"],
-        "Average Performance Radar Chart Xor Family",
-        os.path.join(combined_radar_chart_dir, "xor_family_radar_chart.png"),
-    )
+    for kind in ["all", "comp", "db-query", "without-filter-mat"]:
+        plot_radar_chart(
+            pl.all().exclude("Uncompressed", "RLE"),
+            "Average Performance Radar Chart All",
+            os.path.join(combined_radar_chart_dir, f"all_radar_chart_{kind}.png"),
+            kind=kind
+        )
+        # Xor Family
+        plot_radar_chart(
+            ["Gorilla", "Chimp", "Chimp128", "ElfOnChimp", "Elf"],
+            "Average Performance Radar Chart Xor Family",
+            os.path.join(combined_radar_chart_dir, f"xor_family_radar_chart_{kind}.png"),
+            kind=kind
+        )
     labels = compression_ratios_df.columns
     # Top 5 Compression Ratios
     compression_ratios_sorted_labels = list(
@@ -1231,50 +1318,61 @@ def main():
         )
     )
     for unnecessary_label in ["Uncompressed", "RLE"]:
-        compression_ratios_sorted_labels.remove(unnecessary_label)
-        compression_throughput_sorted_labels.remove(unnecessary_label)
-        filter_greater_throughput_sorted_labels.remove(unnecessary_label)
-        max_throughput_sorted_labels.remove(unnecessary_label)
-        sum_throughput_sorted_labels.remove(unnecessary_label)
+        try:
+            compression_ratios_sorted_labels.remove(unnecessary_label)
+            compression_throughput_sorted_labels.remove(unnecessary_label)
+            filter_greater_throughput_sorted_labels.remove(unnecessary_label)
+            max_throughput_sorted_labels.remove(unnecessary_label)
+            sum_throughput_sorted_labels.remove(unnecessary_label)
+        except ValueError:
+            print(f"{unnecessary_label} not found in labels list")
+            pass
 
-    plot_radar_chart(
-        compression_ratios_sorted_labels[:5],
-        "Top 5 Compression Ratios",
-        os.path.join(
-            combined_radar_chart_dir, "top_5_compression_ratios_radar_chart.png"
-        ),
-    )
-    plot_radar_chart(
-        compression_throughput_sorted_labels[:5],
-        "Top 5 Compression Throughput",
-        os.path.join(
-            combined_radar_chart_dir, "top_5_compression_throughput_radar_chart.png"
-        ),
-    )
-    plot_radar_chart(
-        decompressin_throughput_sorted_labels[:5],
-        "Top 5 Decompression Throughput",
-        os.path.join(
-            combined_radar_chart_dir, "top_5_decompression_throughput_radar_chart.png"
-        ),
-    )
-    plot_radar_chart(
-        max_throughput_sorted_labels[:5],
-        "Top 5 Max Throughput",
-        os.path.join(combined_radar_chart_dir, "top_5_max_throughput_radar_chart.png"),
-    )
-    plot_radar_chart(
-        sum_throughput_sorted_labels[:5],
-        "Top 5 Sum Throughput",
-        os.path.join(combined_radar_chart_dir, "top_5_sum_throughput_radar_chart.png"),
-    )
-    plot_radar_chart(
-        filter_greater_throughput_sorted_labels[:5],
-        "Top 5 Filter GREATER then 10 th percentile Throughput",
-        os.path.join(
-            combined_radar_chart_dir, "top_5_filter_greater_throughput_radar_chart.png"
-        ),
-    )
+    for kind in ["all", "comp", "db-query", "without-filter-mat"]:
+        plot_radar_chart(
+            compression_ratios_sorted_labels[:5],
+            "Top 5 Compression Ratios",
+            os.path.join(
+                combined_radar_chart_dir, f"top_5_compression_ratios_radar_chart_{kind}.png"
+            ),
+            kind=kind,
+        )
+        plot_radar_chart(
+            compression_throughput_sorted_labels[:5],
+            "Top 5 Compression Throughput",
+            os.path.join(
+                combined_radar_chart_dir, f"top_5_compression_throughput_radar_chart_{kind}.png"
+            ),
+            kind=kind
+        )
+        plot_radar_chart(
+            decompressin_throughput_sorted_labels[:5],
+            "Top 5 Decompression Throughput",
+            os.path.join(
+                combined_radar_chart_dir, f"top_5_decompression_throughput_radar_chart_{kind}.png"
+            ),
+            kind=kind
+        )
+        plot_radar_chart(
+            max_throughput_sorted_labels[:5],
+            "Top 5 Max Throughput",
+            os.path.join(combined_radar_chart_dir, f"top_5_max_throughput_radar_chart_{kind}.png"),
+            kind=kind
+        )
+        plot_radar_chart(
+            sum_throughput_sorted_labels[:5],
+            "Top 5 Sum Throughput",
+            os.path.join(combined_radar_chart_dir, f"top_5_sum_throughput_radar_chart_{kind}.png"),
+            kind=kind
+        )
+        plot_radar_chart(
+            filter_greater_throughput_sorted_labels[:5],
+            "Top 5 Filter GREATER then 10 th percentile Throughput",
+            os.path.join(
+                combined_radar_chart_dir, f"top_5_filter_greater_throughput_radar_chart_{kind}.png"
+            ),
+            kind=kind
+        )
 
 
 if __name__ == "__main__":
