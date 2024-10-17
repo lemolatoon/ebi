@@ -77,7 +77,8 @@ pub type BUFFIterator<'a> = iter::Map<slice::Iter<'a, f64>, F>;
 impl Reader for BUFFReader {
     type NativeHeader = ();
 
-    type DecompressIterator<'a> = BUFFIterator<'a>
+    type DecompressIterator<'a>
+        = BUFFIterator<'a>
     where
         Self: 'a;
 

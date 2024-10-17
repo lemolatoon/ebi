@@ -35,7 +35,8 @@ pub type ZstdDecompressIterator<'a> = iter::Map<slice::Iter<'a, f64>, F>;
 impl<R: Read> Reader for GzipReader<R> {
     type NativeHeader = ();
 
-    type DecompressIterator<'a> = ZstdDecompressIterator<'a>
+    type DecompressIterator<'a>
+        = ZstdDecompressIterator<'a>
     where
         Self: 'a;
 

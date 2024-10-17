@@ -1,9 +1,10 @@
 use either::Either;
 use experimenter::{
-    get_appropriate_scale, AllOutput, AllOutputInner, CompressStatistics, CompressionConfig,
+    get_appropriate_precision, AllOutput, AllOutputInner, CompressStatistics, CompressionConfig,
     FilterConfig, FilterFamilyOutput, FilterMaterializeConfig, MaterializeConfig, MatrixResult,
-    MaxConfig, Output, OutputWrapper, SumConfig, UCR2018Config, UCR2018DecompressionResult,
-    UCR2018ForAllCompressionMethodsResult, UCR2018Result, UCR2018ResultForOneDataset,
+    MaxConfig, Output, OutputWrapper, SimpleCompressionPerformanceForOneDataset, SumConfig,
+    UCR2018Config, UCR2018DecompressionResult, UCR2018ForAllCompressionMethodsResult,
+    UCR2018Result, UCR2018ResultForOneDataset,
 };
 use glob::glob;
 use rand::Rng as _;
@@ -281,6 +282,10 @@ enum Commands {
         #[arg(long, short('o'))]
         output_dir: PathBuf,
     },
+    Embedding {
+        #[arg(long, short('o'))]
+        output_dir: PathBuf,
+    },
 }
 
 impl Commands {
@@ -298,6 +303,7 @@ impl Commands {
             Commands::Sum { .. } => "sum",
             Commands::UCR2018 { .. } => "ucr2018",
             Commands::Matrix { .. } => "matrix",
+            Commands::Embedding { .. } => "embedding",
         }
     }
 }
@@ -458,6 +464,35 @@ fn main() -> anyhow::Result<()> {
         return Ok(());
     }
 
+    if let Commands::Embedding { output_dir } = &cli.command {
+        let input_dir = Path::new(input);
+        let output_dir = output_dir.join("result").join("embedding");
+        anyhow::ensure!(
+            input_dir.is_dir(),
+            "Input directory does not exist or not directory: {}",
+            input_dir.display()
+        );
+
+        std::fs::create_dir_all(&output_dir)?;
+
+        let save_dir = input_dir.parent().unwrap().join("result").join("embedding");
+        // Determine the next available directory name
+        let mut dir_number = 0;
+        let unique_output_dir = loop {
+            let output_dirname = save_dir.join(format!("{:03}", dir_number));
+            if !output_dirname.exists() {
+                break output_dirname;
+            }
+            dir_number += 1;
+        };
+
+        // without controlled precision support
+        let output = embedding_command(input_dir)?;
+        save_embedding_json(output, &unique_output_dir)?;
+
+        return Ok(());
+    }
+
     let files = glob(input)
         .context("Failed to read glob pattern")?
         .collect::<Result<Vec<PathBuf>, _>>()
@@ -546,6 +581,7 @@ fn process_file(filename: impl AsRef<Path>, cli: Cli) -> anyhow::Result<()> {
         Commands::All { .. } => unreachable!(),
         Commands::UCR2018 { .. } => unreachable!(),
         Commands::Matrix { .. } => unreachable!(),
+        Commands::Embedding { .. } => unreachable!(),
     };
 
     // Get the directory where the filename is located
@@ -602,6 +638,20 @@ fn save_ucr2018_json(
         let output_file = save_dir.as_ref().join(filename);
         write_output_json(result, output_file)?;
     }
+
+    Ok(())
+}
+
+fn save_embedding_json(
+    output: HashMap<String, HashMap<String, SimpleCompressionPerformanceForOneDataset>>,
+    save_dir: impl AsRef<Path>,
+) -> anyhow::Result<()> {
+    // Create the directory if it doesn't exist
+    std::fs::create_dir_all(&save_dir)?;
+
+    let output_file = save_dir.as_ref().join("embedding_result.json");
+    // Write the output to JSON
+    write_output_json(Output::Embedding(output), output_file)?;
 
     Ok(())
 }
@@ -1062,7 +1112,10 @@ fn create_default_compressor_config(
         filename.as_ref().display()
     ))?);
     println!("get scale for {}", filename.as_ref().display());
-    let scale = get_appropriate_scale(reader, ',');
+    let prec = get_appropriate_precision(reader, ',')?;
+    let scale = 10u64
+        .checked_pow(prec)
+        .context("Failed to get appropriate scale")?;
     let mut configs: Vec<(&'static str, CompressorConfig)> = vec![
         (
             "uncompressed",
@@ -1082,25 +1135,14 @@ fn create_default_compressor_config(
         ("snappy", CompressorConfig::snappy().build().into()),
         ("ffi_alp", CompressorConfig::ffi_alp().build().into()),
     ];
-    match scale {
-        Ok(scale) => {
-            configs.push((
-                "delta_sprintz",
-                CompressorConfig::delta_sprintz()
-                    .scale(scale)
-                    .build()
-                    .into(),
-            ));
-            configs.push(("buff", CompressorConfig::buff().scale(scale).build().into()));
-        }
-        Err(e) => {
-            println!(
-                "Failed to get appropriate scale for {}\n{}",
-                filename.as_ref().display(),
-                e
-            );
-        }
-    }
+    configs.push((
+        "delta_sprintz",
+        CompressorConfig::delta_sprintz()
+            .scale(scale)
+            .build()
+            .into(),
+    ));
+    configs.push(("buff", CompressorConfig::buff().scale(scale).build().into()));
     let configs = configs.into_iter().map(|(name, config)| {
         (
             name,
@@ -1939,7 +1981,7 @@ fn ucr2018_command(
     dbg!(&dataset_entries);
 
     let mut dataset_scales = HashMap::new();
-    let mut scale_fallbacked_datasets = Vec::new();
+    let scale_fallbacked_datasets = Vec::new();
     for dataset_entry in tqdm(dataset_entries.iter()) {
         if !dataset_entry.is_dir() {
             continue;
@@ -1955,17 +1997,14 @@ fn ucr2018_command(
             File::open(&train_file)
                 .context(format!("Failed to open file.: {}", train_file.display()))?,
         );
-        let scale = match get_appropriate_scale(train_file_reader, '\t') {
-            Ok(scale) => scale,
-            Err(_) => {
-                println!(
-                    "Failed to get appropriate scale for {}, Fallback to precision 9, scale: 10^9",
-                    dataset_name
-                );
-                scale_fallbacked_datasets.push(dataset_name.clone());
-                10u32.pow(9)
-            }
-        };
+        let prec = get_appropriate_precision(train_file_reader, '\t').context(format!(
+            "Failed to get appropriate prec for {}, Fallback to precision 9, scale: 10^9",
+            &dataset_name
+        ))?;
+        let scale = 10u64.checked_pow(prec).context(format!(
+            "Failed to calculate scale for {} with precision {}",
+            &dataset_name, prec
+        ))?;
         dataset_scales.insert(dataset_name, scale);
     }
     dbg!(&dataset_scales);
@@ -2218,7 +2257,7 @@ fn matrix_command(
     do_with_only_compression_methods_with_controlled_precision_support: bool,
 ) -> anyhow::Result<HashMap<String, MatrixResult>> {
     let original_data_precision = 8;
-    let scale = 10u32.pow(original_data_precision);
+    let scale = 10u64.pow(original_data_precision);
     let seed: u64 = (original_data_precision as usize * matrix_size + 42).try_into()?;
     let mut rng = ChaCha20Rng::seed_from_u64(seed);
     const N_DATA_MATRIX: usize = 40;
@@ -2329,6 +2368,158 @@ fn matrix_command(
         };
 
         results.insert(format!("{:?}", config.compression_scheme()), result);
+    }
+
+    Ok(results)
+}
+
+fn embedding_command(
+    input_dir: impl AsRef<Path>,
+    // dataaset_name -> method_name -> result
+) -> anyhow::Result<HashMap<String, HashMap<String, SimpleCompressionPerformanceForOneDataset>>> {
+    let datasets_exclude = "Cohere_wikipedia-22-12-simple-embeddings_emb";
+
+    let dataset_entries = entry_file_iter(input_dir.as_ref())?
+        .filter(|entry| {
+            let dataset_name = entry.file_stem().unwrap().to_string_lossy();
+            let ext = entry.as_path().extension().unwrap().to_string_lossy();
+            !datasets_exclude.contains(dataset_name.as_ref()) && ext == "bin"
+        })
+        .collect::<Vec<_>>();
+
+    let precision_map: HashMap<String, f64> = serde_json::from_reader(
+        File::open(input_dir.as_ref().join("precision_data.json"))
+            .context("Failed to open precision_data.json")?,
+    )
+    .context("Failed to parse precision_data.json")?;
+    let precision_map: HashMap<String, u64> = precision_map
+        .into_iter()
+        .map(|(k, v)| (k, v.round() as u64))
+        .collect();
+    let scale_map: HashMap<String, u64> = precision_map
+        .clone()
+        .into_iter()
+        .map(|(k, v)| {
+            (
+                k,
+                10u64
+                    .checked_pow(v as u32)
+                    .context(format!("Failed to calculate scale with precision: {v}"))
+                    .unwrap(),
+            )
+        })
+        .collect();
+    // scale is set to 10^precision later
+    let configs: Vec<CompressorConfig> = vec![
+        CompressorConfig::buff().scale(0).build().into(),
+        CompressorConfig::uncompressed().build().into(),
+        CompressorConfig::chimp128().build().into(),
+        CompressorConfig::chimp().build().into(),
+        CompressorConfig::elf_on_chimp().build().into(),
+        CompressorConfig::elf().build().into(),
+        CompressorConfig::gorilla().build().into(),
+        CompressorConfig::rle().build().into(),
+        CompressorConfig::zstd().build().into(),
+        CompressorConfig::gzip().build().into(),
+        CompressorConfig::snappy().build().into(),
+        CompressorConfig::ffi_alp().build().into(),
+        CompressorConfig::delta_sprintz().scale(0).build().into(),
+    ];
+
+    let mut results = HashMap::new();
+    let n = 10;
+    for dataset_entry in tqdm(dataset_entries) {
+        let dataset_key = dataset_entry
+            .file_stem()
+            .unwrap()
+            .to_string_lossy()
+            .to_string();
+        let scale = scale_map[&dataset_key];
+
+        // encode
+        let mut input_in_memory = Vec::new();
+        BufReader::new(File::open(dataset_entry.as_path())?).read_to_end(&mut input_in_memory)?;
+
+        let mut results_of_this_dataset = HashMap::new();
+        for config in tqdm(configs.clone()) {
+            let config = {
+                let mut config = config;
+                config.set_scale(scale);
+                config
+            };
+            let mut compression_elapsed_time_nanos = Vec::with_capacity(n);
+            let mut compression_segmented_execution_times = Vec::with_capacity(n);
+            let mut compression_result_string = Vec::with_capacity(n);
+            let mut compression_statistics = Vec::with_capacity(n);
+
+            let mut decompression_elapsed_time_nanos = Vec::with_capacity(n);
+            let mut decompression_segmented_execution_times = Vec::with_capacity(n);
+            let mut decompression_result_string = Vec::with_capacity(n);
+
+            for _ in 0..n {
+                let mut encoder = Encoder::new(
+                    EncoderInput::from_reader(Cursor::new(&input_in_memory[..])),
+                    EncoderOutput::from_vec(Vec::new()),
+                    DEFAULT_CHUNK_OPTION,
+                    config,
+                );
+                let start = std::time::Instant::now();
+                encoder.encode()?;
+                let compression_elapsed_time_nano_secs = start.elapsed().as_nanos();
+                let encoded = encoder.into_output().into_inner().into_inner();
+
+                let decoder_input = DecoderInput::from_reader(Cursor::new(&encoded[..]));
+                let mut decoder = Decoder::new(decoder_input)?;
+
+                compression_elapsed_time_nanos.push(
+                    compression_elapsed_time_nano_secs
+                        .try_into()
+                        .unwrap_or(u64::MAX),
+                );
+                compression_segmented_execution_times
+                    .push((*decoder.footer().segmented_execution_times()).into());
+                compression_result_string.push(format!("{:?}", &encoded[..5.min(encoded.len())]));
+
+                let statistics = get_compress_statistics(&decoder)?;
+                compression_statistics.push(statistics);
+
+                // decode
+                let mut decoder_output = DecoderOutput::from_vec(Vec::new());
+                let start = std::time::Instant::now();
+                decoder.materialize(&mut decoder_output, None, None)?;
+                let decompression_elapsed_time_nano_secs = start.elapsed().as_nanos();
+
+                decompression_elapsed_time_nanos.push(
+                    decompression_elapsed_time_nano_secs
+                        .try_into()
+                        .unwrap_or(u64::MAX),
+                );
+                decompression_segmented_execution_times
+                    .push(decoder.segmented_execution_times().into());
+                decompression_result_string.push(format!(
+                    "{:?}",
+                    &decoder_output.into_writer().into_inner()[..5.min(encoded.len())]
+                ));
+            }
+
+            let result = SimpleCompressionPerformanceForOneDataset {
+                n,
+                dataset_name: dataset_key.clone(),
+                compression_config: CompressionConfig::new(DEFAULT_CHUNK_OPTION, config),
+                compression_elapsed_time_nanos,
+                compression_segmented_execution_times,
+                compression_result_string,
+                compression_statistics,
+                decompression_elapsed_time_nanos,
+                decompression_segmented_execution_times,
+                decompression_result_string,
+                precision: precision_map[&dataset_key],
+            };
+
+            results_of_this_dataset.insert(format!("{:?}", config.compression_scheme()), result);
+        }
+
+        results.insert(dataset_key.clone(), results_of_this_dataset);
     }
 
     Ok(results)

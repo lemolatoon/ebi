@@ -60,7 +60,10 @@ impl<R: Read> RunLengthReaderImpl<R> {
 
 impl<R: Read> Reader for RunLengthReaderImpl<R> {
     type NativeHeader = RunLengthHeader;
-    type DecompressIterator<'a> = RunLengthIteratorImpl<'a, R> where Self: 'a;
+    type DecompressIterator<'a>
+        = RunLengthIteratorImpl<'a, R>
+    where
+        Self: 'a;
 
     fn decompress(&mut self, timer: &mut SegmentedExecutionTimes) -> decoder::Result<&[f64]> {
         if self.decompressed.is_some() {

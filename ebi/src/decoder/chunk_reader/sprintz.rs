@@ -52,7 +52,8 @@ pub type DeltaSprintzDecompressIterator<'a> = DeltaSprintzDecompressIteratorImpl
 impl Reader for DeltaSprintzReader {
     type NativeHeader = ();
 
-    type DecompressIterator<'a> = DeltaSprintzDecompressIterator<'a>
+    type DecompressIterator<'a>
+        = DeltaSprintzDecompressIterator<'a>
     where
         Self: 'a;
 

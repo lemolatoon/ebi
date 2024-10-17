@@ -48,7 +48,10 @@ impl UncompressedReader {
 
 impl<R: Read> Reader for UncompressedReaderImpl<R> {
     type NativeHeader = ();
-    type DecompressIterator<'a> = UncompressedIteratorImpl<'a, R> where Self: 'a;
+    type DecompressIterator<'a>
+        = UncompressedIteratorImpl<'a, R>
+    where
+        Self: 'a;
 
     fn decompress(&mut self, timer: &mut SegmentedExecutionTimes) -> decoder::Result<&[f64]> {
         if self.values.is_some() {
