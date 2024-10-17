@@ -179,7 +179,7 @@ default_mapping: SegmentLabelMapping = {
     "io_read_nanos": ["IO Read"],
     "io_write_nanos": ["IO Write"],
     "xor_nanos": ["XOR"],
-    "others": ["Others"],
+    "others": ["Other Processing"],
     "bit_packing_nanos": ["Bit Packing"],
     "decompression_nanos": ["Decompression"],
     "compare_insert_nanos": ["Compare"],
@@ -456,7 +456,7 @@ def plot_absolute_stacked_execution_times_for_methods(
         bottom += values
 
     # Add chart decorations
-    plt.xlabel("Compression Methods", fontsize=fontsize)
+    # plt.xlabel("Compression Methods", fontsize=fontsize)
     plt.ylabel(y_label, fontsize=fontsize)  # y-axis now reflects absolute time
     if not omit_title:
         plt.title(f"Execution Times for {dataset_name} by Compression Method", fontsize=fontsize)
@@ -652,6 +652,9 @@ def main():
     decompression_execution_times_ratio_data: Dict[str, List[Dict[str, float]]] = {
         method_name: [None] * len(dataset_names) for method_name in compression_methods
     }
+    compression_execution_times_ratio_data: Dict[str, List[Dict[str, float]]] = {
+        method_name: [None] * len(dataset_names) for method_name in compression_methods
+    }
     filter_execution_times_data: dict[
         str, dict[str, List[Optional[ExecutionTimesWithOthers]]]
     ] = {
@@ -705,13 +708,15 @@ def main():
             compression_execution_times: ExecutionTimesWithOthers = {}  # type: ignore
             decompression_execution_times: ExecutionTimesWithOthers = {}  # type: ignore
             decompression_execution_times_ratios: Dict[str, float] = {}
+            compression_execution_times_ratios: Dict[str, float] = {}
             for key in execution_times_keys:
                 compression_execution_times[key] = fmean(
                     compress["execution_times"][key] for compress in output["compress"]
                 )
-                compression_execution_times["others"] = fmean(
+                entire_compression_time = fmean(
                     compress["elapsed_time_nanos"] for compress in output["compress"]
-                ) - sum(compression_execution_times.values())
+                )
+                compression_execution_times["others"] = entire_compression_time - sum(compression_execution_times.values())
 
                 decompression_execution_times[key] = fmean(
                     materialize["execution_times"][key]
@@ -724,6 +729,9 @@ def main():
                 decompression_execution_times["others"] = entiere_decompression_time - sum(decompression_execution_times.values())
 
                 decompression_execution_times_ratios[key] = decompression_execution_times[key] / entiere_decompression_time
+                compression_execution_times_ratios[key] = compression_execution_times[key] / entire_compression_time
+            compression_execution_times_ratios["others"] = compression_execution_times["others"] / entire_compression_time
+            decompression_execution_times_ratios["others"] = decompression_execution_times["others"] / entiere_decompression_time
 
             compression_execution_times_data[method_name][dataset_index] = (
                 compression_execution_times
@@ -733,6 +741,9 @@ def main():
             )
             decompression_execution_times_ratio_data[method_name][dataset_index] = (
                 decompression_execution_times_ratios
+            )
+            compression_execution_times_ratio_data[method_name][dataset_index] = (
+                compression_execution_times_ratios
             )
 
             compression_ratios_data[method_name][dataset_index] = ratio
@@ -980,6 +991,15 @@ def main():
         ]
         for method in decompression_execution_times_ratio_data
     }
+    compression_execution_times_throughput: Dict[str, List[Dict[str, float]]] = {
+        method: [
+            {
+                key: fmean([d[key] for d in compression_execution_times_ratio_data[method]]) / fmean(compression_throughput_data[method])
+                for key in compression_execution_times_ratio_data[method][0].keys()
+            }
+        ]
+        for method in compression_execution_times_ratio_data
+    }
     barchart_dir = os.path.join(out_dir, "barchart")
     boxplot_dir = os.path.join(out_dir, "boxplot")
 
@@ -990,7 +1010,24 @@ def main():
         decompression_execution_times_throughput,
         0,
         "Decompression Throughput",
-        os.path.join(barchart_dir, "stacked_decompression_throughput.png"),
+        os.path.join(barchart_dir, "normalized_stacked_decompression_execution_times.png"),
+        note_str="*ALP utilize SIMD instructions",
+        y_label="Average Execution Times (s/GB)",
+    )
+    plot_absolute_stacked_execution_times_for_methods(
+        compression_execution_times_throughput,
+        0,
+        "Compression Throughput",
+        os.path.join(barchart_dir, "normalized_stacked_compression_execution_times.png"),
+        note_str="*ALP utilize SIMD instructions",
+        y_label="Average Execution Times (s/GB)",
+    )
+    compression_execution_times_throughput.pop("Gzip")
+    plot_absolute_stacked_execution_times_for_methods(
+        compression_execution_times_throughput,
+        0,
+        "Compression Throughput",
+        os.path.join(barchart_dir, "normalized_stacked_compression_execution_times_without_gzip.png"),
         note_str="*ALP utilize SIMD instructions",
         y_label="Average Execution Times (s/GB)",
     )
