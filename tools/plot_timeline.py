@@ -5,6 +5,12 @@ import os
 from matplotlib.patches import PathPatch
 from matplotlib.path import Path
 
+method_colors = {
+    "General Purpose": "blue",
+    "XOR Based": "green",
+    "Quantization Based": "red"
+}
+
 def draw_timeline(title, compression_methods, out_dir: str = "results", fontsize=10):
     """
     Draws a timeline of compression methods with adaptive label positioning.
@@ -20,8 +26,8 @@ def draw_timeline(title, compression_methods, out_dir: str = "results", fontsize
 
     # Group methods by year
     year_to_methods = defaultdict(list)
-    for name, year in compression_methods:
-        year_to_methods[year].append(name)
+    for name, year, method_type in compression_methods:
+        year_to_methods[year].append((name, method_type))
 
     # Detect large gap and adjust display years if necessary
     years = sorted(year_to_methods.keys())
@@ -81,9 +87,10 @@ def draw_timeline(title, compression_methods, out_dir: str = "results", fontsize
         ax.scatter(display_year, 1, color='black', marker='o', zorder=3)
 
         # Add labels with horizontal offsets
-        for j, name in enumerate(methods):
+        for j, (name, method_type) in enumerate(methods):
             x_offset = display_year + start_offset + j * step
-            ax.text(x_offset, 1.3, name, ha='center', va='bottom', rotation=90, fontsize=fontsize, fontfamily='monospace')
+            color = method_colors.get(method_type, "black")  # Get color based on method type
+            ax.text(x_offset, 1.3, name, ha='center', va='bottom', rotation=90, fontsize=fontsize, color=color, fontfamily='monospace')
 
     # Configure the axis and layout
     ax.set_xticks(display_years)
@@ -101,17 +108,17 @@ def draw_timeline(title, compression_methods, out_dir: str = "results", fontsize
 
 # Example usage
 compression_methods = [
-    ("gzip", 1977),
-    ("Snappy", 2011),
-    ("Gorilla", 2015),
-    ("Zstd", 2016),
-    ("Sprintz", 2018),
-    ("Buff", 2021),
-    ("Chimp", 2022),
-    ("Patas", 2022),
-    ("Elf", 2023),
-    ("BtrBlocks", 2023),
-    ("ALP", 2023),
+    ("gzip", 1977, "General Purpose"),
+    ("Snappy", 2011, "General Purpose"),
+    ("Gorilla", 2015, "XOR Based"),
+    ("Zstd", 2016, "General Purpose"),
+    ("Sprintz", 2018, "Quantization Based"),
+    ("Buff", 2021, "Quantization Based"),
+    ("Chimp", 2022, "XOR Based"),
+    ("Patas", 2022, "XOR Based"),
+    ("Elf", 2023, "XOR Based"),
+    ("BtrBlocks", 2023, "Quantization Based"),
+    ("ALP", 2023, "Quantization Based"),
 ]
 
 # Draw the timeline
