@@ -817,7 +817,7 @@ def main():
             compression_ratios_df.columns,
             compression_ratios_df.row(dataset_index),
             f"{dataset_name}: Compression Ratio",
-            "Compression Ratio (smaller, better)",
+            "Compression Ratio",
             os.path.join(
                 dataset_out_dir,
                 f"compression_ratios.png",
@@ -869,7 +869,7 @@ def main():
                 "Throughput (GB/s)",
                 os.path.join(
                     dataset_filter_dir,
-                    f"{filter_name}_filter_elapsed_seconds.png",
+                    f"{filter_name}_filter_throughput.png",
                 ),
                 note_str="*ALP,Buff utilize SIMD instructions",
             )
@@ -880,7 +880,7 @@ def main():
                 "Throughput (GB/s)",
                 os.path.join(
                     dataset_filter_dir,
-                    f"{filter_name}_filter_materialize_elapsed_seconds.png",
+                    f"{filter_name}_filter_materialize_throughput.png",
                 ),
                 note_str="*ALP,Buff utilize SIMD instructions",
             )
@@ -915,7 +915,7 @@ def main():
             "Throughput (GB/s)",
             os.path.join(
                 dataset_out_dir,
-                f"materialize_elapsed_seconds.png",
+                f"materialize_throughput.png",
             ),
             note_str="*ALP utilize SIMD instructions",
         )
@@ -927,7 +927,7 @@ def main():
             "Throughput (GB/s)",
             os.path.join(
                 dataset_out_dir,
-                f"max_elapsed_seconds.png",
+                f"max_throughput.png",
             ),
             note_str="*ALP utilizes SIMD instructions",
         )
@@ -938,7 +938,7 @@ def main():
             "Throughput (GB/s)",
             os.path.join(
                 dataset_out_dir,
-                f"sum_elapsed_seconds.png",
+                f"sum_throughput.png",
             ),
             note_str="*ALP utilizes SIMD instructions",
         )
