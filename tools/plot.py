@@ -461,6 +461,7 @@ def plot_absolute_stacked_execution_times_for_methods(
     if not omit_title:
         plt.title(f"Execution Times for {dataset_name} by Compression Method", fontsize=fontsize)
     plt.xticks(index, map_method(methods), rotation=45, fontsize=fontsize)
+    plt.tick_params(axis='y', labelsize=fontsize) 
     # plt.legend(title="Processing Types", bbox_to_anchor=(1.05, 1), loc="upper left", fontsize=fontsize)
     plt.legend(title="Processing Types", loc="upper right", fontsize=fontsize)
     plt.tight_layout()
@@ -494,6 +495,7 @@ def plot_comparison(
     # plt.xlabel("Compression Method", fontsize=fontsize)   
     plt.ylabel(y_label, fontsize=fontsize)
     plt.xticks(rotation=45, ha="right", fontsize=fontsize)
+    plt.tick_params(axis='y', labelsize=fontsize) 
     plt.tight_layout()
     plt.savefig(output_path)
     plt.close()
@@ -1038,7 +1040,7 @@ def main():
             for column in compression_ratios_df.columns
         ],
         "Average Compression Ratio",
-        "Compression Ratio (smaller, better)",
+        "Compression Ratio",
         os.path.join(barchart_dir, "average_compression_ratios.png"),
         max_value=1.1,
     )
@@ -1048,7 +1050,7 @@ def main():
             compression_throughput_df[column].mean()
             for column in compression_throughput_df.columns
         ],
-        "Average Compression Throughput (bigger, better)",
+        "Average Compression Throughput",
         "Throughput (GB/s)",
         os.path.join(barchart_dir, "average_compression_throughput.png"),
         note_str="*ALP utilizes SIMD instructions",
@@ -1059,7 +1061,7 @@ def main():
             decompression_throughput_df[column].mean()
             for column in decompression_throughput_df.columns
         ],
-        "Average Decompression Throughput (bigger, better)",
+        "Average Decompression Throughput",
         "Throughput (GB/s)",
         os.path.join(barchart_dir, "average_decompression_throughput.png"),
         note_str="*ALP utilizes SIMD instructions",
@@ -1067,7 +1069,7 @@ def main():
     plot_comparison(
         max_throughput_df.columns,
         [max_throughput_df[column].mean() for column in max_throughput_df.columns],
-        "Average Max Throughput (bigger, better)",
+        "Average Max Throughput",
         "Throughput (GB/s)",
         os.path.join(barchart_dir, "average_max_throughput.png"),
         note_str="*ALP utilizes SIMD instructions",
@@ -1075,7 +1077,7 @@ def main():
     plot_comparison(
         sum_throughput_df.columns,
         [sum_throughput_df[column].mean() for column in sum_throughput_df.columns],
-        "Average Sum Throughput (bigger, better)",
+        "Average Sum Throughput",
         "Throughput (GB/s)",
         os.path.join(barchart_dir, "average_sum_throughput.png"),
         note_str="*ALP utilizes SIMD instructions",
@@ -1090,7 +1092,7 @@ def main():
                 filter_throughput_dfs[filter_name][column].mean()
                 for column in filter_throughput_dfs[filter_name].columns
             ],
-            f"Average {filter_name.upper()} Filter Throughput (bigger, better)",
+            f"Average {filter_name.upper()} Filter Throughput",
             "Throughput (GB/s)",
             os.path.join(
                 os.path.join(barchart_dir, "filter"),
@@ -1132,7 +1134,7 @@ def main():
 
     plot_boxplot(
         compression_ratios_df,
-        "Boxplot for Average Compression Ratios (smaller, better)",
+        "Boxplot for Average Compression Ratios",
         "Compression Ratio",
         os.path.join(boxplot_dir, "boxplot_compression_ratios.png"),
     )
