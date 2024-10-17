@@ -2377,13 +2377,13 @@ fn embedding_command(
     input_dir: impl AsRef<Path>,
     // dataaset_name -> method_name -> result
 ) -> anyhow::Result<HashMap<String, HashMap<String, SimpleCompressionPerformanceForOneDataset>>> {
-    let datasets_exclude = vec!["Cohere_wikipedia-22-12-simple-embeddings_emb"];
+    let datasets_exclude = "Cohere_wikipedia-22-12-simple-embeddings_emb";
 
     let dataset_entries = entry_file_iter(input_dir.as_ref())?
         .filter(|entry| {
             let dataset_name = entry.file_stem().unwrap().to_string_lossy();
             let ext = entry.as_path().extension().unwrap().to_string_lossy();
-            !datasets_exclude.contains(&dataset_name.as_ref()) && ext == "bin"
+            !datasets_exclude.contains(dataset_name.as_ref()) && ext == "bin"
         })
         .collect::<Vec<_>>();
 

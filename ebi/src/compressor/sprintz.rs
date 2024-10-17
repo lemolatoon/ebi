@@ -156,7 +156,7 @@ mod delta_impl {
         // write header
         let initial_number_bits = unsafe { mem::transmute::<i64, u64>(initial_number) };
         w.write_bits(initial_number_bits, 64);
-        w.write_bits(scale as u64, 32);
+        w.write_bits(scale, 32);
         w.write_byte(number_of_bits_needed);
 
         if number_of_bits_needed == 0 {

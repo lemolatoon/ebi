@@ -75,9 +75,10 @@ def plot_graphs(data: Dict[str, Dict[str, SimpleCompressionPerformanceForOneData
     }
     # Plot absolute stacked execution times for methods
     for i, dataset_name in enumerate(dataset_names):
-        print(dataset_name)
         methods = data[dataset_name]
         for method_name, performance in methods.items():
+            if method_name not in compression_methods:
+                continue
             ratio = fmean(
                 compress["compressed_size"] / compress["uncompressed_size"]
                 for compress in performance["compression_statistics"]
@@ -115,7 +116,7 @@ def plot_graphs(data: Dict[str, Dict[str, SimpleCompressionPerformanceForOneData
             for column in compression_ratios_df.columns
         ],
         "Average Compression Ratio",
-        "Compression Ratio (smaller, better)",
+        "Compression Ratio",
         os.path.join(barchart_dir, "average_compression_ratios.png"),
         max_value=1.1,
     )

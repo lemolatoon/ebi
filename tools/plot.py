@@ -491,7 +491,7 @@ def plot_comparison(
     plt.ylim(0, max_value)
     if not omit_title:
         plt.title(title, fontsize=fontsize)
-    plt.xlabel("Compression Method", fontsize=fontsize)   
+    # plt.xlabel("Compression Method", fontsize=fontsize)   
     plt.ylabel(y_label, fontsize=fontsize)
     plt.xticks(rotation=45, ha="right", fontsize=fontsize)
     plt.tight_layout()
