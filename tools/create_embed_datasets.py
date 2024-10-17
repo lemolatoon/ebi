@@ -3,27 +3,40 @@ import json
 import numpy as np
 from datasets import load_dataset
 import argparse
+from tqdm import tqdm
 
 # Metadata for datasets including dataset name and the column name to extract
 dataset_metas = [
-    ("Cohere/wikipedia-22-12-simple-embeddings", "emb"),
-    ("MongoDB/subset_arxiv_papers_with_embeddings", "embedding"),
+    # ("Cohere/wikipedia-22-12-simple-embeddings", "emb"),
+    # ("MongoDB/subset_arxiv_papers_with_embeddings", "embedding"),
     ("MongoDB/airbnb_embeddings", "text_embeddings"),
+    ("MongoDB/airbnb_embeddings", "image_embeddings"),
+    # ("asahi417/seamless-align-deA-enA.speaker-embedding.metavoice", "deA.audio.speaker_embedding"),
 ]
 
 # Function to calculate the precision of floating-point numbers and dump to JSON
 def calculate_precision_and_dump_to_json(dataset_metas, output_dir):
     precision_data = {}
+    precision_data = json.load(open(os.path.join(output_dir, "precision_data.json"), "r")) if os.path.exists(os.path.join(output_dir, "precision_data.json")) else {}
+    print(precision_data)
     
-    for dataset_name, column_name in dataset_metas:
+    for dataset_name, column_name in tqdm(dataset_metas):
+        if f"{dataset_name.replace('/', '_')}_{column_name}" in precision_data:
+            print(f"Skipping dataset '{dataset_name}' with column '{column_name}' as it has already been processed")
+            continue
         try:
             # Load the dataset
-            dataset = load_dataset(dataset_name)
+            if dataset_name == "asahi417/seamless-align-deA-enA.speaker-embedding.metavoice":
+                dataset = load_dataset(dataset_name, 'subset_1')
+            else:
+                dataset = load_dataset(dataset_name)
+
+            print(dataset['train'].column_names)
             column_data = dataset['train'][column_name]
             
             # Calculate the precision of floating-point numbers
             def calculate_precision(value):
-                str_value = f"{value:.16f}".rstrip('0')
+                str_value = f"{value:.15f}".rstrip('0')
                 if '.' in str_value:
                     return len(str_value.split('.')[1])
                 return 0
@@ -56,6 +69,7 @@ def main():
     args = parser.parse_args()
     
     # Ensure the output directory exists
+    print(args.output_dir)
     os.makedirs(args.output_dir, exist_ok=True)
     
     # Execute the function with the provided output directory
