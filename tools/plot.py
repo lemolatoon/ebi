@@ -666,6 +666,13 @@ def main():
         }
         for key in filter_methods
     }
+    filter_execution_times_ratio_data: Dict[str, Dict[str, List[Dict[str, float]]]] = {
+        key: {
+            method_name: [None] * len(dataset_names)
+            for method_name in compression_methods
+        }
+        for key in filter_methods
+    }
 
     filter_materialize_execution_times_data: dict[
         str, dict[str, List[Optional[ExecutionTimesWithOthers]]]
@@ -709,8 +716,14 @@ def main():
 
             compression_execution_times: ExecutionTimesWithOthers = {}  # type: ignore
             decompression_execution_times: ExecutionTimesWithOthers = {}  # type: ignore
+            filter_execution_times: Dict[str, ExecutionTimesWithOthers] = {
+                key: {} for key in filter_methods
+            }
             decompression_execution_times_ratios: Dict[str, float] = {}
             compression_execution_times_ratios: Dict[str, float] = {}
+            filter_execution_times_ratios: Dict[str, Dict[str, float]] = {
+                key: {} for key in filter_methods
+            }
             for key in execution_times_keys:
                 compression_execution_times[key] = fmean(
                     compress["execution_times"][key] for compress in output["compress"]
@@ -732,8 +745,28 @@ def main():
 
                 decompression_execution_times_ratios[key] = decompression_execution_times[key] / entiere_decompression_time
                 compression_execution_times_ratios[key] = compression_execution_times[key] / entire_compression_time
+
+                for filter_name in filter_methods:
+                    entire_filter_time = fmean(
+                        f["elapsed_time_nanos"]
+                        for f in output["filters"][filter_name]["filter"]
+                    )
+                    filter_execution_times[filter_name][key] = fmean(
+                        f["execution_times"][key]
+                        for f in output["filters"][filter_name]["filter"]
+                    )
+                    filter_execution_times[filter_name]["others"] = entire_filter_time - sum(filter_execution_times[filter_name].values())
+
+                    filter_execution_times_ratios[filter_name][key] = filter_execution_times[filter_name][key] / entire_filter_time
+
             compression_execution_times_ratios["others"] = compression_execution_times["others"] / entire_compression_time
             decompression_execution_times_ratios["others"] = decompression_execution_times["others"] / entiere_decompression_time
+            for filter_name in filter_methods:
+                filter_execution_times_ratios[filter_name]["others"] = filter_execution_times[filter_name]["others"] / entire_filter_time
+            for filter_name in filter_methods:
+                filter_execution_times_ratio_data[filter_name][method_name][dataset_index] = (
+                    filter_execution_times_ratios[filter_name]
+                )
 
             compression_execution_times_data[method_name][dataset_index] = (
                 compression_execution_times
@@ -824,6 +857,7 @@ def main():
     # dataset-wise plot_comparison
 
     for dataset_index, dataset_name in enumerate(tqdm(dataset_names)):
+        break
         dataset_out_dir = os.path.join(out_dir, dataset_name)
         os.makedirs(dataset_out_dir, exist_ok=True)
         plot_comparison(
@@ -1033,6 +1067,24 @@ def main():
         note_str="*ALP utilize SIMD instructions",
         y_label="Average Execution Times (s/GB)",
     )
+    for filter_name in filter_methods:
+        filter_execution_times_throughput: Dict[str, List[Dict[str, float]]] = {
+            method: [
+                {
+                    key: fmean([d[key] for d in filter_execution_times_ratio_data[filter_name][method]]) / fmean(filter_throughput_data[filter_name][method])
+                    for key in filter_execution_times_ratio_data[filter_name][method][0].keys()
+                }
+            ]
+            for method in filter_execution_times_ratio_data[filter_name]
+        }
+        plot_absolute_stacked_execution_times_for_methods(
+            filter_execution_times_throughput,
+            0,
+            f"{filter_name} Filter Throughput",
+            os.path.join(barchart_dir, f"normalized_stacked_{filter_name}_execution_times.png"),
+            note_str="*ALP,Buff utilize SIMD instructions",
+            y_label="Average Execution Times (s/GB)",
+        )
     plot_comparison(
         compression_ratios_df.columns,
         [
