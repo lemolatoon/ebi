@@ -185,7 +185,7 @@ default_mapping: SegmentLabelMapping = {
     "compare_insert_nanos": ["Compare"],
     "delta_nanos": ["Delta"],
     "bit_packing_nanos": ["Bit Packing"],
-    "quantization_nanos": ["Quantization"],
+    "quantization_nanos": ["Quantize"],
     "sum_nanos": ["Sum"],
 }
 xor_patch = {
@@ -220,18 +220,18 @@ segment_mapping: Dict[CompressionMethodKeys, SegmentLabelMapping] = {
     },
     "BUFF": {
         **default_mapping,
-        "bit_packing_nanos": ["Bit Packing", "Quantization", "Delta"],
-        "compare_insert_nanos": ["Compare", "Bit Packing", "Quantization", "Delta"],
-        "sum_nanos": ["Sum", "Bit Packing", "Quantization", "Delta"],
+        "bit_packing_nanos": ["Bit Packing", "Quantize", "Delta"],
+        "compare_insert_nanos": ["Compare", "Bit Packing", "Quantize", "Delta"],
+        "sum_nanos": ["Sum", "Bit Packing", "Quantize", "Delta"],
     },
     "DeltaSprintz": {
         **default_mapping,
-        "decompression_nanos": ["Bit Packing", "ZigZag", "Quantization", "Delta"],
+        "decompression_nanos": ["Bit Packing", "ZigZag", "Quantize", "Delta"],
         "compare_insert_nanos": [
             "Compare",
             "Bit Packing",
             "ZigZag",
-            "Quantization",
+            "Quantize",
             "Delta",
         ],
     },
@@ -410,6 +410,7 @@ def plot_absolute_stacked_execution_times_for_methods(
     ]
     | None = None,
     y_label: str = "Execution Time (ns)",
+    legend_loc: str = "upper right",
 ):
     methods: List[CompressionMethodKeys] = list(data.keys())  # type: ignore
     processing_types = list(data[methods[0]][0].keys())
@@ -463,7 +464,7 @@ def plot_absolute_stacked_execution_times_for_methods(
     plt.xticks(index, map_method(methods), rotation=45, fontsize=fontsize)
     plt.tick_params(axis='y', labelsize=fontsize) 
     # plt.legend(title="Processing Types", bbox_to_anchor=(1.05, 1), loc="upper left", fontsize=fontsize)
-    plt.legend(title="Processing Types", loc="upper right", fontsize=fontsize)
+    plt.legend(title="Processing Types", loc=legend_loc, fontsize=fontsize)
     plt.tight_layout()
     plt.savefig(output_path)
     plt.close()
@@ -1047,7 +1048,7 @@ def main():
         0,
         "Decompression Throughput",
         os.path.join(barchart_dir, "normalized_stacked_decompression_execution_times.png"),
-        note_str="*ALP utilize SIMD instructions",
+        note_str="*ALP utilizes SIMD instructions",
         y_label="Average Execution Times (s/GB)",
     )
     plot_absolute_stacked_execution_times_for_methods(
@@ -1057,6 +1058,7 @@ def main():
         os.path.join(barchart_dir, "normalized_stacked_compression_execution_times.png"),
         note_str="*ALP utilize SIMD instructions",
         y_label="Average Execution Times (s/GB)",
+        legend_loc="upper left",
     )
     compression_execution_times_throughput.pop("Gzip")
     plot_absolute_stacked_execution_times_for_methods(
