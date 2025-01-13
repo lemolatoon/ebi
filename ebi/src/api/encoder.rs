@@ -12,6 +12,7 @@ use crate::{
     time::SegmentedExecutionTimes,
 };
 
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct EncoderInput<R: Read> {
     inner: R,
 }
@@ -47,6 +48,7 @@ impl EncoderInput<File> {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct EncoderOutput<W: Write + Seek> {
     inner: W,
 }
