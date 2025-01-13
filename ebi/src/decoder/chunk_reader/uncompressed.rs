@@ -104,7 +104,7 @@ impl<'a, R: Read> UncompressedIteratorImpl<'a, R> {
     }
 }
 
-impl<'a, R: Read> Iterator for UncompressedIteratorImpl<'a, R> {
+impl<R: Read> Iterator for UncompressedIteratorImpl<'_, R> {
     type Item = decoder::Result<f64>;
 
     fn next(&mut self) -> Option<Self::Item> {

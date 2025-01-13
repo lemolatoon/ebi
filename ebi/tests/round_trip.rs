@@ -356,9 +356,9 @@ fn test_round_trip(
         let mut i = 1;
         while i < 64 {
             let last = values[i];
-            let last_bits = unsafe { std::mem::transmute::<f64, u64>(last) };
+            let last_bits = last.to_bits();
             let next = (last_bits) ^ (1 << (i - 1));
-            let next = unsafe { std::mem::transmute::<u64, f64>(next) };
+            let next = f64::from_bits(next);
             // `f64::is_nan` is const unstable
             #[allow(clippy::eq_op)]
             let is_nan = next != next;

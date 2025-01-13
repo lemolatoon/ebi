@@ -162,7 +162,7 @@ pub struct ElfXorEncoder {
 }
 
 impl ElfXorEncoder {
-    const END_SIGN: u64 = const { unsafe { std::mem::transmute(f64::NAN) } };
+    const END_SIGN: u64 = f64::NAN.to_bits();
     const LEADING_REPRESENTATION: [u8; 64] = [
         0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 2, 2, 2, 2, 3, 3, 4, 4, 5, 5, 6, 6, 7, 7, 7, 7, 7, 7,
         7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7,
