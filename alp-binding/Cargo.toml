@@ -6,6 +6,7 @@ edition = "2021"
 [dependencies]
 autocxx = "0.27.0"
 cxx = "1.0"
+fastlanes = "0.1.8"
 
 [build-dependencies]
 autocxx-build = "0.27.0"

@@ -1,5 +1,6 @@
 #![allow(clippy::upper_case_acronyms)]
 #![allow(clippy::missing_safety_doc)]
+pub mod encoder;
 use autocxx::prelude::*; // use all the main autocxx functions
 
 include_cpp! {
@@ -11,6 +12,9 @@ include_cpp! {
     generate!("alp::AlpDecompressorDouble")
 }
 
+use encoder::AlpEncoder;
+use encoder::AlpRdEncoder;
+use encoder::AlpState;
 pub use ffi::alp::AlpCompressorDouble;
 pub use ffi::alp::AlpDecompressorDouble;
 
@@ -46,6 +50,14 @@ pub fn worst_case_compression_size_double(n_tuple: usize) -> usize {
 ///
 #[inline]
 pub fn compress_double(input: &[f64], buffer: &mut Vec<u8>) {
+    let mut stt = AlpState::<f64>::default();
+    let mut sample_attr = Vec::with_capacity(VECTOR_SIZE);
+    AlpEncoder::init_f64(&input, 0, VECTOR_SIZE, &mut sample_attr, &mut stt);
+    match stt.scheme {
+        encoder::Scheme::INVALID => panic!("Invalid scheme"),
+        encoder::Scheme::ALP_RD => AlpRdEncoder::encode_f64,
+        encoder::Scheme::ALP => todo!(),
+    }
     moveit! {
         let mut compressor = AlpCompressorDouble::new();
     }
