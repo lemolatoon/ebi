@@ -193,7 +193,7 @@ mod tests {
         let chunk_footers = file_footer.chunk_footers();
         assert_eq!(
             chunk_footers.len(),
-            (record_count + RECORD_COUNT_PER_CHUNK - 1) / RECORD_COUNT_PER_CHUNK,
+            record_count.div_ceil(RECORD_COUNT_PER_CHUNK),
             "number of chunk footers must be equal to the number of chunks, which is the number of records divided by the record count"
         );
         for (i, chunk_footer) in chunk_footers.iter().enumerate() {

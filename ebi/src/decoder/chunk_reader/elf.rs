@@ -112,7 +112,7 @@ pub struct ElfXorDecoder {
 }
 
 impl ElfXorDecoder {
-    const END_SIGN: u64 = unsafe { std::mem::transmute(f64::NAN) };
+    const END_SIGN: u64 = f64::NAN.to_bits();
     const LEADING_REPRESENTATION: [u8; 8] = [0, 8, 12, 16, 18, 20, 22, 24];
 
     pub fn new() -> Self {

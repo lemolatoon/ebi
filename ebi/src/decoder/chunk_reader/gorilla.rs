@@ -75,7 +75,7 @@ mod modified_tsz {
     }
 
     impl GorillaDecoder {
-        const NAN_BITS: u64 = const { unsafe { std::mem::transmute::<f64, u64>(f64::NAN) } };
+        const NAN_BITS: u64 = const { f64::NAN.to_bits() };
         /// new creates a new StdDecoder which will read bytes from r
         pub fn new() -> Self {
             Self {

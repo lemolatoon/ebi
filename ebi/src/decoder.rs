@@ -80,7 +80,7 @@ pub struct MetadataRef<'a, 'b> {
     footer: &'b NativeFileFooter,
 }
 
-impl<'a, 'b> MetadataRef<'a, 'b> {
+impl MetadataRef<'_, '_> {
     /// Returns an iterator over the chunks in the file.
     /// If the header or the footer is not read yet, returns `None`.
     pub fn chunks_iter(&self) -> impl Iterator<Item = GeneralChunkHandle<Self>> {

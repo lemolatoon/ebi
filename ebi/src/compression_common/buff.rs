@@ -77,7 +77,7 @@ pub(crate) mod bit_packing {
         }
     }
 
-    impl<'a> BitPack<&'a mut [u8]> {
+    impl BitPack<&mut [u8]> {
         /// # Errors
         /// If bits > MAX_BITS, return Err(bits)
         ///
@@ -150,7 +150,7 @@ pub(crate) mod bit_packing {
         }
     }
 
-    impl<'a> BitPack<&'a [u8]> {
+    impl BitPack<&[u8]> {
         #[allow(dead_code)]
         pub fn read(&mut self, mut bits: usize) -> Result<u32, usize> {
             if bits > MAX_BITS || self.buff.len() * BYTE_BITS < self.sum_bits() + bits {
@@ -305,8 +305,7 @@ pub(crate) mod bit_packing {
             let len = self.buff.len();
 
             if let Some(bits) = (self.sum_bits() + bits).checked_sub(len * BYTE_BITS) {
-                self.buff
-                    .resize(len + (bits + BYTE_BITS - 1) / BYTE_BITS, 0x0);
+                self.buff.resize(len + bits.div_ceil(BYTE_BITS), 0x0);
             }
 
             let mut bitpack = BitPack {
@@ -331,8 +330,7 @@ pub(crate) mod bit_packing {
             let len = self.buff.len();
 
             if let Some(bits) = (self.sum_bits() + bits).checked_sub(len * BYTE_BITS) {
-                self.buff
-                    .resize(len + (bits + BYTE_BITS - 1) / BYTE_BITS, 0x0);
+                self.buff.resize(len + bits.div_ceil(BYTE_BITS), 0x0);
             }
 
             let mut bitpack = BitPack {
