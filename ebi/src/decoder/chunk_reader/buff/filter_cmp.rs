@@ -530,7 +530,7 @@ mod simd_x86_64 {
             )
         };
         *qualified_bitmask |=
-            RoaringBitmap::from_bitmap_bytes(logical_offset, qualified_bitmasks_bytes);
+            RoaringBitmap::from_lsb0_bytes(logical_offset, qualified_bitmasks_bytes);
 
         let to_check_bitmasks_bytes = unsafe {
             std::slice::from_raw_parts(
@@ -538,6 +538,6 @@ mod simd_x86_64 {
                 size_of_val(to_check_bitmasks.as_slice()),
             )
         };
-        RoaringBitmap::from_bitmap_bytes(logical_offset, to_check_bitmasks_bytes)
+        RoaringBitmap::from_lsb0_bytes(logical_offset, to_check_bitmasks_bytes)
     }
 }
