@@ -237,7 +237,7 @@ mod simd_x86_64 {
             bitmasks.push(eq_mask as u32);
         }
 
-        RoaringBitmap::from_bitmap_bytes(logical_offset, unsafe {
+        RoaringBitmap::from_lsb0_bytes(logical_offset, unsafe {
             std::slice::from_raw_parts(
                 bitmasks.as_ptr().cast::<u8>(),
                 size_of_val(bitmasks.as_slice()),

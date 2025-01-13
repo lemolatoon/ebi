@@ -4,7 +4,7 @@ version = "0.1.14"
 edition = "2021"
 
 [dependencies]
-roaring = { git = "https://github.com/lemolatoon/roaring-rs", rev = "03a61ad" }
+roaring = "0.10.10"
 derive-getters = "0.4.0"
 rand = "0.8.5"
 thiserror = "1.0.62"
