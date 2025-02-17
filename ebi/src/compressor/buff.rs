@@ -110,6 +110,10 @@ impl BUFFCompressorConfig {
     pub fn set_scale(&mut self, scale: u64) {
         self.scale = scale;
     }
+
+    pub fn scale(&self) -> u64 {
+        self.scale
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]

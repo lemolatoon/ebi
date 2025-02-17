@@ -307,6 +307,24 @@ impl CompressorConfig {
         }
     }
 
+    pub fn scale(&self) -> Option<u64> {
+        match self {
+            CompressorConfig::BUFF(c) => Some(c.scale()),
+            CompressorConfig::DeltaSprintz(c) => Some(c.scale()),
+            CompressorConfig::Uncompressed(_)
+            | CompressorConfig::RLE(_)
+            | CompressorConfig::Gorilla(_)
+            | CompressorConfig::Chimp(_)
+            | CompressorConfig::Chimp128(_)
+            | CompressorConfig::ElfOnChimp(_)
+            | CompressorConfig::Elf(_)
+            | CompressorConfig::Zstd(_)
+            | CompressorConfig::Gzip(_)
+            | CompressorConfig::Snappy(_)
+            | CompressorConfig::FFIAlp(_) => None,
+        }
+    }
+
     /// Serialize the compressor configuration to the given writer.
     /// The first byte is the size of the configuration in bytes.
     /// The rest of the bytes are the serialized configuration.

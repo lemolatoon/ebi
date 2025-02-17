@@ -29,6 +29,7 @@ use ebi::{
     compressor::CompressorConfig,
     decoder::query::{Predicate, Range, RangeValue},
     encoder::ChunkOption,
+    format::CompressionScheme,
     time::SerializableSegmentedExecutionTimes,
 };
 
@@ -715,7 +716,35 @@ fn process_experiment_for_compressor(
     save_dir: impl AsRef<Path>,
     all_output_inner: &mut AllOutputInner,
     n: usize,
+    max_value: f64,
 ) -> anyhow::Result<()> {
+    let compression_scheme = compression_config.compressor_config.compression_scheme();
+    if compression_scheme == CompressionScheme::BUFF
+        || compression_scheme == CompressionScheme::DeltaSprintz
+    {
+        let scale = compression_config.compressor_config.scale().unwrap();
+        let precision = if scale == 0 {
+            0
+        } else {
+            (scale as f64).log10() as usize
+        };
+        // Check if the quantization will be done correctly
+        let quantized = max_value * scale as f64;
+        if !quantized.is_finite() || quantized.abs() > i64::MAX as f64 {
+            eprintln!(
+                "Quantization will not be done correctly. Skip: {:?}",
+                compressor_config
+            );
+            return Ok(());
+        }
+        if compression_scheme == CompressionScheme::BUFF && precision > 12 {
+            eprintln!(
+                "Precision is too high for BUFF. Skip: {:?}",
+                compressor_config
+            );
+            return Ok(());
+        }
+    }
     let binary_file_stem = binary_file
         .as_ref()
         .file_stem()
@@ -861,6 +890,21 @@ fn process_experiment_for_dataset(
                 sum: Vec::with_capacity(n),
             });
 
+        // Find the max value for the dataset
+        let max_value = {
+            let mut max_value: f64 = 0.0;
+            let mut reader = BufReader::new(File::open(&binary_file)?);
+            let mut buffer = [0; 8];
+            while let Ok(n) = reader.read(&mut buffer) {
+                if n == 0 {
+                    break;
+                }
+                let value = u64::from_le_bytes(buffer);
+                max_value = max_value.max(f64::from_bits(value));
+            }
+            max_value
+        };
+
         process_experiment_for_compressor(
             in_memory,
             &binary_file,
@@ -870,6 +914,7 @@ fn process_experiment_for_dataset(
             &save_dir,
             all_output_inner,
             n,
+            max_value,
         )?;
     }
 
