@@ -8,11 +8,11 @@ Currently under developments.
 Ensure that your datasets are in the `DATA_DICT`
 ```bash
 # create binary files from csv
-$ cargo run --bin csv2bin --release -- DATA_DICT
+$ cargo run --bin csv2bin --release -- "DATA_DICT/*"
 $ cd experimenter
 # create directory for saving experiment checkpoints
-$ mkdir save
-$ cargo run --release -- all -c compressor_configs -f DATA_DICT/filter_config -b DATA_DICT/binary --create-config --n 10 --in-memory -s save
+$ mkdir save compressor_configs data/filter_config
+$ cargo run --release --bin experimenter -- all -c compressor_configs -f DATA_DICT/filter_config -b DATA_DICT/binary --create-config --n 10 --in-memory -s save
 ```
 Results will be saved in `DATA_DICT/result`
 
