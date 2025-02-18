@@ -1176,9 +1176,6 @@ fn create_default_compressor_config(
     ))?);
     println!("get scale for {}", filename.as_ref().display());
     let prec = get_appropriate_precision(reader, ',', exact_precision)?;
-    let scale = 10u64
-        .checked_pow(prec)
-        .context("Failed to get appropriate scale")?;
     let mut configs: Vec<(&'static str, CompressorConfig)> = vec![
         (
             "uncompressed",
@@ -1198,14 +1195,21 @@ fn create_default_compressor_config(
         ("snappy", CompressorConfig::snappy().build().into()),
         ("ffi_alp", CompressorConfig::ffi_alp().build().into()),
     ];
-    configs.push((
-        "delta_sprintz",
-        CompressorConfig::delta_sprintz()
-            .scale(scale)
-            .build()
-            .into(),
-    ));
-    configs.push(("buff", CompressorConfig::buff().scale(scale).build().into()));
+    if let Some(scale) = 10u64.checked_pow(prec) {
+        configs.push((
+            "delta_sprintz",
+            CompressorConfig::delta_sprintz()
+                .scale(scale)
+                .build()
+                .into(),
+        ));
+        configs.push(("buff", CompressorConfig::buff().scale(scale).build().into()));
+    } else {
+        eprintln!(
+            "Precision is too high for delta_sprintz and buff. Skip creating config for them of {}",
+            filename.as_ref().display()
+        );
+    }
     let configs = configs.into_iter().map(|(name, config)| {
         (
             name,
