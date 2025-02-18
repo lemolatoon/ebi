@@ -74,7 +74,6 @@ class CompressStatistics(TypedDict):
     compression_ratio: float
     compression_ratio_chunk_only: float
 
-
 T = TypeVar("T")
 
 
@@ -127,10 +126,73 @@ class OutputWrapper(TypedDict, Generic[T]):
     datetime: datetime
     result_string: str
 
+class AveragedOutputWrapper(TypedDict, Generic[T]):
+    version: str
+    config_path: str
+    compression_config: CompressionConfig
+    command_specific: T
+    elapsed_time_nanos: float
+    throughput: float
+    execution_times: ExecutionTimesWithOthers
+    execution_times_ratios: Dict[str, float]
+    input_filename: str
+    datetime: datetime
+    result_string: str
+
 
 class FilterFamilyOutput(TypedDict):
     filter: List[OutputWrapper[FilterConfig]]
     filter_materialize: List[OutputWrapper[FilterMaterializeConfig]]
+
+class AveragedFilterFamilyOutput(TypedDict):
+    filter: AveragedOutputWrapper[FilterConfig]
+    filter_materialize: AveragedOutputWrapper[FilterMaterializeConfig]
+
+
+class AveragedAllOutputInner(TypedDict):
+    compress: AveragedOutputWrapper[CompressStatistics]
+    filters: Mapping[str, AveragedFilterFamilyOutput]
+    materialize: AveragedOutputWrapper[MaterializeConfig]
+    max: AveragedOutputWrapper[MaxConfig]
+    sum: AveragedOutputWrapper[SumConfig]
+
+T = TypeVar("T")
+def compute_average(outputs: List[OutputWrapper[T]], uncompressed_size: float) -> AveragedOutputWrapper[T]:
+    elapsed_time_nanos = fmean(c["elapsed_time_nanos"] for c in outputs)
+    throughput = uncompressed_size / elapsed_time_nanos
+
+    execution_times: Dict[str, float] = {
+        key: fmean(c["execution_times"][key] for c in outputs)
+        for key in execution_times_keys
+    }
+    entire_time = elapsed_time_nanos
+    execution_times["others"] = entire_time - sum(execution_times.values())
+    execution_times_ratios = {
+        key: execution_times[key] / entire_time
+        for key in execution_times_keys
+    }
+
+    # check values are identical where using the only first output
+    first_keys = ["version", "config_path", "compression_config", "command_specific", "input_filename", "datetime", "result_string"]
+    for k in first_keys:
+        if not all(c[k] == outputs[0][k] for c in outputs):
+            raise ValueError(f"Key '{k}' values are not identical")
+
+    first = outputs[0]
+    return {
+        "version": first["version"],
+        "config_path": first["config_path"],
+        "compression_config": first["compression_config"],
+        "command_specific": first["command_specific"],
+        "elapsed_time_nanos": elapsed_time_nanos,
+        "throughput": throughput,
+        "execution_times": execution_times,
+        "execution_times_ratios": execution_times_ratios,
+        "input_filename": first["input_filename"],
+        "datetime": first["datetime"],
+        "result_string": first["result_string"],
+    }
+    
 
 
 class AllOutputInner(TypedDict):
@@ -140,9 +202,108 @@ class AllOutputInner(TypedDict):
     max: List[OutputWrapper[MaxConfig]]
     sum: List[OutputWrapper[SumConfig]]
 
+    def uncompressed_size(self) -> float:
+        return self["compress"][0]["command_specific"]["uncompressed_size"]
+
+    def averaged_compress(self) -> AveragedOutputWrapper[CompressStatistics]:
+        cs = self["compress"]
+        uncompressed_size = self.uncompressed_size()
+        
+        def cmd_mean(key: str) -> float:
+            if not all(key in c["command_specific"] for c in cs):
+                raise KeyError(f"Key '{key}' not found in command_specific")
+            return fmean(c["command_specific"][key] for c in cs)
+        
+        ratio = cmd_mean("compression_ratio")
+        ratio_chunk_only = cmd_mean("compression_ratio_chunk_only")
+        compression_elapsed_time = cmd_mean("compression_elapsed_time_nano_secs")
+        compressed_size = cmd_mean("compressed_size")
+        compressed_size_chunk_only = cmd_mean("compressed_size_chunk_only")
+        
+        elapsed_time_nanos = fmean(c["elapsed_time_nanos"] for c in cs)
+        compression_throughput = uncompressed_size / compression_elapsed_time if compression_elapsed_time else 0
+
+        execution_times: Dict[str, float] = {
+            key: fmean(c["execution_times"][key] for c in cs)
+            for key in execution_times_keys
+        }
+        entire_time = elapsed_time_nanos
+        execution_times["others"] = entire_time - sum(execution_times.values())
+        execution_times_ratios = {
+            key: execution_times[key] / entire_time
+            for key in execution_times_keys
+        }
+
+        command_specific: CompressStatistics = {
+            "compression_elapsed_time_nano_secs": compression_elapsed_time,
+            "uncompressed_size": uncompressed_size,
+            "compressed_size": compressed_size,
+            "compressed_size_chunk_only": compressed_size_chunk_only,
+            "compression_ratio": ratio,
+            "compression_ratio_chunk_only": ratio_chunk_only,
+        }
+        
+        first = cs[0]
+        return {
+            "version": first["version"],
+            "config_path": first["config_path"],
+            "compression_config": first["compression_config"],
+            "command_specific": command_specific,
+            "elapsed_time_nanos": elapsed_time_nanos,
+            "throughput": compression_throughput,
+            "execution_times": execution_times,
+            "execution_times_ratios": execution_times_ratios,
+            "input_filename": first["input_filename"],
+            "datetime": first["datetime"],
+            "result_string": first["result_string"],
+        }
+    
+    def averaged_filter(self, filter_name: str) -> AveragedOutputWrapper[FilterConfig]:
+        uncompressed_size = self.uncompressed_size()
+        filter_outputs = self["filters"][filter_name]["filter"]
+        return compute_average(filter_outputs, uncompressed_size)
+    
+    def averaged_filter_materialize(self, filter_name: str) -> AveragedOutputWrapper[FilterMaterializeConfig]:
+        uncompressed_size = self.uncompressed_size()
+        filter_outputs = self["filters"][filter_name]["filter_materialize"]
+        return compute_average(filter_outputs, uncompressed_size)
+    
+    def averaged_materialize(self) -> AveragedOutputWrapper[MaterializeConfig]:
+        uncompressed_size = self.uncompressed_size()
+        materialize_outputs = self["materialize"]
+        return compute_average(materialize_outputs, uncompressed_size)
+    
+    def averaged_max(self) -> AveragedOutputWrapper[MaxConfig]:
+        uncompressed_size = self.uncompressed_size()
+        max_outputs = self["max"]
+        return compute_average(max_outputs, uncompressed_size)
+    
+    def averaged_sum(self) -> AveragedOutputWrapper[SumConfig]:
+        uncompressed_size = self.uncompressed_size()
+        sum_outputs = self["sum"]
+        return compute_average(sum_outputs, uncompressed_size)
+    
+    def averaged(self) -> AveragedAllOutputInner:
+        filters: Dict[str, AveragedFilterFamilyOutput] = {
+            filter_name: {
+                "filter": self.averaged_filter(filter_name),
+                "filter_materialize": self.averaged_filter_materialize(filter_name)
+            }
+            for filter_name in self["filters"]
+        }
+        return {
+            "compress": self.averaged_compress(),
+            "filters": filters,
+            "materialize": self.averaged_materialize(),
+            "max": self.averaged_max(),
+            "sum": self.averaged_sum(),
+        }
 
 class AllOutput(TypedDict):
     __root__: Dict[str, Dict[str, AllOutputInner]]
+
+    def ofdataset(self, dataset: str) -> Dict[str, AllOutputInner]:
+        return self[dataset]
 
 
 CompressionMethodKeys = Literal[
