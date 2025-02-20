@@ -3,7 +3,7 @@ import json
 import os
 from pathlib import Path
 import sys
-from typing import Callable
+from typing import Callable, Set
 import numpy as np
 import polars as pl
 import matplotlib.pyplot as plt
@@ -74,6 +74,7 @@ class CompressStatistics(TypedDict):
     compression_ratio: float
     compression_ratio_chunk_only: float
 
+
 T = TypeVar("T")
 
 
@@ -126,6 +127,7 @@ class OutputWrapper(TypedDict, Generic[T]):
     datetime: datetime
     result_string: str
 
+
 class AveragedOutputWrapper(TypedDict, Generic[T]):
     version: str
     config_path: str
@@ -144,6 +146,7 @@ class FilterFamilyOutput(TypedDict):
     filter: List[OutputWrapper[FilterConfig]]
     filter_materialize: List[OutputWrapper[FilterMaterializeConfig]]
 
+
 class AveragedFilterFamilyOutput(TypedDict):
     filter: AveragedOutputWrapper[FilterConfig]
     filter_materialize: AveragedOutputWrapper[FilterMaterializeConfig]
@@ -156,8 +159,13 @@ class AveragedAllOutputInner(TypedDict):
     max: AveragedOutputWrapper[MaxConfig]
     sum: AveragedOutputWrapper[SumConfig]
 
+
 T = TypeVar("T")
-def compute_average(outputs: List[OutputWrapper[T]], uncompressed_size: float) -> AveragedOutputWrapper[T]:
+
+
+def compute_average(
+    outputs: List[OutputWrapper[T]], uncompressed_size: float
+) -> AveragedOutputWrapper[T]:
     elapsed_time_nanos = fmean(c["elapsed_time_nanos"] for c in outputs)
     throughput = uncompressed_size / elapsed_time_nanos
 
@@ -169,13 +177,24 @@ def compute_average(outputs: List[OutputWrapper[T]], uncompressed_size: float) -
     execution_times["others"] = entire_time - sum(execution_times.values())
     execution_times_ratios = {
         key: execution_times[key] / entire_time
-        for key in execution_times_keys
+        for key in [*execution_times_keys, "others"]
     }
 
     # check values are identical where using the only first output
-    first_keys = ["version", "config_path", "compression_config", "command_specific", "input_filename", "datetime", "result_string"]
+    first_keys = [
+        "version",
+        "config_path",
+        "compression_config",
+        "command_specific",
+        "input_filename",
+        "datetime",
+        "result_string",
+    ]
     for k in first_keys:
         if not all(c[k] == outputs[0][k] for c in outputs):
+            if k == "datetime":
+                # "Key 'datetime' values are not identical, but it's OK"
+                continue
             raise ValueError(f"Key '{k}' values are not identical")
 
     first = outputs[0]
@@ -192,7 +211,6 @@ def compute_average(outputs: List[OutputWrapper[T]], uncompressed_size: float) -
         "datetime": first["datetime"],
         "result_string": first["result_string"],
     }
-    
 
 
 class AllOutputInner(TypedDict):
@@ -202,26 +220,35 @@ class AllOutputInner(TypedDict):
     max: List[OutputWrapper[MaxConfig]]
     sum: List[OutputWrapper[SumConfig]]
 
+
+class AllOutputInnerHandler:
+    def __init__(self, data: AllOutputInner):
+        self.data = data
+
     def uncompressed_size(self) -> float:
-        return self["compress"][0]["command_specific"]["uncompressed_size"]
+        return self.data["compress"][0]["command_specific"]["uncompressed_size"]
 
     def averaged_compress(self) -> AveragedOutputWrapper[CompressStatistics]:
-        cs = self["compress"]
+        cs = self.data["compress"]
         uncompressed_size = self.uncompressed_size()
-        
+
         def cmd_mean(key: str) -> float:
             if not all(key in c["command_specific"] for c in cs):
                 raise KeyError(f"Key '{key}' not found in command_specific")
             return fmean(c["command_specific"][key] for c in cs)
-        
+
         ratio = cmd_mean("compression_ratio")
         ratio_chunk_only = cmd_mean("compression_ratio_chunk_only")
         compression_elapsed_time = cmd_mean("compression_elapsed_time_nano_secs")
         compressed_size = cmd_mean("compressed_size")
         compressed_size_chunk_only = cmd_mean("compressed_size_chunk_only")
-        
+
         elapsed_time_nanos = fmean(c["elapsed_time_nanos"] for c in cs)
-        compression_throughput = uncompressed_size / compression_elapsed_time if compression_elapsed_time else 0
+        compression_throughput = (
+            uncompressed_size / compression_elapsed_time
+            if compression_elapsed_time
+            else 0
+        )
 
         execution_times: Dict[str, float] = {
             key: fmean(c["execution_times"][key] for c in cs)
@@ -231,7 +258,7 @@ class AllOutputInner(TypedDict):
         execution_times["others"] = entire_time - sum(execution_times.values())
         execution_times_ratios = {
             key: execution_times[key] / entire_time
-            for key in execution_times_keys
+            for key in [*execution_times_keys, "others"]
         }
 
         command_specific: CompressStatistics = {
@@ -242,7 +269,7 @@ class AllOutputInner(TypedDict):
             "compression_ratio": ratio,
             "compression_ratio_chunk_only": ratio_chunk_only,
         }
-        
+
         first = cs[0]
         return {
             "version": first["version"],
@@ -257,39 +284,44 @@ class AllOutputInner(TypedDict):
             "datetime": first["datetime"],
             "result_string": first["result_string"],
         }
-    
+
     def averaged_filter(self, filter_name: str) -> AveragedOutputWrapper[FilterConfig]:
         uncompressed_size = self.uncompressed_size()
-        filter_outputs = self["filters"][filter_name]["filter"]
+        filter_outputs = self.data["filters"][filter_name]["filter"]
         return compute_average(filter_outputs, uncompressed_size)
-    
-    def averaged_filter_materialize(self, filter_name: str) -> AveragedOutputWrapper[FilterMaterializeConfig]:
+
+    def averaged_filter_materialize(
+        self, filter_name: str
+    ) -> AveragedOutputWrapper[FilterMaterializeConfig]:
         uncompressed_size = self.uncompressed_size()
-        filter_outputs = self["filters"][filter_name]["filter_materialize"]
+        filter_outputs = self.data["filters"][filter_name]["filter_materialize"]
         return compute_average(filter_outputs, uncompressed_size)
-    
+
     def averaged_materialize(self) -> AveragedOutputWrapper[MaterializeConfig]:
         uncompressed_size = self.uncompressed_size()
-        materialize_outputs = self["materialize"]
+        materialize_outputs = self.data["materialize"]
         return compute_average(materialize_outputs, uncompressed_size)
-    
+
     def averaged_max(self) -> AveragedOutputWrapper[MaxConfig]:
         uncompressed_size = self.uncompressed_size()
-        max_outputs = self["max"]
+        max_outputs = self.data["max"]
         return compute_average(max_outputs, uncompressed_size)
-    
+
     def averaged_sum(self) -> AveragedOutputWrapper[SumConfig]:
         uncompressed_size = self.uncompressed_size()
-        sum_outputs = self["sum"]
+        sum_outputs = self.data["sum"]
         return compute_average(sum_outputs, uncompressed_size)
-    
-    def averaged(self) -> AveragedAllOutputInner:
+
+    def averaged(self) -> AveragedAllOutputInner | None:
+        if self.data["compress"] is None or len(self.data["compress"]) == 0:
+            # print("No compress data")
+            return None
         filters: Dict[str, AveragedFilterFamilyOutput] = {
             filter_name: {
                 "filter": self.averaged_filter(filter_name),
-                "filter_materialize": self.averaged_filter_materialize(filter_name)
+                "filter_materialize": self.averaged_filter_materialize(filter_name),
             }
-            for filter_name in self["filters"]
+            for filter_name in self.data["filters"]
         }
         return {
             "compress": self.averaged_compress(),
@@ -299,11 +331,797 @@ class AllOutputInner(TypedDict):
             "sum": self.averaged_sum(),
         }
 
+
+class AveragedStats(TypedDict):
+    compression_ratio: float
+
+    compression_execution_time: float
+    decompression_execution_time: float
+    max_execution_time: float
+    sum_execution_time: float
+    filter_gt_10th_percentile_execution_time: float
+    filter_gt_50th_percentile_execution_time: float
+    filter_gt_90th_percentile_execution_time: float
+    filter_ne_execution_time: float
+    filter_eq_execution_time: float
+    filter_gt_10th_percentile_materialize_execution_time: float
+    filter_gt_50th_percentile_materialize_execution_time: float
+    filter_gt_90th_percentile_materialize_execution_time: float
+    filter_ne_materialize_execution_time: float
+    filter_eq_materialize_execution_time: float
+
+    compression_exec_time_ratios: Dict[str, float]
+    decompression_exec_time_ratios: Dict[str, float]
+    max_exec_time_ratios: Dict[str, float]
+    sum_exec_time_ratios: Dict[str, float]
+    filter_gt_10th_percentile_exec_time_ratios: Dict[str, float]
+    filter_gt_50th_percentile_exec_time_ratios: Dict[str, float]
+    filter_gt_90th_percentile_exec_time_ratios: Dict[str, float]
+    filter_ne_exec_time_ratios: Dict[str, float]
+    filter_eq_exec_time_ratios: Dict[str, float]
+    filter_gt_10th_percentile_materialize_exec_time_ratios: Dict[str, float]
+    filter_gt_50th_percentile_materialize_exec_time_ratios: Dict[str, float]
+    filter_gt_90th_percentile_materialize_exec_time_ratios: Dict[str, float]
+    filter_ne_materialize_exec_time_ratios: Dict[str, float]
+    filter_eq_materialize_exec_time_ratios: Dict[str, float]
+
+    compression_throughput: float
+    decompression_throughput: float
+    max_throughput: float
+    sum_throughput: float
+    filter_gt_10th_percentile_throughput: float
+    filter_gt_50th_percentile_throughput: float
+    filter_gt_90th_percentile_throughput: float
+    filter_ne_throughput: float
+    filter_eq_throughput: float
+    filter_gt_10th_percentile_materialize_throughput: float
+    filter_gt_50th_percentile_materialize_throughput: float
+    filter_gt_90th_percentile_materialize_throughput: float
+    filter_ne_materialize_throughput: float
+    filter_eq_materialize_throughput: float
+
+
+class AveragedAllOutput(TypedDict):
+    # method -> dataset -> averaged output
+    __root__: Dict[str, Optional[Dict[str, AveragedAllOutputInner]]]
+
+
+class AveragedAllOutputHandler:
+    def __init__(self, data: AveragedAllOutput):
+        self.data = data
+
+    def datasets(self) -> List[str]:
+        datasets = set()
+        for method in self.data.values():
+            datasets.update(method.keys())
+        return list(datasets)
+
+    def methods(self) -> List[str]:
+        return list(self.data.keys())
+
+    def methods_in_dataset(self, dataset: str) -> List[str]:
+        methods = set()
+        for method in self.data.values():
+            if dataset in method:
+                methods.add(dataset)
+        return list(methods)
+
+    def datasets_in_method(self, method: str) -> List[str]:
+        return list(self.data[method].keys())
+
+    def map(self, f: Callable[[AveragedAllOutputInner], T]) -> Dict[str, Dict[str, T]]:
+        return {
+            method: {
+                dataset: f(self.data[method][dataset])
+                if self.data[method][dataset] is not None
+                else None
+                for dataset in self.datasets()
+            }
+            for method in self.methods()
+        }
+
+    def map_to_stats(self) -> Dict[str, Dict[str, AveragedStats]]:
+        def mapper(d: AveragedAllOutputInner) -> AveragedStats:
+            return {
+                "compression_ratio": d["compress"]["command_specific"][
+                    "compression_ratio"
+                ],
+                "compression_exec_time_ratios": d["compress"]["execution_times_ratios"],
+                "decompression_exec_time_ratios": d["materialize"][
+                    "execution_times_ratios"
+                ],
+                "max_exec_time_ratios": d["max"]["execution_times_ratios"],
+                "sum_exec_time_ratios": d["sum"]["execution_times_ratios"],
+                "filter_gt_10th_percentile_exec_time_ratios": d["filters"][
+                    "greater_10th_percentile"
+                ]["filter"]["execution_times_ratios"],
+                "filter_gt_50th_percentile_exec_time_ratios": d["filters"][
+                    "greater_50th_percentile"
+                ]["filter"]["execution_times_ratios"],
+                "filter_gt_90th_percentile_exec_time_ratios": d["filters"][
+                    "greater_90th_percentile"
+                ]["filter"]["execution_times_ratios"],
+                "filter_ne_exec_time_ratios": d["filters"]["ne"]["filter"][
+                    "execution_times_ratios"
+                ],
+                "filter_eq_exec_time_ratios": d["filters"]["eq"]["filter"][
+                    "execution_times_ratios"
+                ],
+                "filter_gt_10th_percentile_materialize_exec_time_ratios": d["filters"][
+                    "greater_10th_percentile"
+                ]["filter_materialize"]["execution_times_ratios"],
+                "filter_gt_50th_percentile_materialize_exec_time_ratios": d["filters"][
+                    "greater_50th_percentile"
+                ]["filter_materialize"]["execution_times_ratios"],
+                "filter_gt_90th_percentile_materialize_exec_time_ratios": d["filters"][
+                    "greater_90th_percentile"
+                ]["filter_materialize"]["execution_times_ratios"],
+                "filter_ne_materialize_exec_time_ratios": d["filters"]["ne"][
+                    "filter_materialize"
+                ]["execution_times_ratios"],
+                "filter_eq_materialize_exec_time_ratios": d["filters"]["eq"][
+                    "filter_materialize"
+                ]["execution_times_ratios"],
+                "compression_throughput": d["compress"]["throughput"],
+                "decompression_throughput": d["materialize"]["throughput"],
+                "max_throughput": d["max"]["throughput"],
+                "sum_throughput": d["sum"]["throughput"],
+                "filter_gt_10th_percentile_throughput": d["filters"][
+                    "greater_10th_percentile"
+                ]["filter"]["throughput"],
+                "filter_gt_50th_percentile_throughput": d["filters"][
+                    "greater_50th_percentile"
+                ]["filter"]["throughput"],
+                "filter_gt_90th_percentile_throughput": d["filters"][
+                    "greater_90th_percentile"
+                ]["filter"]["throughput"],
+                "filter_ne_throughput": d["filters"]["ne"]["filter"]["throughput"],
+                "filter_eq_throughput": d["filters"]["eq"]["filter"]["throughput"],
+                "filter_gt_10th_percentile_materialize_throughput": d["filters"][
+                    "greater_10th_percentile"
+                ]["filter_materialize"]["throughput"],
+                "filter_gt_50th_percentile_materialize_throughput": d["filters"][
+                    "greater_50th_percentile"
+                ]["filter_materialize"]["throughput"],
+                "filter_gt_90th_percentile_materialize_throughput": d["filters"][
+                    "greater_90th_percentile"
+                ]["filter_materialize"]["throughput"],
+                "filter_ne_materialize_throughput": d["filters"]["ne"][
+                    "filter_materialize"
+                ]["throughput"],
+                "filter_eq_materialize_throughput": d["filters"]["eq"][
+                    "filter_materialize"
+                ]["throughput"],
+            }
+
+        return self.map(mapper)
+
+    def map_across_dataset(
+        self, f: Callable[[Optional[Dict[str, AveragedAllOutputInner]]], T]
+    ) -> Dict[str, T]:
+        return {method: f(self.data[method]) for method in self.methods()}
+
+    def none_data_containing_method(self) -> Set[str]:
+        return set(method for method in self.methods() if self.data[method] is None)
+
+    def none_data_containing_dataset(self) -> Set[str]:
+        return set(
+            dataset
+            for dataset in self.datasets()
+            if any(self.data[method][dataset] is None for method in self.methods())
+        )
+
+    def compute_normalized_segmented_execution_times(
+        self, metric: str
+    ) -> Dict[str, Dict[str, float]]:
+        # return method -> Dict[str, float] (s/GB)
+        assert metric in [
+            "compress",
+            "materialize",
+            "max",
+            "sum",
+            "filter_gt_10th_percentile",
+            "filter_gt_50th_percentile",
+            "filter_gt_90th_percentile",
+            "filter_ne",
+            "filter_eq",
+            "filter_gt_10th_percentile_materialize",
+            "filter_gt_50th_percentile_materialize",
+            "filter_gt_90th_percentile_materialize",
+            "filter_ne_materialize",
+            "filter_eq_materialize",
+        ]
+
+        def store(
+            d: Dict[str, Dict[str, float]],
+            method: str,
+            dataset: str,
+            base: AveragedOutputWrapper,
+            uncompressed_size: float,
+        ):
+            d[method][dataset] = copy.deepcopy(base["execution_times"])
+            for key in d[method][dataset].keys():
+                d[method][dataset][key] = d[method][dataset][key] / uncompressed_size
+
+        ret = {
+            method: {dataset: {} for dataset in self.datasets()}
+            for method in self.methods()
+        }
+        for method in self.methods():
+            for dataset in self.datasets():
+                if self.data[method][dataset] is None:
+                    ret[method][dataset] = None
+                    continue
+                uncompressed_size = self.data[method][dataset]["compress"][
+                    "command_specific"
+                ]["uncompressed_size"]
+                if metric == "compress":
+                    store(
+                        ret,
+                        method,
+                        dataset,
+                        self.data[method][dataset]["compress"],
+                        uncompressed_size,
+                    )
+                elif metric == "materialize":
+                    store(
+                        ret,
+                        method,
+                        dataset,
+                        self.data[method][dataset]["materialize"],
+                        uncompressed_size,
+                    )
+                elif metric == "max":
+                    store(
+                        ret,
+                        method,
+                        dataset,
+                        self.data[method][dataset]["max"],
+                        uncompressed_size,
+                    )
+                elif metric == "sum":
+                    store(
+                        ret,
+                        method,
+                        dataset,
+                        self.data[method][dataset]["sum"],
+                        uncompressed_size,
+                    )
+                elif metric == "filter_gt_10th_percentile":
+                    store(
+                        ret,
+                        method,
+                        dataset,
+                        self.data[method][dataset]["filters"][
+                            "greater_10th_percentile"
+                        ]["filter"],
+                        uncompressed_size,
+                    )
+                elif metric == "filter_gt_50th_percentile":
+                    store(
+                        ret,
+                        method,
+                        dataset,
+                        self.data[method][dataset]["filters"][
+                            "greater_50th_percentile"
+                        ]["filter"],
+                        uncompressed_size,
+                    )
+                elif metric == "filter_gt_90th_percentile":
+                    store(
+                        ret,
+                        method,
+                        dataset,
+                        self.data[method][dataset]["filters"][
+                            "greater_90th_percentile"
+                        ]["filter"],
+                        uncompressed_size,
+                    )
+                elif metric == "filter_ne":
+                    store(
+                        ret,
+                        method,
+                        dataset,
+                        self.data[method][dataset]["filters"]["ne"]["filter"],
+                        uncompressed_size,
+                    )
+                elif metric == "filter_eq":
+                    store(
+                        ret,
+                        method,
+                        dataset,
+                        self.data[method][dataset]["filters"]["eq"]["filter"],
+                        uncompressed_size,
+                    )
+                elif metric == "filter_gt_10th_percentile_materialize":
+                    store(
+                        ret,
+                        method,
+                        dataset,
+                        self.data[method][dataset]["filters"][
+                            "greater_10th_percentile"
+                        ]["filter_materialize"],
+                        uncompressed_size,
+                    )
+                elif metric == "filter_gt_50th_percentile_materialize":
+                    store(
+                        ret,
+                        method,
+                        dataset,
+                        self.data[method][dataset]["filters"][
+                            "greater_50th_percentile"
+                        ]["filter_materialize"],
+                        uncompressed_size,
+                    )
+                elif metric == "filter_gt_90th_percentile_materialize":
+                    store(
+                        ret,
+                        method,
+                        dataset,
+                        self.data[method][dataset]["filters"][
+                            "greater_90th_percentile"
+                        ]["filter_materialize"],
+                        uncompressed_size,
+                    )
+                elif metric == "filter_ne_materialize":
+                    store(
+                        ret,
+                        method,
+                        dataset,
+                        self.data[method][dataset]["filters"]["ne"][
+                            "filter_materialize"
+                        ],
+                        uncompressed_size,
+                    )
+                elif metric == "filter_eq_materialize":
+                    store(
+                        ret,
+                        method,
+                        dataset,
+                        self.data[method][dataset]["filters"]["eq"][
+                            "filter_materialize"
+                        ],
+                        uncompressed_size,
+                    )
+        return ret
+
+    def compute_average_across_dataset(
+        self, skip_none_containing_dataset=False, skip_none_containing_method=False
+    ) -> Dict[str, AveragedStats]:
+        none_data_containing_method = self.none_data_containing_method()
+        none_data_containing_dataset = self.none_data_containing_dataset()
+        if (
+            not skip_none_containing_dataset
+            and not skip_none_containing_method
+            and len(none_data_containing_dataset) > 0
+        ):
+            raise ValueError("Some datasets do not have data")
+
+        def mapper(d: Dict[str, AveragedAllOutputInner]):
+            def get_exec_time_ratios(
+                ratios: Dict[str, Dict[str, float]],
+            ) -> Dict[str, float]:
+                # ratios: dataset -> Dict[str, float]
+                averaged_ratios = {}
+                ratio_keys = list(ratios.values())[0].keys()
+                for key in ratio_keys:
+                    averaged_ratios[key] = fmean(
+                        [inner[key] for inner in ratios.values()]
+                    )
+                assert abs(sum(averaged_ratios.values()) - 1) < 1e-6
+                return averaged_ratios
+
+            def ok(dataset: str) -> bool:
+                return not (
+                    skip_none_containing_dataset
+                    and dataset in none_data_containing_dataset
+                )
+
+            return {
+                "compression_ratio": fmean(
+                    [
+                        inner["compress"]["command_specific"]["compression_ratio"]
+                        for dataset, inner in d.items()
+                        if ok(dataset)
+                    ]
+                ),
+                "compression_execution_time": fmean(
+                    [
+                        inner["compress"]["elapsed_time_nanos"]
+                        for dataset, inner in d.items()
+                        if ok(dataset)
+                    ]
+                ),
+                "decompression_execution_time": fmean(
+                    [
+                        inner["materialize"]["elapsed_time_nanos"]
+                        for dataset, inner in d.items()
+                        if ok(dataset)
+                    ]
+                ),
+                "max_execution_time": fmean(
+                    [
+                        inner["max"]["elapsed_time_nanos"]
+                        for dataset, inner in d.items()
+                        if ok(dataset)
+                    ]
+                ),
+                "sum_execution_time": fmean(
+                    [
+                        inner["sum"]["elapsed_time_nanos"]
+                        for dataset, inner in d.items()
+                        if ok(dataset)
+                    ]
+                ),
+                "filter_gt_10th_percentile_execution_time": fmean(
+                    [
+                        inner["filters"]["greater_10th_percentile"]["filter"][
+                            "elapsed_time_nanos"
+                        ]
+                        for dataset, inner in d.items()
+                        if ok(dataset)
+                    ]
+                ),
+                "filter_gt_50th_percentile_execution_time": fmean(
+                    [
+                        inner["filters"]["greater_50th_percentile"]["filter"][
+                            "elapsed_time_nanos"
+                        ]
+                        for dataset, inner in d.items()
+                        if ok(dataset)
+                    ]
+                ),
+                "filter_gt_90th_percentile_execution_time": fmean(
+                    [
+                        inner["filters"]["greater_90th_percentile"]["filter"][
+                            "elapsed_time_nanos"
+                        ]
+                        for dataset, inner in d.items()
+                        if ok(dataset)
+                    ]
+                ),
+                "filter_ne_execution_time": fmean(
+                    [
+                        inner["filters"]["ne"]["filter"]["elapsed_time_nanos"]
+                        for dataset, inner in d.items()
+                        if ok(dataset)
+                    ]
+                ),
+                "filter_eq_execution_time": fmean(
+                    [
+                        inner["filters"]["eq"]["filter"]["elapsed_time_nanos"]
+                        for dataset, inner in d.items()
+                        if ok(dataset)
+                    ]
+                ),
+                "filter_gt_10th_percentile_materialize_execution_time": fmean(
+                    [
+                        inner["filters"]["greater_10th_percentile"][
+                            "filter_materialize"
+                        ]["elapsed_time_nanos"]
+                        for dataset, inner in d.items()
+                        if ok(dataset)
+                    ]
+                ),
+                "filter_gt_50th_percentile_materialize_execution_time": fmean(
+                    [
+                        inner["filters"]["greater_50th_percentile"][
+                            "filter_materialize"
+                        ]["elapsed_time_nanos"]
+                        for dataset, inner in d.items()
+                        if ok(dataset)
+                    ]
+                ),
+                "filter_gt_90th_percentile_materialize_execution_time": fmean(
+                    [
+                        inner["filters"]["greater_90th_percentile"][
+                            "filter_materialize"
+                        ]["elapsed_time_nanos"]
+                        for dataset, inner in d.items()
+                        if ok(dataset)
+                    ]
+                ),
+                "filter_ne_materialize_execution_time": fmean(
+                    [
+                        inner["filters"]["ne"]["filter_materialize"][
+                            "elapsed_time_nanos"
+                        ]
+                        for dataset, inner in d.items()
+                        if ok(dataset)
+                    ]
+                ),
+                "filter_eq_materialize_execution_time": fmean(
+                    [
+                        inner["filters"]["eq"]["filter_materialize"][
+                            "elapsed_time_nanos"
+                        ]
+                        for dataset, inner in d.items()
+                        if ok(dataset)
+                    ]
+                ),
+                "compression_exec_time_ratios": get_exec_time_ratios(
+                    {
+                        dataset: inner["compress"]["execution_times_ratios"]
+                        for dataset, inner in d.items()
+                        if ok(dataset)
+                    }
+                ),
+                "decompression_exec_time_ratios": get_exec_time_ratios(
+                    {
+                        dataset: inner["materialize"]["execution_times_ratios"]
+                        for dataset, inner in d.items()
+                        if ok(dataset)
+                    }
+                ),
+                "max_exec_time_ratios": get_exec_time_ratios(
+                    {
+                        dataset: inner["max"]["execution_times_ratios"]
+                        for dataset, inner in d.items()
+                        if ok(dataset)
+                    }
+                ),
+                "sum_exec_time_ratios": get_exec_time_ratios(
+                    {
+                        dataset: inner["sum"]["execution_times_ratios"]
+                        for dataset, inner in d.items()
+                        if ok(dataset)
+                    }
+                ),
+                "filter_gt_10th_percentile_exec_time_ratios": get_exec_time_ratios(
+                    {
+                        dataset: inner["filters"]["greater_10th_percentile"]["filter"][
+                            "execution_times_ratios"
+                        ]
+                        for dataset, inner in d.items()
+                        if ok(dataset)
+                    }
+                ),
+                "filter_gt_50th_percentile_exec_time_ratios": get_exec_time_ratios(
+                    {
+                        dataset: inner["filters"]["greater_50th_percentile"]["filter"][
+                            "execution_times_ratios"
+                        ]
+                        for dataset, inner in d.items()
+                        if ok(dataset)
+                    }
+                ),
+                "filter_gt_90th_percentile_exec_time_ratios": get_exec_time_ratios(
+                    {
+                        dataset: inner["filters"]["greater_90th_percentile"]["filter"][
+                            "execution_times_ratios"
+                        ]
+                        for dataset, inner in d.items()
+                        if ok(dataset)
+                    }
+                ),
+                "filter_ne_exec_time_ratios": get_exec_time_ratios(
+                    {
+                        dataset: inner["filters"]["ne"]["filter"][
+                            "execution_times_ratios"
+                        ]
+                        for dataset, inner in d.items()
+                        if ok(dataset)
+                    }
+                ),
+                "filter_eq_exec_time_ratios": get_exec_time_ratios(
+                    {
+                        dataset: inner["filters"]["eq"]["filter"][
+                            "execution_times_ratios"
+                        ]
+                        for dataset, inner in d.items()
+                        if ok(dataset)
+                    }
+                ),
+                "filter_gt_10th_percentile_materialize_exec_time_ratios": get_exec_time_ratios(
+                    {
+                        dataset: inner["filters"]["greater_10th_percentile"][
+                            "filter_materialize"
+                        ]["execution_times_ratios"]
+                        for dataset, inner in d.items()
+                        if ok(dataset)
+                    }
+                ),
+                "filter_gt_50th_percentile_materialize_exec_time_ratios": get_exec_time_ratios(
+                    {
+                        dataset: inner["filters"]["greater_50th_percentile"][
+                            "filter_materialize"
+                        ]["execution_times_ratios"]
+                        for dataset, inner in d.items()
+                        if ok(dataset)
+                    }
+                ),
+                "filter_gt_90th_percentile_materialize_exec_time_ratios": get_exec_time_ratios(
+                    {
+                        dataset: inner["filters"]["greater_90th_percentile"][
+                            "filter_materialize"
+                        ]["execution_times_ratios"]
+                        for dataset, inner in d.items()
+                        if ok(dataset)
+                    }
+                ),
+                "filter_ne_materialize_exec_time_ratios": get_exec_time_ratios(
+                    {
+                        dataset: inner["filters"]["ne"]["filter_materialize"][
+                            "execution_times_ratios"
+                        ]
+                        for dataset, inner in d.items()
+                        if ok(dataset)
+                    }
+                ),
+                "filter_eq_materialize_exec_time_ratios": get_exec_time_ratios(
+                    {
+                        dataset: inner["filters"]["eq"]["filter_materialize"][
+                            "execution_times_ratios"
+                        ]
+                        for dataset, inner in d.items()
+                        if ok(dataset)
+                    }
+                ),
+                "compression_throughput": fmean(
+                    [
+                        inner["compress"]["throughput"]
+                        for dataset, inner in d.items()
+                        if ok(dataset)
+                    ]
+                ),
+                "decompression_throughput": fmean(
+                    [
+                        inner["materialize"]["throughput"]
+                        for dataset, inner in d.items()
+                        if ok(dataset)
+                    ]
+                ),
+                "max_throughput": fmean(
+                    [
+                        inner["max"]["throughput"]
+                        for dataset, inner in d.items()
+                        if ok(dataset)
+                    ]
+                ),
+                "sum_throughput": fmean(
+                    [
+                        inner["sum"]["throughput"]
+                        for dataset, inner in d.items()
+                        if ok(dataset)
+                    ]
+                ),
+                "filter_gt_10th_percentile_throughput": fmean(
+                    [
+                        inner["filters"]["greater_10th_percentile"]["filter"][
+                            "throughput"
+                        ]
+                        for dataset, inner in d.items()
+                        if ok(dataset)
+                    ]
+                ),
+                "filter_gt_50th_percentile_throughput": fmean(
+                    [
+                        inner["filters"]["greater_50th_percentile"]["filter"][
+                            "throughput"
+                        ]
+                        for dataset, inner in d.items()
+                        if ok(dataset)
+                    ]
+                ),
+                "filter_gt_90th_percentile_throughput": fmean(
+                    [
+                        inner["filters"]["greater_90th_percentile"]["filter"][
+                            "throughput"
+                        ]
+                        for dataset, inner in d.items()
+                        if ok(dataset)
+                    ]
+                ),
+                "filter_ne_throughput": fmean(
+                    [
+                        inner["filters"]["ne"]["filter"]["throughput"]
+                        for dataset, inner in d.items()
+                        if ok(dataset)
+                    ]
+                ),
+                "filter_eq_throughput": fmean(
+                    [
+                        inner["filters"]["eq"]["filter"]["throughput"]
+                        for dataset, inner in d.items()
+                        if ok(dataset)
+                    ]
+                ),
+                "filter_gt_10th_percentile_materialize_throughput": fmean(
+                    [
+                        inner["filters"]["greater_10th_percentile"][
+                            "filter_materialize"
+                        ]["throughput"]
+                        for dataset, inner in d.items()
+                        if ok(dataset)
+                    ]
+                ),
+                "filter_gt_50th_percentile_materialize_throughput": fmean(
+                    [
+                        inner["filters"]["greater_50th_percentile"][
+                            "filter_materialize"
+                        ]["throughput"]
+                        for dataset, inner in d.items()
+                        if ok(dataset)
+                    ]
+                ),
+                "filter_gt_90th_percentile_materialize_throughput": fmean(
+                    [
+                        inner["filters"]["greater_90th_percentile"][
+                            "filter_materialize"
+                        ]["throughput"]
+                        for dataset, inner in d.items()
+                        if ok(dataset)
+                    ]
+                ),
+                "filter_ne_materialize_throughput": fmean(
+                    [
+                        inner["filters"]["ne"]["filter_materialize"]["throughput"]
+                        for dataset, inner in d.items()
+                        if ok(dataset)
+                    ]
+                ),
+                "filter_eq_materialize_throughput": fmean(
+                    [
+                        inner["filters"]["eq"]["filter_materialize"]["throughput"]
+                        for dataset, inner in d.items()
+                        if ok(dataset)
+                    ]
+                ),
+            }
+
+        return {
+            method: mapper(self.data[method])
+            for method in self.methods()
+            if not (
+                skip_none_containing_method and method in none_data_containing_method
+            )
+        }
+
+
 class AllOutput(TypedDict):
     __root__: Dict[str, Dict[str, AllOutputInner]]
 
-    def ofdataset(self, dataset: str) -> Dict[str, AllOutputInner]:
-        return self[dataset]
+
+class AllOutputHandler:
+    def __init__(self, data: AllOutput):
+        self.data = data
+
+    def datasets(self) -> List[str]:
+        datasets = set(self.data.keys())
+        datasets.remove("command_type")
+        return list(datasets)
+
+    def methods(self) -> List[str]:
+        methods = set()
+        for dataset in self.data.values():
+            if type(dataset) is not dict:
+                # f"Expected dict, got {type(dataset)}"
+                continue
+            methods.update(dataset.keys())
+        return list(methods)
+
+    def methods_in_dataset(self, dataset: str) -> List[str]:
+        return list(self.data[dataset].keys())
+
+    def of(self, dataset: str, method: str) -> AllOutputInnerHandler | None:
+        if method in self.data[dataset]:
+            return AllOutputInnerHandler(self.data[dataset][method])
+        return None
+
+    def averaged(self) -> AveragedAllOutputHandler:
+        def get_averaged(dataset: str, method: str) -> AveragedAllOutputInner | None:
+            # print("Processing", dataset, method)
+            if self.of(dataset, method) is not None:
+                return self.of(dataset, method).averaged()
+            return None
+
+        inner = {
+            method: {
+                dataset: get_averaged(dataset, method) for dataset in self.datasets()
+            }
+            for method in self.methods()
+        }
+        return AveragedAllOutputHandler(inner)
 
 
 CompressionMethodKeys = Literal[
@@ -432,8 +1250,12 @@ method_mapping = {
     **{f"BUFF_{i}": f"Buff_{i}" for i in [1, 3, 5, 8]},
     "BUFF": "Buff",
 }
+
+
 def map_method(methods: List[str]) -> List[str]:
     return [method_mapping[method] for method in methods]
+
+
 mapped_processing_types = set(
     "+".join(segment_mapping[method][mapping_key])
     for method in compression_methods
@@ -441,6 +1263,7 @@ mapped_processing_types = set(
 )
 
 fontsize = 15
+
 
 # Function to calculate the ratios for each process
 def calculate_ratios(
@@ -462,6 +1285,7 @@ def get_color_exe(label: str) -> tuple[float, float, float, float]:
     if label in color_map_exe:
         return color_map_exe[label]
     next_index = len(color_map_exe)
+    assert next_index < 20
     color_map_exe[label] = matplotlib.colormaps["tab20"](next_index)
 
     return color_map_exe[label]
@@ -477,7 +1301,9 @@ def add_notes_to_plot(
     if note_str is not None:
         fig.text(x_pos, y_pos, note_str, ha="right", va="bottom", fontsize=fontsize)
 
+
 omit_title = True
+
 
 def plot_stacked_execution_time_ratios_for_methods(
     # methods to dataset to execution times
@@ -551,9 +1377,17 @@ def plot_relative_stacked_execution_time_ratios_for_methods(
     plt.xlabel("Compression Methods", fontsize=fontsize)
     plt.ylabel("Execution Time Percentage (%)", fontsize=fontsize)
     if not omit_title:
-        plt.title(f"Execution Time Ratios for {dataset_name} by Compression Method", fontsize=fontsize)
+        plt.title(
+            f"Execution Time Ratios for {dataset_name} by Compression Method",
+            fontsize=fontsize,
+        )
     plt.xticks(index, methods, rotation=45, fontsize=fontsize)
-    plt.legend(title="Processing Types", bbox_to_anchor=(1.05, 1), loc="upper left", fontsize=fontsize)
+    plt.legend(
+        title="Processing Types",
+        bbox_to_anchor=(1.05, 1),
+        loc="upper left",
+        fontsize=fontsize,
+    )
     plt.tight_layout()
     plt.savefig(output_path)
     plt.close()
@@ -621,9 +1455,12 @@ def plot_absolute_stacked_execution_times_for_methods(
     # plt.xlabel("Compression Methods", fontsize=fontsize)
     plt.ylabel(y_label, fontsize=fontsize)  # y-axis now reflects absolute time
     if not omit_title:
-        plt.title(f"Execution Times for {dataset_name} by Compression Method", fontsize=fontsize)
+        plt.title(
+            f"Execution Times for {dataset_name} by Compression Method",
+            fontsize=fontsize,
+        )
     plt.xticks(index, map_method(methods), rotation=45, fontsize=fontsize)
-    plt.tick_params(axis='y', labelsize=fontsize) 
+    plt.tick_params(axis="y", labelsize=fontsize)
     # plt.legend(title="Processing Types", bbox_to_anchor=(1.05, 1), loc="upper left", fontsize=fontsize)
     plt.legend(title="Processing Types", loc=legend_loc, fontsize=fontsize)
     plt.tight_layout()
@@ -654,10 +1491,10 @@ def plot_comparison(
     plt.ylim(0, max_value)
     if not omit_title:
         plt.title(title, fontsize=fontsize)
-    # plt.xlabel("Compression Method", fontsize=fontsize)   
+    # plt.xlabel("Compression Method", fontsize=fontsize)
     plt.ylabel(y_label, fontsize=fontsize)
     plt.xticks(rotation=45, ha="right", fontsize=fontsize)
-    plt.tick_params(axis='y', labelsize=fontsize) 
+    plt.tick_params(axis="y", labelsize=fontsize)
     plt.tight_layout()
     plt.savefig(output_path)
     plt.close()
@@ -715,7 +1552,14 @@ def plot_combined_radar_chart(data_dict, title, labels, output_path):
     for i, label in enumerate(labels):
         values = [normalized_data_dict[metric][i] for metric in metrics]
         values += values[:1]  # Repeat the first value to close the polygon
-        ax.plot(angles, values, color=get_color(method_mapping[label]), label=method_mapping[label], linewidth=2, zorder=2)
+        ax.plot(
+            angles,
+            values,
+            color=get_color(method_mapping[label]),
+            label=method_mapping[label],
+            linewidth=2,
+            zorder=2,
+        )
 
     empty_strs = [""] * len(metrics)
     ax.set_xticks(angles[:-1], labels=empty_strs)
@@ -727,16 +1571,23 @@ def plot_combined_radar_chart(data_dict, title, labels, output_path):
     distance_idx = 1
     distances = [1.1, 1.2]
     for i, (metric, angle) in enumerate(zip(metrics, angles[:-1])):
-        ha = 'center'
+        ha = "center"
         if distance_idx == 0:
             distance_idx = 1
         else:
             distance_idx = 0
         distance = 1.25 if metric == "Compression\nRatios" else distances[distance_idx]
         # Adjust the position using ax.text
-        ax.text(angle, distance, metric, size=fontsize + 2, horizontalalignment=ha, fontweight="bold", verticalalignment="center", zorder=1)
-
-
+        ax.text(
+            angle,
+            distance,
+            metric,
+            size=fontsize + 2,
+            horizontalalignment=ha,
+            fontweight="bold",
+            verticalalignment="center",
+            zorder=1,
+        )
 
     if not omit_title:
         plt.title(title, size=15, color="black", y=1.1, fontsize=fontsize)
@@ -768,9 +1619,17 @@ def main():
     dataset_names = list(all_output.keys())
     dataset_names.remove("command_type")
 
-    out_dir = "results"
-    out_dir = os.path.join(out_dir, Path(path).stem)
+    if len(sys.argv) == 3:
+        out_dir = sys.argv[2]
+    else:
+        out_dir = "results"
+        out_dir = os.path.join(out_dir, Path(path).stem)
     os.makedirs(out_dir, exist_ok=True)
+    # if something is in the out_dir, log it and abort
+    if len(os.listdir(out_dir)) > 0:
+        print("Output directory is not empty")
+        print(os.listdir(out_dir))
+        sys.exit(1)
 
     compression_ratios_data: dict[str, List[Optional[float]]] = {
         method_name: [None] * len(dataset_names) for method_name in compression_methods
@@ -851,9 +1710,12 @@ def main():
         if dataset_name == "command_type":
             continue
         for method_name in tqdm(methods, leave=False):
-            if  method_name in skip_methods:
+            if method_name in skip_methods:
                 continue
             output: AllOutputInner = methods[method_name]
+            if len(output["compress"]) == 0:
+                print(f"Skipping {dataset_name} {method_name}")
+                continue
             ratio = fmean(
                 compress["command_specific"]["compression_ratio"]
                 for compress in output["compress"]
@@ -893,7 +1755,9 @@ def main():
                 entire_compression_time = fmean(
                     compress["elapsed_time_nanos"] for compress in output["compress"]
                 )
-                compression_execution_times["others"] = entire_compression_time - sum(compression_execution_times.values())
+                compression_execution_times["others"] = entire_compression_time - sum(
+                    compression_execution_times.values()
+                )
 
                 decompression_execution_times[key] = fmean(
                     materialize["execution_times"][key]
@@ -903,10 +1767,17 @@ def main():
                     materialize["elapsed_time_nanos"]
                     for materialize in output["materialize"]
                 )
-                decompression_execution_times["others"] = entiere_decompression_time - sum(decompression_execution_times.values())
+                decompression_execution_times["others"] = (
+                    entiere_decompression_time
+                    - sum(decompression_execution_times.values())
+                )
 
-                decompression_execution_times_ratios[key] = decompression_execution_times[key] / entiere_decompression_time
-                compression_execution_times_ratios[key] = compression_execution_times[key] / entire_compression_time
+                decompression_execution_times_ratios[key] = (
+                    decompression_execution_times[key] / entiere_decompression_time
+                )
+                compression_execution_times_ratios[key] = (
+                    compression_execution_times[key] / entire_compression_time
+                )
 
                 for filter_name in filter_methods:
                     entire_filter_time = fmean(
@@ -917,18 +1788,29 @@ def main():
                         f["execution_times"][key]
                         for f in output["filters"][filter_name]["filter"]
                     )
-                    filter_execution_times[filter_name]["others"] = entire_filter_time - sum(filter_execution_times[filter_name].values())
+                    filter_execution_times[filter_name]["others"] = (
+                        entire_filter_time
+                        - sum(filter_execution_times[filter_name].values())
+                    )
 
-                    filter_execution_times_ratios[filter_name][key] = filter_execution_times[filter_name][key] / entire_filter_time
+                    filter_execution_times_ratios[filter_name][key] = (
+                        filter_execution_times[filter_name][key] / entire_filter_time
+                    )
 
-            compression_execution_times_ratios["others"] = compression_execution_times["others"] / entire_compression_time
-            decompression_execution_times_ratios["others"] = decompression_execution_times["others"] / entiere_decompression_time
+            compression_execution_times_ratios["others"] = (
+                compression_execution_times["others"] / entire_compression_time
+            )
+            decompression_execution_times_ratios["others"] = (
+                decompression_execution_times["others"] / entiere_decompression_time
+            )
             for filter_name in filter_methods:
-                filter_execution_times_ratios[filter_name]["others"] = filter_execution_times[filter_name]["others"] / entire_filter_time
-            for filter_name in filter_methods:
-                filter_execution_times_ratio_data[filter_name][method_name][dataset_index] = (
-                    filter_execution_times_ratios[filter_name]
+                filter_execution_times_ratios[filter_name]["others"] = (
+                    filter_execution_times[filter_name]["others"] / entire_filter_time
                 )
+            for filter_name in filter_methods:
+                filter_execution_times_ratio_data[filter_name][method_name][
+                    dataset_index
+                ] = filter_execution_times_ratios[filter_name]
 
             compression_execution_times_data[method_name][dataset_index] = (
                 compression_execution_times
@@ -1178,12 +2060,14 @@ def main():
                 filter_name
             ].filter(pl.all_horizontal(pl.col("*").is_not_null()))
         )
-    
 
     decompression_execution_times_throughput: Dict[str, List[Dict[str, float]]] = {
         method: [
             {
-                key: fmean([d[key] for d in decompression_execution_times_ratio_data[method]]) / fmean(decompression_throughput_data[method])
+                key: fmean(
+                    [d[key] for d in decompression_execution_times_ratio_data[method]]
+                )
+                / fmean(decompression_throughput_data[method])
                 for key in decompression_execution_times_ratio_data[method][0].keys()
             }
         ]
@@ -1192,7 +2076,10 @@ def main():
     compression_execution_times_throughput: Dict[str, List[Dict[str, float]]] = {
         method: [
             {
-                key: fmean([d[key] for d in compression_execution_times_ratio_data[method]]) / fmean(compression_throughput_data[method])
+                key: fmean(
+                    [d[key] for d in compression_execution_times_ratio_data[method]]
+                )
+                / fmean(compression_throughput_data[method])
                 for key in compression_execution_times_ratio_data[method][0].keys()
             }
         ]
@@ -1208,7 +2095,9 @@ def main():
         decompression_execution_times_throughput,
         0,
         "Decompression Throughput",
-        os.path.join(barchart_dir, "normalized_stacked_decompression_execution_times.png"),
+        os.path.join(
+            barchart_dir, "normalized_stacked_decompression_execution_times.png"
+        ),
         note_str="*ALP utilizes SIMD instructions",
         y_label="Average Execution Times (s/GB)",
     )
@@ -1216,7 +2105,9 @@ def main():
         compression_execution_times_throughput,
         0,
         "Compression Throughput",
-        os.path.join(barchart_dir, "normalized_stacked_compression_execution_times.png"),
+        os.path.join(
+            barchart_dir, "normalized_stacked_compression_execution_times.png"
+        ),
         note_str="*ALP utilize SIMD instructions",
         y_label="Average Execution Times (s/GB)",
         legend_loc="upper left",
@@ -1226,7 +2117,10 @@ def main():
         compression_execution_times_throughput,
         0,
         "Compression Throughput",
-        os.path.join(barchart_dir, "normalized_stacked_compression_execution_times_without_gzip.png"),
+        os.path.join(
+            barchart_dir,
+            "normalized_stacked_compression_execution_times_without_gzip.png",
+        ),
         note_str="*ALP utilize SIMD instructions",
         y_label="Average Execution Times (s/GB)",
     )
@@ -1234,8 +2128,18 @@ def main():
         filter_execution_times_throughput: Dict[str, List[Dict[str, float]]] = {
             method: [
                 {
-                    key: fmean([d[key] for d in filter_execution_times_ratio_data[filter_name][method]]) / fmean(filter_throughput_data[filter_name][method])
-                    for key in filter_execution_times_ratio_data[filter_name][method][0].keys()
+                    key: fmean(
+                        [
+                            d[key]
+                            for d in filter_execution_times_ratio_data[filter_name][
+                                method
+                            ]
+                        ]
+                    )
+                    / fmean(filter_throughput_data[filter_name][method])
+                    for key in filter_execution_times_ratio_data[filter_name][method][
+                        0
+                    ].keys()
                 }
             ]
             for method in filter_execution_times_ratio_data[filter_name]
@@ -1244,7 +2148,9 @@ def main():
             filter_execution_times_throughput,
             0,
             f"{filter_name} Filter Throughput",
-            os.path.join(barchart_dir, f"normalized_stacked_{filter_name}_execution_times.png"),
+            os.path.join(
+                barchart_dir, f"normalized_stacked_{filter_name}_execution_times.png"
+            ),
             note_str="*ALP,Buff utilize SIMD instructions",
             y_label="Average Execution Times (s/GB)",
         )
@@ -1437,11 +2343,15 @@ def main():
         key: df.mean() for key, df in filter_materialize_throughput_dfs.items()
     }
 
-    def plot_radar_chart(pred: pl.Expr | List[str], title: str, output_path: str, kind: Literal["all", "comp", "db-query", "without-filter-mat"]="all"):
+    def plot_radar_chart(
+        pred: pl.Expr | List[str],
+        title: str,
+        output_path: str,
+        kind: Literal["all", "comp", "db-query", "without-filter-mat"] = "all",
+    ):
         cr_key = "Compression\nRatios"
         data_dict = {
-            cr_key: np.array(compression_ratios_avg.select(pred).row(0))
-            ** -1,
+            cr_key: np.array(compression_ratios_avg.select(pred).row(0)) ** -1,
             "Compression Throughput": np.array(
                 compression_throughput_avg.select(pred).row(0)
             ),
@@ -1478,8 +2388,10 @@ def main():
 
             if kind != "without-filter-mat":
                 for key in filter_materialize_throughput_avg:
-                    data_dict[f"Filter Materialize Throughput \n({key_map[key]})"] = np.array(
-                        filter_materialize_throughput_avg[key].select(pred).row(0)
+                    data_dict[f"Filter Materialize Throughput \n({key_map[key]})"] = (
+                        np.array(
+                            filter_materialize_throughput_avg[key].select(pred).row(0)
+                        )
                     )
 
         labels = compression_ratios_df.select(pred).columns
@@ -1491,14 +2403,16 @@ def main():
             pl.all().exclude("Uncompressed", "RLE"),
             "Average Performance Radar Chart All",
             os.path.join(combined_radar_chart_dir, f"all_radar_chart_{kind}.png"),
-            kind=kind
+            kind=kind,
         )
         # Xor Family
         plot_radar_chart(
             ["Gorilla", "Chimp", "Chimp128", "ElfOnChimp", "Elf"],
             "Average Performance Radar Chart Xor Family",
-            os.path.join(combined_radar_chart_dir, f"xor_family_radar_chart_{kind}.png"),
-            kind=kind
+            os.path.join(
+                combined_radar_chart_dir, f"xor_family_radar_chart_{kind}.png"
+            ),
+            kind=kind,
         )
     labels = compression_ratios_df.columns
     # Top 5 Compression Ratios
@@ -1587,7 +2501,8 @@ def main():
             compression_ratios_sorted_labels[:5],
             "Top 5 Compression Ratios",
             os.path.join(
-                combined_radar_chart_dir, f"top_5_compression_ratios_radar_chart_{kind}.png"
+                combined_radar_chart_dir,
+                f"top_5_compression_ratios_radar_chart_{kind}.png",
             ),
             kind=kind,
         )
@@ -1595,37 +2510,44 @@ def main():
             compression_throughput_sorted_labels[:5],
             "Top 5 Compression Throughput",
             os.path.join(
-                combined_radar_chart_dir, f"top_5_compression_throughput_radar_chart_{kind}.png"
+                combined_radar_chart_dir,
+                f"top_5_compression_throughput_radar_chart_{kind}.png",
             ),
-            kind=kind
+            kind=kind,
         )
         plot_radar_chart(
             decompressin_throughput_sorted_labels[:5],
             "Top 5 Decompression Throughput",
             os.path.join(
-                combined_radar_chart_dir, f"top_5_decompression_throughput_radar_chart_{kind}.png"
+                combined_radar_chart_dir,
+                f"top_5_decompression_throughput_radar_chart_{kind}.png",
             ),
-            kind=kind
+            kind=kind,
         )
         plot_radar_chart(
             max_throughput_sorted_labels[:5],
             "Top 5 Max Throughput",
-            os.path.join(combined_radar_chart_dir, f"top_5_max_throughput_radar_chart_{kind}.png"),
-            kind=kind
+            os.path.join(
+                combined_radar_chart_dir, f"top_5_max_throughput_radar_chart_{kind}.png"
+            ),
+            kind=kind,
         )
         plot_radar_chart(
             sum_throughput_sorted_labels[:5],
             "Top 5 Sum Throughput",
-            os.path.join(combined_radar_chart_dir, f"top_5_sum_throughput_radar_chart_{kind}.png"),
-            kind=kind
+            os.path.join(
+                combined_radar_chart_dir, f"top_5_sum_throughput_radar_chart_{kind}.png"
+            ),
+            kind=kind,
         )
         plot_radar_chart(
             filter_greater_throughput_sorted_labels[:5],
             "Top 5 Filter GREATER then 10 th percentile Throughput",
             os.path.join(
-                combined_radar_chart_dir, f"top_5_filter_greater_throughput_radar_chart_{kind}.png"
+                combined_radar_chart_dir,
+                f"top_5_filter_greater_throughput_radar_chart_{kind}.png",
             ),
-            kind=kind
+            kind=kind,
         )
 
 
