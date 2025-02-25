@@ -38,11 +38,13 @@ class CompressStatistics(TypedDict):
     compression_ratio: float
     compression_ratio_chunk_only: float
 
+
 class UCR2018DecompressionResult(TypedDict):
     n: int
     elapsed_time_nanos: List[int]
     execution_times: List[ExecutionTimes]
     result_string: List[str]
+
 
 class UCR2018ResultForOneDataset(TypedDict):
     dataset_name: str
@@ -54,11 +56,13 @@ class UCR2018ResultForOneDataset(TypedDict):
     compression_statistics: CompressStatistics
     decompression_result: UCR2018DecompressionResult
 
+
 class UCR2018Result(TypedDict):
     results: Dict[str, UCR2018ResultForOneDataset]
     scale_fallbacked_dataset: Optional[List[str]]
     start_time: datetime
     end_time: datetime
+
 
 class UCR2018ForAllCompressionMethodsResult(TypedDict):
     results: Dict[str, UCR2018Result]
@@ -186,25 +190,47 @@ def main():
             # print(f"Accuracy: {dataset_result['accuracy']}")
             # print(f"Compression statistics: {dataset_result['compression_statistics']}")
 
-
             original_dataset_size = dataset_result["compression_statistics"][
                 "uncompressed_size"
             ]
 
             if dataset_name == "FaceFour":
-                compression_throughput = original_dataset_size / dataset_result["compression_statistics"]["compression_elapsed_time_nano_secs"]
-                time = dataset_result["compression_statistics"]["compression_elapsed_time_nano_secs"] / (10 ** 9)
-                print(f"Original dataset size: {original_dataset_size}, Time: {time}, Compression throughput: {compression_throughput}")
+                compression_throughput = (
+                    original_dataset_size
+                    / dataset_result["compression_statistics"][
+                        "compression_elapsed_time_nano_secs"
+                    ]
+                )
+                time = dataset_result["compression_statistics"][
+                    "compression_elapsed_time_nano_secs"
+                ] / (10**9)
+                print(
+                    f"Original dataset size: {original_dataset_size}, Time: {time}, Compression throughput: {compression_throughput}"
+                )
 
             if method_name in compression_methods:
-                compression_ratio = dataset_result["compression_statistics"]["compressed_size"] / original_dataset_size
+                compression_ratio = (
+                    dataset_result["compression_statistics"]["compressed_size"]
+                    / original_dataset_size
+                )
                 compression_ratio_per_method[method_name].append(compression_ratio)
-                compression_throughput = original_dataset_size / dataset_result["compression_statistics"]["compression_elapsed_time_nano_secs"]
-                compression_throughput_per_method[method_name].append(compression_throughput)
+                compression_throughput = (
+                    original_dataset_size
+                    / dataset_result["compression_statistics"][
+                        "compression_elapsed_time_nano_secs"
+                    ]
+                )
+                compression_throughput_per_method[method_name].append(
+                    compression_throughput
+                )
 
-            decompression_throughput = original_dataset_size / fmean(dataset_result["decompression_result"]["elapsed_time_nanos"])
+            decompression_throughput = original_dataset_size / fmean(
+                dataset_result["decompression_result"]["elapsed_time_nanos"]
+            )
 
-            decompression_throughput_per_method[method_name].append(decompression_throughput)
+            decompression_throughput_per_method[method_name].append(
+                decompression_throughput
+            )
 
             average_elapsed_time_per_vector = fmean(
                 [fmean(times) for times in dataset_result["elapsed_time_nanos"]]
@@ -272,8 +298,12 @@ def main():
     }
 
     compression_ratio_per_method_df = pl.DataFrame(compression_ratio_per_method)
-    compression_throughput_per_method_df = pl.DataFrame(compression_throughput_per_method)
-    decompression_throughput_per_method_df = pl.DataFrame(decompression_throughput_per_method)
+    compression_throughput_per_method_df = pl.DataFrame(
+        compression_throughput_per_method
+    )
+    decompression_throughput_per_method_df = pl.DataFrame(
+        decompression_throughput_per_method
+    )
 
     for dataset_index, dataset_name in enumerate(tqdm(dataset_names)):
         dataset_out_dir = os.path.join(out_dir, dataset_name)
@@ -338,7 +368,7 @@ def main():
     os.makedirs(boxplot_dir, exist_ok=True)
     os.makedirs(compression_dir, exist_ok=True)
 
-    # Compression 
+    # Compression
 
     plot_comparison(
         compression_ratio_per_method_df.columns,

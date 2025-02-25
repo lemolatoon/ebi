@@ -85,12 +85,11 @@ def plot_graphs(data: Dict[str, Dict[str, SimpleCompressionPerformanceForOneData
             )
             compression_throughput = fmean(
                 compress["uncompressed_size"]
-                / compress['compression_elapsed_time_nano_secs']
+                / compress["compression_elapsed_time_nano_secs"]
                 for compress in performance["compression_statistics"]
             )
             decompression_throughput = fmean(
-                compress["uncompressed_size"]
-                / decompress
+                compress["uncompressed_size"] / decompress
                 for compress, decompress in zip(
                     performance["compression_statistics"],
                     performance["decompression_elapsed_time_nanos"],
@@ -100,7 +99,7 @@ def plot_graphs(data: Dict[str, Dict[str, SimpleCompressionPerformanceForOneData
             compression_ratios_data[method_name][i] = ratio
             compression_throughput_data[method_name][i] = compression_throughput
             decompression_throughput_data[method_name][i] = decompression_throughput
-    
+
     compression_ratios_df = pl.DataFrame(compression_ratios_data)
     compression_throughput_df = pl.DataFrame(compression_throughput_data)
     decompression_throughput_df = pl.DataFrame(decompression_throughput_data)
@@ -164,7 +163,6 @@ def plot_graphs(data: Dict[str, Dict[str, SimpleCompressionPerformanceForOneData
         os.path.join(boxplot_dir, "boxplot_decompression_throughput.png"),
         note_str="*ALP,Buff utilize SIMD instructions",
     )
-
 
 
 if __name__ == "__main__":

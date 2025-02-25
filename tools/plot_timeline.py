@@ -8,8 +8,9 @@ from matplotlib.path import Path
 method_colors = {
     "General Purpose": "blue",
     "XOR Based": "green",
-    "Quantization Based": "red"
+    "Quantization Based": "red",
 }
+
 
 def draw_timeline(title, compression_methods, out_dir: str = "results", fontsize=10):
     """
@@ -35,7 +36,9 @@ def draw_timeline(title, compression_methods, out_dir: str = "results", fontsize
     replaced_year = 2008
     if years[1] - years[0] > large_gap_threshold:
         display_years = [replaced_year] + years[1:]
-        wave_symbol_position = (replaced_year + years[1]) / 2  # Position for the wave symbol
+        wave_symbol_position = (
+            replaced_year + years[1]
+        ) / 2  # Position for the wave symbol
     else:
         display_years = years
 
@@ -43,13 +46,15 @@ def draw_timeline(title, compression_methods, out_dir: str = "results", fontsize
     fig, ax = plt.subplots(figsize=(8, 2))
 
     # Draw the horizontal timeline
-    ax.hlines(1, display_years[0] - 1, display_years[-1] + 1, color='black', linewidth=1)
+    ax.hlines(
+        1, display_years[0] - 1, display_years[-1] + 1, color="black", linewidth=1
+    )
 
     # If there is a large gap, add double vertical wave symbols spanning the graph height
     if years[1] - years[0] > large_gap_threshold:
         d1 = 0.1  # Horizontal width of the wave
         d2 = 2.0  # Extended height to span beyond the graph height
-        wn = 51    # Number of waves (must be odd)
+        wn = 51  # Number of waves (must be odd)
 
         # Create the first wave path
         pp = (0, d1, 0, -d1)
@@ -63,15 +68,23 @@ def draw_timeline(title, compression_methods, out_dir: str = "results", fontsize
 
         # Add the first wave symbol as a patch to the axes
         wave_patch1 = PathPatch(
-            wave_path1, lw=1, edgecolor='black', facecolor='none',
-            clip_on=False, zorder=10
+            wave_path1,
+            lw=1,
+            edgecolor="black",
+            facecolor="none",
+            clip_on=False,
+            zorder=10,
         )
         ax.add_patch(wave_patch1)
 
         # Add the second wave symbol as a patch to the axes
         wave_patch2 = PathPatch(
-            wave_path2, lw=1, edgecolor='black', facecolor='none',
-            clip_on=False, zorder=10
+            wave_path2,
+            lw=1,
+            edgecolor="black",
+            facecolor="none",
+            clip_on=False,
+            zorder=10,
         )
         ax.add_patch(wave_patch2)
 
@@ -84,17 +97,32 @@ def draw_timeline(title, compression_methods, out_dir: str = "results", fontsize
         step = offset_range / max(n - 1, 1)  # Step size for label distribution
 
         # Plot a single marker for the display year
-        ax.scatter(display_year, 1, color='black', marker='o', zorder=3)
+        ax.scatter(display_year, 1, color="black", marker="o", zorder=3)
 
         # Add labels with horizontal offsets
         for j, (name, method_type) in enumerate(methods):
             x_offset = display_year + start_offset + j * step
-            color = method_colors.get(method_type, "black")  # Get color based on method type
-            ax.text(x_offset, 1.3, name, ha='center', va='bottom', rotation=90, fontsize=fontsize, color=color, fontfamily='monospace')
+            color = method_colors.get(
+                method_type, "black"
+            )  # Get color based on method type
+            ax.text(
+                x_offset,
+                1.3,
+                name,
+                ha="center",
+                va="bottom",
+                rotation=90,
+                fontsize=fontsize,
+                color=color,
+                fontfamily="monospace",
+            )
 
     # Configure the axis and layout
     ax.set_xticks(display_years)
-    ax.set_xticklabels([str(y) if y != replaced_year else '1977' for y in display_years], fontsize=fontsize)
+    ax.set_xticklabels(
+        [str(y) if y != replaced_year else "1977" for y in display_years],
+        fontsize=fontsize,
+    )
     ax.set_yticks([])
     ax.set_xlim(display_years[0] - 1, display_years[-1] + 1)
     ax.set_ylim(-0.2, 4.0)  # Adjusted for extended height
@@ -105,6 +133,7 @@ def draw_timeline(title, compression_methods, out_dir: str = "results", fontsize
     # Save the graph
     plt.savefig(os.path.join(out_dir, "timeline.png"))
     plt.show()
+
 
 # Example usage
 compression_methods = [
