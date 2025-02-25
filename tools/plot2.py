@@ -22,6 +22,8 @@ from plot import (
     compression_methods,
 )
 
+from common import default_compression_method_order, default_omit_methods
+
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
@@ -506,20 +508,6 @@ def load_merged_df(stats_path: Path, average_stats_all) -> pd.DataFrame:
     return merged
 
 
-def default_omit_methods():
-    return ["RLE", "Uncompressed"]
-
-
-def default_compression_method_order():
-    compression_methods_ordered: List[str] = copy.deepcopy(compression_methods)
-    # if "Uncompressed" in compression_methods_ordered:
-    #     compression_methods_ordered.remove("Uncompressed")
-    for method in default_omit_methods():
-        if method in compression_methods_ordered:
-            compression_methods_ordered.remove(method)
-    return compression_methods_ordered
-
-
 def plot_scatter(df_merged: pd.DataFrame, output_path: Path):
     plt.rcParams.update(
         {
@@ -669,7 +657,14 @@ def plot_radar_chart(
     plt.close()
 
 
-def plot_bar_chart(df: pd.DataFrame, ax: plt.Axes, metric: str):
+def plot_bar_chart(
+    df: pd.DataFrame,
+    ax: plt.Axes,
+    metric: str,
+    xor_series_df: pd.DataFrame | None = None,
+    ucr2018_series_df: pd.DataFrame | None = None,
+    embeddings_series_df: pd.DataFrame | None = None,
+):
     """
     Generate a bar chart and plot it on the given axis.
 
@@ -683,6 +678,9 @@ def plot_bar_chart(df: pd.DataFrame, ax: plt.Axes, metric: str):
         The metric to visualize.
     """
     default_fontsize = 12
+    print(
+        f"Plotting {metric} bar chart: xor_series_df={xor_series_df}, ucr2018_series_df={ucr2018_series_df}, embeddings_series_df={embeddings_series_df}"
+    )
 
     # Compute mean values for Time-Series, Non-Time-Series, and Overall
     time_series_df = df[df["DatasetType"] == "Time-Series"]
@@ -694,18 +692,45 @@ def plot_bar_chart(df: pd.DataFrame, ax: plt.Axes, metric: str):
     non_time_series_mean = (
         non_time_series_df.groupby("Method")[metric].mean().rename("Non-Time-Series")
     )
-    overall_mean = df.groupby("Method")[metric].mean().rename("Overall")
+    overall_mean = df.groupby("Method")[metric].mean().rename("TS+Non-TS")
+
+    xor_mean = None
+    ucr2018_mean = None
+    embeddings_mean = None
+    if xor_series_df is not None:
+        xor_mean = (
+            xor_series_df.groupby("Method")[metric].mean().rename("XOR Synthetic")
+        )
+    if ucr2018_series_df is not None:
+        ucr2018_mean = (
+            ucr2018_series_df.groupby("Method")[metric].mean().rename("UCR2018")
+        )
+    if embeddings_series_df is not None:
+        embeddings_mean = (
+            embeddings_series_df.groupby("Method")[metric].mean().rename("Embeddings")
+        )
 
     # Sort by Method at the order of `default_compression_method_order`
-    for df in [time_series_mean, non_time_series_mean, overall_mean]:
+    dfs = []
+    for df in [
+        time_series_mean,
+        non_time_series_mean,
+        overall_mean,
+        xor_mean,
+        ucr2018_mean,
+        embeddings_mean,
+    ]:
+        if df is None:
+            continue
         df: pd.Series
         df.index = pd.Categorical(
             df.index, categories=default_compression_method_order(), ordered=True
         )
         df.sort_index(inplace=True)
+        dfs.append(df)
 
     # Combine results into a single DataFrame
-    plot_df = pd.concat([time_series_mean, non_time_series_mean, overall_mean], axis=1)
+    plot_df = pd.concat(dfs, axis=1)
 
     small_default = 10
 
@@ -713,7 +738,7 @@ def plot_bar_chart(df: pd.DataFrame, ax: plt.Axes, metric: str):
     plot_df.plot(
         kind="bar",
         ax=ax,
-        color=["tab:blue", "tab:orange", "tab:green"],
+        color=plt.get_cmap("tab10").colors,
         fontsize=small_default,
         legend=False,
     )
@@ -734,6 +759,8 @@ def plot_bar_chart(df: pd.DataFrame, ax: plt.Axes, metric: str):
         ax.set_ylabel("Comp Ratio (Smaller is Better)", fontsize=default_fontsize)
     else:
         ax.set_ylabel(metric, fontsize=default_fontsize)
+    # goes to the bottom a bit
+    ax.yaxis.set_label_coords(-0.075, 0.45)
 
     ax.set_xticklabels(
         ax.get_xticklabels(), rotation=45, ha="right", fontsize=small_default
@@ -748,6 +775,9 @@ def make_subplots_all(
     output_path: Path,
     metrics: List[str],
     excluded_datasets: List[str] = default_exclude_datasets,
+    xor_series_df: pd.DataFrame | None = None,
+    ucr2018_series_df: pd.DataFrame | None = None,
+    embeddings_series_df: pd.DataFrame | None = None,
 ):
     """
     Create subplots for all metrics arranged in 3 columns and display as a single figure.
@@ -776,11 +806,18 @@ def make_subplots_all(
     fig, axes = plt.subplots(nrows=num_rows, ncols=num_cols, figsize=(15, 3 * num_rows))
     axes = axes.flatten()  # Convert to 1D array for easy iteration
 
+    ax_for_legend: plt.Axes = None
     for ax, metric in zip(axes, metrics):
         ax: plt.Axes
-        plot_bar_chart(df, ax, metric)
+        if metric in ["Comp Ratio", "DeComp Throughput", "Comp Throughput"]:
+            plot_bar_chart(
+                df, ax, metric, xor_series_df, ucr2018_series_df, embeddings_series_df
+            )
+            ax_for_legend = ax
+        else:
+            plot_bar_chart(df, ax, metric)
 
-    handles, labels = ax.get_legend_handles_labels()
+    handles, labels = ax_for_legend.get_legend_handles_labels()
 
     # Hide unused subplots
     for i in range(len(metrics), len(axes)):
@@ -791,13 +828,21 @@ def make_subplots_all(
         handles,
         labels,
         loc="upper center",
-        bbox_to_anchor=(0.5, 1.02),
-        ncol=3,
+        bbox_to_anchor=(0.5, 1.01),
+        ncol=3
+        + len(
+            list(
+                filter(
+                    lambda x: x is not None,
+                    [xor_series_df, ucr2018_series_df, embeddings_series_df],
+                )
+            )
+        ),
         fontsize=12,
         frameon=True,
     )
 
-    fig.tight_layout()
+    fig.tight_layout(rect=[0, 0, 1, 0.95])
     fig.savefig(output_path, format="png", dpi=300)
 
 
@@ -1326,7 +1371,14 @@ def generate_combined(df: pd.DataFrame) -> str:
 
 def main():
     if len(sys.argv) < 2:
-        print("Usage: python plot2.py <json_file>")
+        print(
+            "Usage: python plot2.py <json_file> [<xor_json_file> <ucr2018_json_file> <embeddings_json_file>]"
+        )
+        sys.exit(1)
+    if len(sys.argv) > 2 and len(sys.argv) < 5:
+        print(
+            "Usage: python plot2.py <json_file> [<xor_json_file> <ucr2018_json_file> <embeddings_json_file>]"
+        )
         sys.exit(1)
 
     json_file_path = sys.argv[1]
@@ -1335,6 +1387,21 @@ def main():
     with open(json_file_path, "r") as f:
         all_output = cast(AllOutput, json.load(f))
     all_output: AllOutputHandler = AllOutputHandler(all_output)
+
+    if len(sys.argv) == 5:
+        import embedding_plot, ucr2018_plot, plot_xor
+
+        xor_json_file_path = sys.argv[2]
+        xor_df = plot_xor.create_df(xor_json_file_path)
+
+        ucr2018_json_file_path = sys.argv[3]
+        ucr2018_df = ucr2018_plot.create_df(ucr2018_json_file_path)
+
+        embeddings_json_file_path = sys.argv[4]
+        embeddings_df = embedding_plot.create_df(embeddings_json_file_path)
+        print(xor_df)
+        print(ucr2018_df)
+        print(embeddings_df)
 
     # averaged() を呼び出し、AveragedAllOutput へ変換
     averaged_all_output = all_output.averaged()
@@ -1399,6 +1466,21 @@ def main():
             "Max Throughput",
             "Sum Throughput",
         ],
+    )
+    make_subplots_all(
+        merged,
+        out_dir.joinpath("bars_with_other_datasets.png"),
+        [
+            "Comp Ratio",
+            "Comp Throughput",
+            "DeComp Throughput",
+            "Filter Gt 90 Throughput",
+            "Max Throughput",
+            "Sum Throughput",
+        ],
+        xor_series_df=xor_df,
+        ucr2018_series_df=ucr2018_df,
+        embeddings_series_df=embeddings_df,
     )
     print("===== Comp Ratio Table =====")
     print_table(merged, "Comp Ratio")
@@ -1465,4 +1547,5 @@ def main():
 
 
 if __name__ == "__main__":
+    init_plt_font()
     main()

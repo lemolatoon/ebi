@@ -9,10 +9,9 @@ import pandas as pd
 import matplotlib.pyplot as plt
 
 from plot import AllOutput, AllOutputHandler
+from common import default_omit_methods, default_compression_method_order
 from plot2 import (
     create_all_df,
-    default_omit_methods,
-    default_compression_method_order,
     init_plt_font,
 )
 
@@ -45,16 +44,8 @@ def plot_comp_ratio_bar_chart(df: pd.DataFrame, out_path: Path):
     plt.close()
 
 
-def main():
-    if len(sys.argv) < 2:
-        print("Usage: python plot2.py <json_file>")
-        sys.exit(1)
-
-    json_file_path = sys.argv[1]
-    out_dir = Path(json_file_path).parent.joinpath(Path(json_file_path).stem)
-    os.makedirs(out_dir, exist_ok=True)
-    print(f"Output directory: {out_dir}")
-    with open(json_file_path, "r") as f:
+def create_df(path: str) -> pd.DataFrame:
+    with open(path, "r") as f:
         all_output = cast(AllOutput, json.load(f))
     all_output: AllOutputHandler = AllOutputHandler(all_output)
     assert "xor_dataset256x1024x1024" in all_output.datasets()
@@ -72,7 +63,19 @@ def main():
 
     # Sort the DataFrame by the order of the compression methods
     df = df.reindex(default_compression_method_order())
-    print(df)
+    return df
+
+
+def main():
+    if len(sys.argv) < 2:
+        print("Usage: python plot2.py <json_file>")
+        sys.exit(1)
+
+    json_file_path = sys.argv[1]
+    out_dir = Path(json_file_path).parent.joinpath(Path(json_file_path).stem)
+    os.makedirs(out_dir, exist_ok=True)
+    print(f"Output directory: {out_dir}")
+    df = create_df(json_file_path)
 
     plot_comp_ratio_bar_chart(df, out_dir.joinpath("xor_comp_ratio.png"))
 

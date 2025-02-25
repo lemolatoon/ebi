@@ -7,6 +7,7 @@ import sys
 from typing import TypedDict, List, Dict, Optional
 from datetime import datetime
 
+import pandas as pd
 from tqdm import tqdm
 from plot import (
     CompressionConfig,
@@ -22,6 +23,8 @@ from plot import (
     plot_comparison,
 )
 import polars as pl
+
+from common import default_compression_method_order, default_omit_methods
 
 
 class UCR2018Config(TypedDict):
@@ -94,6 +97,75 @@ compression_methods_with_precision = [
     *compression_methods,
     *[f"BUFF_{p}" for p in precisions],
 ]
+
+
+def create_df(path: str) -> pd.DataFrame:
+    assert os.path.exists(path)
+
+    results = load_json_files_from_directory(path)
+
+    compression_metrics = {
+        method_name: {"Comp Ratio": [], "Comp Throughput": [], "DeComp Throughput": []}
+        for method_name in compression_methods_with_precision
+    }
+
+    for method_name, result in results.items():
+        if method_name in skip_methods:
+            continue
+
+        for dataset_name, dataset_result in result["results"].items():
+            original_dataset_size = dataset_result["compression_statistics"][
+                "uncompressed_size"
+            ]
+
+            if method_name in compression_methods:
+                compression_ratio = (
+                    dataset_result["compression_statistics"]["compressed_size"]
+                    / original_dataset_size
+                )
+                compression_metrics[method_name]["Comp Ratio"].append(compression_ratio)
+
+            compression_throughput = (
+                original_dataset_size
+                / dataset_result["compression_statistics"][
+                    "compression_elapsed_time_nano_secs"
+                ]
+            )
+            compression_metrics[method_name]["Comp Throughput"].append(
+                compression_throughput
+            )
+
+            decompression_throughput = original_dataset_size / fmean(
+                dataset_result["decompression_result"]["elapsed_time_nanos"]
+            )
+            compression_metrics[method_name]["DeComp Throughput"].append(
+                decompression_throughput
+            )
+
+    df_dict = {
+        method_name: {
+            "Comp Ratio": fmean(values["Comp Ratio"]) if values["Comp Ratio"] else None,
+            "Comp Throughput": fmean(values["Comp Throughput"])
+            if values["Comp Throughput"]
+            else None,
+            "DeComp Throughput": fmean(values["DeComp Throughput"])
+            if values["DeComp Throughput"]
+            else None,
+        }
+        for method_name, values in compression_metrics.items()
+    }
+
+    df = pd.DataFrame.from_dict(df_dict, orient="index")
+    df.index.name = "Method"
+
+    df.reset_index(inplace=True)
+    df = df[~df["Method"].isin(default_omit_methods())]
+    df = df[~df["Method"].isin([f"BUFF_{p}" for p in precisions])]
+    df.set_index("Method", inplace=True)
+
+    # Sort the DataFrame by the order of the compression methods
+    df = df.reindex(default_compression_method_order())
+    return df
 
 
 def main():
