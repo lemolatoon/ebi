@@ -32,9 +32,21 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.decomposition import PCA
 from yellowbrick.cluster import KElbowVisualizer
 
-# del matplotlib.font_manager.weight_dict['roman']
-# matplotlib.font_manager._rebuild()
-plt.rcParams["font.family"] = "Times New Roman"
+
+def init_plt_font():
+    # del matplotlib.font_manager.weight_dict['roman']
+    # matplotlib.font_manager._rebuild()
+    plt.rcParams["font.family"] = "Times New Roman"
+    plt.rcParams.update(
+        {
+            "font.size": 16,
+            "axes.labelsize": 18,
+            "xtick.labelsize": 14,
+            "ytick.labelsize": 14,
+            "legend.fontsize": 14,
+            "axes.titlesize": 20,
+        }
+    )
 
 
 class Stats(TypedDict):
@@ -462,7 +474,9 @@ def create_all_df(
             continue
         for dataset, stats in ds_map.items():
             if stats is not None:
-                row = flatten_averaged_stats(stats, method, file_to_dataset[dataset])
+                row = flatten_averaged_stats(
+                    stats, method, file_to_dataset.get(dataset, dataset)
+                )
                 rows.append(row)
     df = pd.DataFrame(rows)
     if not df.empty:
