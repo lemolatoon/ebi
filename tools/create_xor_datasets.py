@@ -33,8 +33,8 @@ seeds = [1, 2, 4, 8, 16, 0.5, 0.25, 0.125, 0.0625, 0.03125, 0.015625]
 
 
 def main(output_dir: str):
-    output_path = os.path.join(output_dir, "xor_dataset.csv")
-    dataset_size = 1024 * 1024
+    dataset_size = 2048 * 2048
+    output_path = os.path.join(output_dir, f"xor_dataset_{dataset_size}.csv")
     with open(output_path, "w") as csv_file:
         for i in tqdm(range(dataset_size)):
             v = calculate_random_weighted_sum(seeds)

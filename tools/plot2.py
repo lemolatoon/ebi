@@ -789,6 +789,9 @@ def make_subplots_all(
     metrics : list
         List of metrics to visualize.
     """
+    separated_dir = output_path.parent.joinpath(output_path.stem)
+    os.makedirs(separated_dir, exist_ok=True)
+
     # Modify df to add DatasetType, exclude unnecessary methods, and remove specific datasets
     df = df.copy()
     df.reset_index(inplace=True)
@@ -817,6 +820,24 @@ def make_subplots_all(
         else:
             plot_bar_chart(df, ax, metric)
 
+        # Save each subplot separately
+        metric_filename = separated_dir / f"{metric.replace(' ', '_')}.png"
+        single_fig, single_ax = plt.subplots(1, 1, figsize=(7, 3))
+        if metric in ["Comp Ratio", "DeComp Throughput", "Comp Throughput"]:
+            plot_bar_chart(
+                df,
+                single_ax,
+                metric,
+                xor_series_df,
+                ucr2018_series_df,
+                embeddings_series_df,
+            )
+        else:
+            plot_bar_chart(df, single_ax, metric)
+
+        single_fig.tight_layout()
+        single_fig.savefig(metric_filename, format="png", dpi=300)
+
     handles, labels = ax_for_legend.get_legend_handles_labels()
 
     # Hide unused subplots
@@ -842,6 +863,30 @@ def make_subplots_all(
         frameon=True,
     )
 
+    # save only the legend
+    # Add a single legend for the entire figure
+    n_col = 3 + len(
+        list(
+            filter(
+                lambda x: x is not None,
+                [xor_series_df, ucr2018_series_df, embeddings_series_df],
+            )
+        )
+    )
+    legend_fig, legend_ax = plt.subplots(figsize=(1.8 * n_col, 1))
+    legend_ax.legend(
+        handles,
+        labels,
+        loc="center",
+        ncol=n_col,
+        fontsize=12,
+        frameon=True,
+    )
+    legend_ax.axis("off")  # Hide axes for legend-only figure
+    legend_filename = separated_dir / "legend.png"
+    legend_fig.savefig(legend_filename, format="png", dpi=300)
+    plt.close(legend_fig)  # Close the legend figure
+
     fig.tight_layout(rect=[0, 0, 1, 0.95])
     fig.savefig(output_path, format="png", dpi=300)
 
@@ -857,6 +902,38 @@ def default_processing_types_order():
     # push Other Processing to the end
     pts.append("Other Processing")
     return pts
+
+
+hatch_map_exe: dict[str, str] = {}
+
+
+def get_hatch_exe(label: str) -> str:
+    global hatch_map_exe
+    plt.rcParams["hatch.linewidth"] = 0.3
+    hatches = [
+        "O.",
+        "//",
+        "++",
+        "//",
+        "\\\\",
+        "||",
+        "--",
+        "++",
+        "xx",
+        "oo",
+        "OO",
+        "..",
+        "**",
+    ]
+    hatches.reverse()
+
+    if label in hatch_map_exe:
+        return hatch_map_exe[label]
+
+    next_index = len(hatch_map_exe) % len(hatches)
+    hatch_map_exe[label] = hatches[next_index]
+
+    return hatch_map_exe[label]
 
 
 def plot_absolute_stacked_execution_times_for_methods(
@@ -932,6 +1009,7 @@ def plot_absolute_stacked_execution_times_for_methods(
             label=processing_type,
             bottom=bottom,
             color=get_color_exe(processing_type),  # Ensure color consistency
+            hatch=get_hatch_exe(processing_type),
             alpha=0.8,
         )
         bottom += np.array(values)
@@ -944,6 +1022,9 @@ def plot_absolute_stacked_execution_times_for_methods(
 
 
 def make_all_plots_for_stacked(all_df: pd.DataFrame, output_path: Path):
+    separated_dir = output_path.parent.joinpath(output_path.stem)
+    os.makedirs(separated_dir, exist_ok=True)
+
     all_df = all_df[~all_df.index.isin(default_omit_methods())]
     columns = [
         ("Comp Exec Time", "Comp Execution Time (s/GB)"),
@@ -974,6 +1055,20 @@ def make_all_plots_for_stacked(all_df: pd.DataFrame, output_path: Path):
         )
         ax: plt.Axes
         ax.legend().set_visible(False)  # Remove individual legends
+
+        # Add a single legend for all subplots below the figure
+        single_fig, single_ax = plt.subplots(1, 1, figsize=(6, 4))
+        single_filename = separated_dir / f"{ratio_col.replace(' ', '_')}.png"
+        plot_absolute_stacked_execution_times_for_methods(
+            single_ax,
+            all_df,
+            throughput_column,
+            ratio_col,
+            dataset_name,
+            segment_mapping,
+        )
+        single_fig.tight_layout()
+        single_fig.savefig(single_filename, format="png", dpi=300)
 
     # Collect all legend handles and labels from subplots
     lines_labels = [cast(plt.Axes, ax).get_legend_handles_labels() for ax in axes]
@@ -1010,6 +1105,21 @@ def make_all_plots_for_stacked(all_df: pd.DataFrame, output_path: Path):
         ncol=5,
         frameon=True,
     )
+
+    # save only the legend
+    legend_fig, legend_ax = plt.subplots(figsize=(3.5 * 5, 2))
+    legend_ax.legend(
+        handles,
+        labels,
+        loc="center",
+        ncol=5,
+        # fontsize=12,
+        frameon=True,
+    )
+    legend_ax.axis("off")  # Hide axes for legend-only figure
+    legend_filename = separated_dir / "legend.png"
+    legend_fig.savefig(legend_filename, format="png", dpi=300)
+    plt.close(legend_fig)  # Close the legend figure
 
     # Adjust layout and show plot
     plt.tight_layout(rect=[0, 0.2, 1, 1])  # Adjust layout to fit legend
@@ -1402,6 +1512,10 @@ def main():
         print(xor_df)
         print(ucr2018_df)
         print(embeddings_df)
+    else:
+        xor_df = None
+        ucr2018_df = None
+        embeddings_df = None
 
     # averaged() を呼び出し、AveragedAllOutput へ変換
     averaged_all_output = all_output.averaged()
@@ -1483,6 +1597,23 @@ def main():
         embeddings_series_df=embeddings_df,
     )
     print("===== Comp Ratio Table =====")
+    print(merged.groupby(level="Method")["Comp Throughput"].mean())
+    print(merged.groupby(level="Method")["DeComp Throughput"].mean())
+    print("Normalized:")
+    print(
+        (
+            merged.groupby(level="Method")["Comp Throughput"].mean()
+            / merged.groupby(level="Method")["Comp Throughput"].mean().loc["FFIAlp"]
+        )
+        ** (-1)
+    )
+    print(
+        (
+            merged.groupby(level="Method")["DeComp Throughput"].mean()
+            / merged.groupby(level="Method")["DeComp Throughput"].mean().loc["FFIAlp"]
+        )
+        ** (-1)
+    )
     print_table(merged, "Comp Ratio")
     print_method_inorder_by(merged, "Comp Ratio")
     averaged_stats_all_df = create_average_stats_table(

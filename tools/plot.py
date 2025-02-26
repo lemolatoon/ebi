@@ -1261,6 +1261,11 @@ mapped_processing_types = set(
     for method in compression_methods
     for mapping_key in segment_mapping[method]
 )
+mapped_processing_types = list(mapped_processing_types)
+mapped_processing_types.remove("IO Read")
+mapped_processing_types.remove("IO Write")
+mapped_processing_types.insert(0, "IO Write")
+mapped_processing_types.insert(0, "IO Read")
 
 fontsize = 15
 
@@ -2061,14 +2066,29 @@ def main():
             ].filter(pl.all_horizontal(pl.col("*").is_not_null()))
         )
 
+    def skipping_keys(execution_times_ratio_data: List[Dict[str, float] | None]):
+        for d in execution_times_ratio_data:
+            if d is not None:
+                return d.keys()
+
     decompression_execution_times_throughput: Dict[str, List[Dict[str, float]]] = {
         method: [
             {
                 key: fmean(
-                    [d[key] for d in decompression_execution_times_ratio_data[method]]
+                    [
+                        d[key]
+                        for d in decompression_execution_times_ratio_data[method]
+                        if d is not None
+                    ]
                 )
-                / fmean(decompression_throughput_data[method])
-                for key in decompression_execution_times_ratio_data[method][0].keys()
+                / fmean(
+                    elm
+                    for elm in decompression_throughput_data[method]
+                    if elm is not None
+                )
+                for key in skipping_keys(
+                    decompression_execution_times_ratio_data[method]
+                )
             }
         ]
         for method in decompression_execution_times_ratio_data
@@ -2077,10 +2097,18 @@ def main():
         method: [
             {
                 key: fmean(
-                    [d[key] for d in compression_execution_times_ratio_data[method]]
+                    [
+                        d[key]
+                        for d in compression_execution_times_ratio_data[method]
+                        if d is not None
+                    ]
                 )
-                / fmean(compression_throughput_data[method])
-                for key in compression_execution_times_ratio_data[method][0].keys()
+                / fmean(
+                    elm
+                    for elm in compression_throughput_data[method]
+                    if elm is not None
+                )
+                for key in skipping_keys(compression_execution_times_ratio_data[method])
             }
         ]
         for method in compression_execution_times_ratio_data
