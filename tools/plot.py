@@ -243,6 +243,8 @@ class AllOutputInnerHandler:
         compressed_size = cmd_mean("compressed_size")
         compressed_size_chunk_only = cmd_mean("compressed_size_chunk_only")
 
+        print(cs[0]["elapsed_time_nanos"] / uncompressed_size)
+        print(cs[0]["execution_times"]["io_read_nanos"] / uncompressed_size)
         elapsed_time_nanos = fmean(c["elapsed_time_nanos"] for c in cs)
         compression_throughput = (
             uncompressed_size / compression_elapsed_time
@@ -540,6 +542,9 @@ class AveragedAllOutputHandler:
             uncompressed_size: float,
         ):
             d[method][dataset] = copy.deepcopy(base["execution_times"])
+            print(
+                f"{d[method][dataset]['io_read_nanos'] / uncompressed_size:.2f}\t{method} {dataset}"
+            )
             for key in d[method][dataset].keys():
                 d[method][dataset][key] = d[method][dataset][key] / uncompressed_size
 
@@ -1286,12 +1291,15 @@ color_map_exe: dict[str, tuple[float, float, float, float]] = {}
 
 
 def get_color_exe(label: str) -> tuple[float, float, float, float]:
+    import seaborn as sns
+
     global color_map_exe
     if label in color_map_exe:
         return color_map_exe[label]
     next_index = len(color_map_exe)
     assert next_index < 20
-    color_map_exe[label] = matplotlib.colormaps["tab20"](next_index)
+    # color_map_exe[label] = matplotlib.colormaps["tab20"](next_index)
+    color_map_exe[label] = sns.color_palette("tab20", 13)[next_index]
 
     return color_map_exe[label]
 

@@ -407,13 +407,23 @@ def create_normalized_exec_time_df_all(
     averaged_all_output: AveragedAllOutputHandler,
 ) -> pd.DataFrame:
     dfs = []
+    # datasets whose number of records are less than 100,000
+    omitting_datasets = [
+        "Basel-temp",
+        "Basel-wind",
+        "Bird-migration",
+        "PM10-dust",
+        "SD-bench",
+    ]
     metrics = ["compress", "materialize", "filter_gt_90th_percentile"]
     for metric in metrics:
         df = create_normalized_exec_time_df(averaged_all_output, metric)
-        # drop columns based on 'default_exclude_datasets'
+        # filter columns based on 'default_exclude_datasets'
         df = df.drop(default_exclude_datasets, axis=1)
+        df = df.drop(omitting_datasets, axis=1)
         # pick up the sample cell
-        execution_times_key = df.iloc[0]["City-Temp"].keys()
+        # execution_times_key = df.iloc[0]["City-Temp"].keys()
+        execution_times_key = df.iloc[0][0].keys()
 
         # compute average across datasets
         def applyf(row):
@@ -425,6 +435,7 @@ def create_normalized_exec_time_df_all(
         axis=1,
         keys=["Comp Exec Time", "DeComp Exec Time", "Filter Gt 90 Exec Time"],
     )
+    df.to_csv(f"{metric}_normalized_exec_time.csv")
     return df
 
 
@@ -744,7 +755,8 @@ def plot_bar_chart(
     )
 
     # Set labels and legend
-    ax.set_xlabel("Method", fontsize=small_default)
+    # ax.set_xlabel("Method", fontsize=small_default)
+    ax.xaxis.label.set_visible(False)
 
     # Modify y-axis label to indicate GB/s for throughput metrics
     # if "Comp Throughput" == metric:
@@ -812,7 +824,7 @@ def make_subplots_all(
     ax_for_legend: plt.Axes = None
     for ax, metric in zip(axes, metrics):
         ax: plt.Axes
-        if metric in ["Comp Ratio", "DeComp Throughput", "Comp Throughput"]:
+        if metric in ["Comp Ratio", "Comp Throughput", "DeComp Throughput"]:
             plot_bar_chart(
                 df, ax, metric, xor_series_df, ucr2018_series_df, embeddings_series_df
             )
@@ -823,7 +835,7 @@ def make_subplots_all(
         # Save each subplot separately
         metric_filename = separated_dir / f"{metric.replace(' ', '_')}.png"
         single_fig, single_ax = plt.subplots(1, 1, figsize=(7, 3))
-        if metric in ["Comp Ratio", "DeComp Throughput", "Comp Throughput"]:
+        if metric in ["Comp Ratio", "Comp Throughput", "DeComp Throughput"]:
             plot_bar_chart(
                 df,
                 single_ax,
@@ -884,7 +896,7 @@ def make_subplots_all(
     )
     legend_ax.axis("off")  # Hide axes for legend-only figure
     legend_filename = separated_dir / "legend.png"
-    legend_fig.savefig(legend_filename, format="png", dpi=300)
+    legend_fig.savefig(legend_filename, format="png", dpi=600)
     plt.close(legend_fig)  # Close the legend figure
 
     fig.tight_layout(rect=[0, 0, 1, 0.95])
@@ -945,6 +957,7 @@ def plot_absolute_stacked_execution_times_for_methods(
     segment_mapping: Dict[str, Dict[str, List[str]]],
     processing_types_order: List[str] = default_processing_types_order(),
     compression_methods_order: List[str] = default_compression_method_order(),
+    normalized: bool = False,
 ):
     """
     Plots a stacked bar chart of absolute execution times per compression method.
@@ -957,6 +970,12 @@ def plot_absolute_stacked_execution_times_for_methods(
     segment_mapping (dict): A dictionary mapping compression methods to their execution time components.
     y_label (str): Label for the Y-axis.
     """
+    if throughput_column == "Comp Throughput":
+        # drop gzip
+        df = df.drop("Gzip", inplace=False)
+        compression_methods_order = compression_methods_order.copy()
+        compression_methods_order.remove("Gzip")
+
     default_fontsize = 12
 
     patched_segment_mapping = copy.deepcopy(segment_mapping)
@@ -965,7 +984,6 @@ def plot_absolute_stacked_execution_times_for_methods(
     times_by_method = {}
 
     for method, row in df.iterrows():
-        throughput = row[throughput_column]
         normalized_exec_time = row[ratio_column]  # Convert string dict to actual dict
 
         method_times = {}
@@ -973,7 +991,11 @@ def plot_absolute_stacked_execution_times_for_methods(
             if ratio > 0:
                 mapped_keys = patched_segment_mapping.get(method, {}).get(key, [key])
                 label = "+".join(mapped_keys)
-                abs_time = ratio / throughput
+                if not normalized:
+                    throughput = row[throughput_column]
+                    abs_time = ratio / throughput
+                else:
+                    abs_time = ratio
                 if abs_time > 0:
                     method_times[label] = method_times.get(label, 0) + abs_time
 
@@ -1021,7 +1043,9 @@ def plot_absolute_stacked_execution_times_for_methods(
     # ax.set_title(f"Execution Times for {dataset_name} by Compression Method")
 
 
-def make_all_plots_for_stacked(all_df: pd.DataFrame, output_path: Path):
+def make_all_plots_for_stacked(
+    all_df: pd.DataFrame, output_path: Path, normalized: bool = False
+):
     separated_dir = output_path.parent.joinpath(output_path.stem)
     os.makedirs(separated_dir, exist_ok=True)
 
@@ -1032,15 +1056,19 @@ def make_all_plots_for_stacked(all_df: pd.DataFrame, output_path: Path):
         ("Filter Gt 90 Exec Time", "Filter Execution Time (s/GB)"),
     ]
     columns = [
-        ("Comp Throughput", "Comp Exec Time Ratios", "Comp Execution Time (s/GB)"),
+        (
+            "Comp Throughput",
+            "Comp Exec Time" if normalized else "Comp Exec Time Ratios",
+            "Comp Execution Time (s/GB)",
+        ),
         (
             "DeComp Throughput",
-            "DeComp Exec Time Ratios",
+            "DeComp Exec Time" if normalized else "DeComp Exec Time Ratios",
             "DeComp Execution Time (s/GB)",
         ),
         (
             "Filter Gt 90 Throughput",
-            "Filter Gt 90 Exec Time Ratios",
+            "Filter Gt 90 Exec Time" if normalized else "Filter Gt 90 Exec Time Ratios",
             "Filter Execution Time (s/GB)",
         ),
     ]
@@ -1051,7 +1079,13 @@ def make_all_plots_for_stacked(all_df: pd.DataFrame, output_path: Path):
     # Generate plots and remove individual legends
     for ax, (throughput_column, ratio_col, dataset_name) in zip(axes, columns):
         plot_absolute_stacked_execution_times_for_methods(
-            ax, all_df, throughput_column, ratio_col, dataset_name, segment_mapping
+            ax,
+            all_df,
+            throughput_column,
+            ratio_col,
+            dataset_name,
+            segment_mapping,
+            normalized=normalized,
         )
         ax: plt.Axes
         ax.legend().set_visible(False)  # Remove individual legends
@@ -1066,6 +1100,7 @@ def make_all_plots_for_stacked(all_df: pd.DataFrame, output_path: Path):
             ratio_col,
             dataset_name,
             segment_mapping,
+            normalized=normalized,
         )
         single_fig.tight_layout()
         single_fig.savefig(single_filename, format="png", dpi=300)
@@ -1118,7 +1153,7 @@ def make_all_plots_for_stacked(all_df: pd.DataFrame, output_path: Path):
     )
     legend_ax.axis("off")  # Hide axes for legend-only figure
     legend_filename = separated_dir / "legend.png"
-    legend_fig.savefig(legend_filename, format="png", dpi=300)
+    legend_fig.savefig(legend_filename, format="png", dpi=600)
     plt.close(legend_fig)  # Close the legend figure
 
     # Adjust layout and show plot
@@ -1265,6 +1300,26 @@ def print_method_inorder_by(
     overall_avg.sort_values(ascending=small_is_better, inplace=True)
     print(f"Overall AVG of {column_name}")
     print(overall_avg)
+
+
+def reshape_dataframe(df: pd.DataFrame, metric: str) -> pd.DataFrame:
+    """
+    Reshapes the DataFrame by setting 'Dataset' as the row index, 'Method' as columns,
+    and the specified metric as values.
+
+    Parameters:
+    - df: pd.DataFrame (input data)
+    - metric: str (column name of the desired metric)
+
+    Returns:
+    - reshaped_df: pd.DataFrame (reshaped data)
+    """
+    df = df.reset_index(inplace=False)
+    if metric not in df.columns:
+        raise ValueError(f"Metric '{metric}' not found in the dataframe.")
+
+    reshaped_df = df.pivot(index="Dataset", columns="Method", values=metric)
+    return reshaped_df
 
 
 def generate_latex_table(df: pd.DataFrame) -> str:
@@ -1531,6 +1586,11 @@ def main():
     df_all = create_all_df(average_stats_all)
     stats_df = load_stats_df("stats.json")
     stats_df.to_csv("dataset_stats.csv")
+    exec_time_all = create_normalized_exec_time_df_all(averaged_all_output)
+    print(exec_time_all)
+    make_all_plots_for_stacked(
+        exec_time_all, out_dir.joinpath("stacked_2.png"), normalized=True
+    )
     print(stats_df)
     print(df_all)
     merged = load_merged_df("stats.json", average_stats_all)
@@ -1614,6 +1674,9 @@ def main():
         )
         ** (-1)
     )
+    print("===== Comp/DeComp Throughput on City-Temp =====")
+    print(merged.loc[(slice(None), "City-Temp"), "Comp Throughput"])
+    print(merged.loc[(slice(None), "City-Temp"), "DeComp Throughput"])
     print_table(merged, "Comp Ratio")
     print_method_inorder_by(merged, "Comp Ratio")
     averaged_stats_all_df = create_average_stats_table(
@@ -1642,7 +1705,26 @@ def main():
             "Filter Gt 90 Exec Time Ratios",
         ]
     ].to_csv("exec_time_ratios.csv")
+    for metric in ["Comp Exec Time Ratios", "DeComp Exec Time Ratios"]:
+        print(f"===== {metric} =====")
+        print(averaged_stats_all_df[metric])
+        print(averaged_stats_all_df[metric].apply(lambda x: x["io_read_nanos"]))
     make_all_plots_for_stacked(averaged_stats_all_df, out_dir.joinpath("stacked.png"))
+    print("===== Comp/DeComp Throughput =====")
+    print("Comp Exec Time Ratios")
+    print(averaged_stats_all_df["Comp Exec Time Ratios"]["FFIAlp"])
+    print(
+        averaged_stats_all_df["Comp Throughput"]["FFIAlp"]
+        / averaged_stats_all_df["Comp Exec Time Ratios"]["FFIAlp"]["others"]
+    )
+    print("DeComp Exec Time Ratios")
+    print(averaged_stats_all_df["DeComp Exec Time Ratios"]["FFIAlp"])
+    print(
+        averaged_stats_all_df["DeComp Throughput"]["FFIAlp"]
+        / averaged_stats_all_df["DeComp Exec Time Ratios"]["FFIAlp"][
+            "decompression_nanos"
+        ]
+    )
     return
     print("===== Filter Gt 90 Throughput Table =====")
     print_table(merged, "Filter Gt 90 Throughput", factor=1, small_is_better=False)
