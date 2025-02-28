@@ -459,18 +459,17 @@ def plot_cd_diagram(
     ax: plt.Axes
     # ax.set_title("Critical Diagram ({}=0.05)".format(r'$\alpha$'),fontsize=20)
     if kind == "Overall":
-        plt.title(
+        ax.set_title(
             "Critical Diagram ({}=0.05)\n on {}".format(r"$\alpha$", metric),
             fontsize=20,
         )
     else:
-        plt.title(
+        ax.set_title(
             "Critical Diagram ({}=0.05)\n on {}/{}".format(r"$\alpha$", kind, metric),
             fontsize=20,
         )
     print(f"titles: {ax.title}")
-    plt.tight_layout()
-    plt.savefig(
+    fig.savefig(
         out_dir.joinpath(f"CD_{kind.replace(' ', '_')}_{metric.replace(' ', '_')}.png"),
         bbox_inches="tight",
     )
@@ -614,6 +613,7 @@ def main():
             rank_boxplot_out_dir.joinpath(
                 f"{metric.replace(' ', '_')}_rank_boxplot.png"
             ),
+            y_label=f"{metric} Rank",
         )
     for metric in filter_metrics:
         rank_df = get_rank_df(merged_df, metric)
@@ -623,6 +623,7 @@ def main():
             rank_boxplot_out_dir.joinpath(
                 f"{metric.replace(' ', '_')}_rank_boxplot.png"
             ),
+            y_label=f"{metric} Rank",
         )
 
     compression_performance_average_ranking = average_rankings(
@@ -633,6 +634,7 @@ def main():
         rank_boxplot_out_dir.joinpath(
             "compression_performance_average_rank_boxplot.png"
         ),
+        y_label="Average Rank",
     )
 
     filter_average_ranking = average_rankings(filter_metrics_ranking_df.values())
@@ -641,7 +643,9 @@ def main():
     )
 
     plot_rank_boxplot(
-        averaged_ranking, rank_boxplot_out_dir.joinpath("average_rank_boxplot.png")
+        averaged_ranking,
+        rank_boxplot_out_dir.joinpath("average_rank_boxplot.png"),
+        y_label="Average Rank",
     )
 
 
