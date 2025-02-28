@@ -421,16 +421,18 @@ def reshape_dataframe(df: pd.DataFrame, metric: str) -> pd.DataFrame:
 
 
 def plot_cd_diagram(
-    df: pd.DataFrame, metric: str, out_dir: Path, kind: str = "Overall"
+    df: pd.DataFrame,
+    metric: str,
+    out_dir: Path,
+    kind: str = "Overall",
+    no_reshape: bool = False,
 ) -> pd.DataFrame:
     eval_list = []
     if kind == "TS":
         df = df[df["Time Series"]]
-        df = reshape_dataframe(df, metric)
     elif kind == "non-TS":
         df = df[~df["Time Series"]]
-        df = reshape_dataframe(df, metric)
-    else:
+    if not no_reshape:
         df = reshape_dataframe(df, metric)
     if metric == "Comp Ratio":
         metric = "Comp Ratio"
@@ -572,38 +574,28 @@ def plot_rank_boxplot(rank_df: pd.DataFrame, output_path: Path, y_label: str = "
     plt.close(fig)
 
 
-def main():
-    if len(sys.argv) < 2:
-        print("Usage: python plot_cd.py <stats.json>")
-        sys.exit(1)
-    json_file_path = sys.argv[1]
-    out_dir = Path(json_file_path).parent.joinpath(Path(json_file_path).stem)
+def plot_all(merged_df: pd.DataFrame, out_dir: Path):
     cd_out_dir = out_dir.joinpath("cd_diagrams")
     rank_boxplot_out_dir = out_dir.joinpath("rank_boxplots")
-    out_dir = None
     os.makedirs(cd_out_dir, exist_ok=True)
     os.makedirs(rank_boxplot_out_dir, exist_ok=True)
-    with open(json_file_path, "r") as f:
-        all_output = cast(AllOutput, json.load(f))
-    all_output: AllOutputHandler = AllOutputHandler(all_output)
-
-    merged_df = load_merged_df("stats.json", all_output.averaged().map_to_stats())
-    merged_df = merged_df.reset_index(inplace=False)
-    merged_df = merged_df[~merged_df["Method"].isin(default_omit_methods())]
-    merged_df = merged_df[~merged_df["Dataset"].isin(default_exclude_datasets)]
 
     metrics = ["Comp Ratio", "Comp Throughput", "DeComp Throughput"]
     filter_metrics = [
         *[f"Filter {q} Throughput" for q in ["Gt 90", "Gt 50", "Gt 10", "Eq", "Ne"]]
     ]
+    query_metrics = ["Max Throughput", "Sum Throughput"]
 
     for metric in metrics:
         plot_cd_diagram(merged_df, metric, cd_out_dir)
     for metric in filter_metrics:
         plot_cd_diagram(merged_df, metric, cd_out_dir)
+    for metric in query_metrics:
+        plot_cd_diagram(merged_df, metric, cd_out_dir)
 
     metrics_ranking_df = {}
     filter_metrics_ranking_df = {}
+    query_metrics_ranking_df = {}
 
     for metric in metrics:
         rank_df = get_rank_df(merged_df, metric)
@@ -625,6 +617,16 @@ def main():
             ),
             y_label=f"{metric} Rank",
         )
+    for metric in query_metrics:
+        rank_df = get_rank_df(merged_df, metric)
+        query_metrics_ranking_df[metric] = rank_df
+        plot_rank_boxplot(
+            rank_df,
+            rank_boxplot_out_dir.joinpath(
+                f"{metric.replace(' ', '_')}_rank_boxplot.png"
+            ),
+            y_label=f"{metric} Rank",
+        )
 
     compression_performance_average_ranking = average_rankings(
         metrics_ranking_df.values()
@@ -634,19 +636,59 @@ def main():
         rank_boxplot_out_dir.joinpath(
             "compression_performance_average_rank_boxplot.png"
         ),
-        y_label="Average Rank",
+        y_label="Average Rank across Compression Metrics",
     )
 
     filter_average_ranking = average_rankings(filter_metrics_ranking_df.values())
+    plot_rank_boxplot(
+        filter_average_ranking,
+        rank_boxplot_out_dir.joinpath("filter_average_rank_boxplot.png"),
+        y_label="Average Rank across Filter Metrics",
+    )
+
+    query_average_ranking = average_rankings(
+        [filter_average_ranking, *query_metrics_ranking_df.values()]
+    )
+    plot_rank_boxplot(
+        query_average_ranking,
+        rank_boxplot_out_dir.joinpath("query_average_rank_boxplot.png"),
+        y_label="Average Rank across Query Metrics",
+    )
+
     averaged_ranking = average_rankings(
-        [*metrics_ranking_df.values(), filter_average_ranking]
+        [*metrics_ranking_df.values(), query_average_ranking]
     )
 
     plot_rank_boxplot(
         averaged_ranking,
         rank_boxplot_out_dir.joinpath("average_rank_boxplot.png"),
-        y_label="Average Rank",
+        y_label="Average Rank across All Metrics",
     )
+
+
+def main():
+    if len(sys.argv) < 2:
+        print("Usage: python plot_cd.py <stats.json>")
+        sys.exit(1)
+    json_file_path = sys.argv[1]
+    out_dir = Path(json_file_path).parent.joinpath(Path(json_file_path).stem)
+    out_dir = out_dir.joinpath("cd_plots")
+    with open(json_file_path, "r") as f:
+        all_output = cast(AllOutput, json.load(f))
+    all_output: AllOutputHandler = AllOutputHandler(all_output)
+
+    merged_df = load_merged_df("stats.json", all_output.averaged().map_to_stats())
+    merged_df = merged_df.reset_index(inplace=False)
+    merged_df = merged_df[~merged_df["Method"].isin(default_omit_methods())]
+    merged_df = merged_df[~merged_df["Dataset"].isin(default_exclude_datasets)]
+
+    plot_all(merged_df, out_dir.joinpath("overall"))
+
+    ts_merged_df = merged_df[merged_df["Time Series"]]
+    non_ts_merged_df = merged_df[~merged_df["Time Series"]]
+
+    plot_all(ts_merged_df, out_dir.joinpath("ts"))
+    plot_all(non_ts_merged_df, out_dir.joinpath("non_ts"))
 
 
 if __name__ == "__main__":

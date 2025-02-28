@@ -6,6 +6,8 @@ from statistics import fmean
 import sys
 from typing import TypedDict, List, Dict, Optional
 from datetime import datetime
+from matplotlib import pyplot as plt
+import seaborn as sns
 
 import pandas as pd
 from tqdm import tqdm
@@ -168,15 +170,105 @@ def create_df(path: str) -> pd.DataFrame:
     return df
 
 
+def plot_boxplot_seaborn(
+    df, title, y_label, output_path, default_fontsize=14, note_str: str | None = None
+):
+    if hasattr(df, "to_pandas"):
+        df = df.to_pandas()
+    df: pd.DataFrame
+
+    additional_methods = [f"BUFF_{p}" for p in precisions]
+    compression_methods = [*default_compression_method_order(), *additional_methods]
+    tmp = []
+    for method in compression_methods:
+        if method in df.columns and method not in default_omit_methods():
+            tmp.append(method)
+    compression_methods = tmp
+    tmp = None
+
+    df = df[compression_methods]
+
+    # Create boxplot using Seaborn
+    fig, ax = plt.subplots(figsize=(7, 5))
+    sns.boxplot(
+        data=df,
+        ax=ax,
+        meanprops=dict(color="k", linestyle="--"),
+        showmeans=True,
+        meanline=True,
+        linewidth=1.5,  # Thicker boxplot lines
+        width=0.7,  # Adjust box width
+    )
+
+    # Adjust labels and formatting
+    ax.set_xlabel("")
+    ax.xaxis.label.set_visible(False)
+    ax.set_ylabel(y_label, fontsize=default_fontsize)
+    ax.set_xticklabels(
+        ax.get_xticklabels(), rotation=45, ha="right", fontsize=default_fontsize
+    )
+    ax.tick_params(axis="both", labelsize=default_fontsize)
+
+    # Adjust layout for better visibility
+    ax.grid(True, linestyle="--", alpha=0.6)
+
+    if note_str:
+        legend = ax.legend(
+            [note_str], loc="best", frameon=False, fontsize=default_fontsize
+        )
+        bbox = legend.get_window_extent(fig.canvas.get_renderer())
+        inv = fig.transFigure.inverted()
+        bbox_fig = inv.transform(bbox)
+        upper_right_x = bbox_fig[1, 0]
+        upper_right_y = bbox_fig[1, 1]
+
+        upper_left_x = bbox_fig[0, 0]
+        upper_left_y = bbox_fig[0, 1]
+
+        fig.text(
+            upper_left_x,
+            upper_right_y,
+            note_str,
+            ha="left",
+            va="bottom",
+            fontsize=default_fontsize,
+        )
+        legend.set_visible(False)
+
+    plt.tight_layout()
+    plt.savefig(output_path)
+    plt.close(fig)
+
+
+plot_boxplot = plot_boxplot_seaborn
+
+
 def main():
     if len(sys.argv) < 2:
         print("No path provided")
         sys.exit(1)
 
     path = sys.argv[1]
+    sns.reset_orig()
 
     out_dir = "results/ucr2018"
     os.makedirs(out_dir, exist_ok=True)
+
+    barchart_dir = os.path.join(out_dir, "barchart")
+    boxplot_dir = os.path.join(out_dir, "boxplot")
+    compression_dir = os.path.join(out_dir, "compression")
+    os.makedirs(barchart_dir, exist_ok=True)
+    os.makedirs(boxplot_dir, exist_ok=True)
+    os.makedirs(compression_dir, exist_ok=True)
+
+    # average_throughput_per_target_vector_df = pd.read_csv("save.csv")
+    # plot_boxplot_seaborn(
+    #     average_throughput_per_target_vector_df,
+    #     "1-NN Throughput per Target Vector",
+    #     "Throughput (GB/s)",
+    #     os.path.join(boxplot_dir, "throughput_per_target_vector.png"),
+    #     note_str="*ALP utilizes SIMD instructions",
+    # )
 
     results = load_json_files_from_directory(path)
 
@@ -378,6 +470,7 @@ def main():
     )
 
     for dataset_index, dataset_name in enumerate(tqdm(dataset_names)):
+        break
         dataset_out_dir = os.path.join(out_dir, dataset_name)
         os.makedirs(dataset_out_dir, exist_ok=True)
         plot_comparison(
@@ -432,13 +525,6 @@ def main():
             patch_label_mapping=patch_label_mapping,
             note_str="*ALP utilizes SIMD instructions",
         )
-
-    barchart_dir = os.path.join(out_dir, "barchart")
-    boxplot_dir = os.path.join(out_dir, "boxplot")
-    compression_dir = os.path.join(out_dir, "compression")
-    os.makedirs(barchart_dir, exist_ok=True)
-    os.makedirs(boxplot_dir, exist_ok=True)
-    os.makedirs(compression_dir, exist_ok=True)
 
     # Compression
 
@@ -530,6 +616,7 @@ def main():
 
     # Compression End
 
+    average_throughput_per_target_vector_df.to_pandas().to_csv("save.csv")
     plot_boxplot(
         average_throughput_per_target_vector_df,
         "1-NN Throughput per Target Vector",

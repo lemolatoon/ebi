@@ -768,7 +768,7 @@ def plot_bar_chart(
     if "Throughput" in metric:
         ax.set_ylabel(f"{metric} (GB/s)", fontsize=default_fontsize)
     elif "Comp Ratio" == metric:
-        ax.set_ylabel("Comp Ratio (Smaller is Better)", fontsize=default_fontsize)
+        ax.set_ylabel("Comp Ratio (Lower is Better)", fontsize=default_fontsize)
     else:
         ax.set_ylabel(metric, fontsize=default_fontsize)
     # goes to the bottom a bit
@@ -780,6 +780,201 @@ def plot_bar_chart(
 
     # ax.legend(fontsize=small_default, frameon=True)
     ax.tick_params(axis="both", labelsize=small_default)
+
+
+def plot_bar_chart2(
+    df: pd.DataFrame,
+    ax: plt.Axes,
+    metric: str,
+    xor_series_df: pd.DataFrame | None = None,
+    ucr2018_series_df: pd.DataFrame | None = None,
+    embeddings_series_df: pd.DataFrame | None = None,
+    include_overall=False,
+):
+    """
+    Generate a grouped bar chart where each dataset type is a separate cluster,
+    and within each cluster, different compression methods are compared.
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        The dataset containing the necessary columns.
+    ax : matplotlib.axes.Axes
+        The axis on which to plot the bar chart.
+    metric : str
+        The metric to visualize.
+    """
+    default_fontsize = 12
+    print(
+        f"Plotting {metric} grouped bar chart: xor_series_df={xor_series_df}, ucr2018_series_df={ucr2018_series_df}, embeddings_series_df={embeddings_series_df}"
+    )
+
+    # Compute mean values for each dataset type
+    time_series_df = df[df["DatasetType"] == "Time-Series"]
+    non_time_series_df = df[df["DatasetType"] == "Non-Time-Series"]
+
+    time_series_mean = (
+        time_series_df.groupby("Method")[metric].mean().rename("Time-Series")
+    )
+    non_time_series_mean = (
+        non_time_series_df.groupby("Method")[metric].mean().rename("Non-Time-Series")
+    )
+    overall_mean = (
+        df.groupby("Method")[metric].mean().rename("TS+Non-TS")
+        if include_overall
+        else None
+    )
+
+    xor_mean = None
+    ucr2018_mean = None
+    embeddings_mean = None
+    if xor_series_df is not None:
+        xor_mean = (
+            xor_series_df.groupby("Method")[metric].mean().rename("XOR Synthetic")
+        )
+    if ucr2018_series_df is not None:
+        ucr2018_mean = (
+            ucr2018_series_df.groupby("Method")[metric].mean().rename("UCR2018")
+        )
+    if embeddings_series_df is not None:
+        embeddings_mean = (
+            embeddings_series_df.groupby("Method")[metric].mean().rename("Embeddings")
+        )
+
+    # Collect all dataset series (excluding None values)
+    dataset_series = [
+        time_series_mean,
+        non_time_series_mean,
+        overall_mean,
+        xor_mean,
+        ucr2018_mean,
+        embeddings_mean,
+    ]
+    dataset_series = [s for s in dataset_series if s is not None]
+
+    # Combine all series into a DataFrame where columns represent datasets
+    # and rows represent methods
+    plot_df = pd.concat(dataset_series, axis=1)
+
+    # Sort methods in the order specified by default_compression_method_order
+    plot_df.index = pd.Categorical(
+        plot_df.index, categories=default_compression_method_order(), ordered=True
+    )
+    plot_df.sort_index(inplace=True)
+
+    # Transpose so that x-axis represents dataset types,
+    # with each cluster containing different compression methods
+    plot_df = plot_df.transpose()
+
+    small_default = 10
+
+    # Plot grouped bar chart
+    bars = plot_df.plot(
+        kind="bar",
+        ax=ax,
+        color=[get_color(method) for method in plot_df.columns],
+        fontsize=small_default,
+        legend=False,
+        width=0.85,
+    )
+
+    # Apply hatch patterns to each bar
+    for bar_container, method in zip(bars.containers, plot_df.columns):
+        for bar in bar_container:
+            bar.set_hatch(get_hatch(method))
+
+    # Set labels
+    ax.set_xlabel("Dataset Type", fontsize=default_fontsize)
+    if "Throughput" in metric:
+        ax.set_ylabel(f"{metric} (GB/s)", fontsize=default_fontsize)
+    elif "Comp Ratio" == metric:
+        ax.set_ylabel("Comp Ratio (Lower is Better)", fontsize=default_fontsize)
+    else:
+        ax.set_ylabel(metric, fontsize=default_fontsize)
+
+    ax.xaxis.label.set_visible(False)
+    ax.set_xticklabels(
+        ax.get_xticklabels(), rotation=0, ha="right", fontsize=default_fontsize
+    )
+    ax.tick_params(axis="both", labelsize=small_default)
+    # ax.legend(fontsize=small_default, frameon=True)
+
+
+import seaborn as sns
+
+
+def plot_boxplot(
+    df: pd.DataFrame,
+    ax: plt.Axes,
+    metric: str,
+):
+    """
+    Generate a boxplot for a single metric.
+    Only the 'Overall' dataset (TS+Non-TS) is considered.
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        The dataset containing the necessary columns.
+    ax : matplotlib.axes.Axes
+        The axis on which to plot the boxplot.
+    metric : str
+        The metric to visualize.
+    """
+    default_fontsize = 12
+    print(f"Plotting boxplot for metric: {metric}")
+    # renaming the columns
+    renaming_map = {
+        "Comp Ratio": "Comp Ratio (Lower is Better)",
+        "Comp Throughput": "Comp Throughput (GB/s)",
+        "DeComp Throughput": "DeComp Throughput (GB/s)",
+        "Sum Throughput": "Sum Throughput (GB/s)",
+        "Max Throughput": "Max Throughput (GB/s)",
+        "Filter Gt 10 Throughput": "Filter Gt 10 Throughput (GB/s)",
+        "Filter Gt 50 Throughput": "Filter Gt 50 Throughput (GB/s)",
+        "Filter Gt 90 Throughput": "Filter Gt 90 Throughput (GB/s)",
+        "Filter Eq Throughput": "Filter Eq Throughput (GB/s)",
+        "Filter Ne Throughput": "Filter Ne Throughput (GB/s)",
+    }
+    df = df.rename(columns=renaming_map, inplace=False)
+    metric = renaming_map[metric]
+    # sort the methods
+    df["Method"] = pd.Categorical(
+        df["Method"], categories=default_compression_method_order(), ordered=True
+    )
+    df.sort_values("Method", inplace=True)
+
+    # Extract only the 'Overall' dataset (TS+Non-TS)
+    # overall_df = df.groupby(["Method"])[metric].mean().reset_index()
+
+    # Create boxplot using Seaborn
+    sns.boxplot(
+        data=df,
+        x="Method",
+        y=metric,
+        ax=ax,
+        meanprops=dict(color="k", linestyle="--"),
+        showmeans=True,
+        meanline=True,
+        # palette=[get_color(method) for method in overall_df["Method"]],  # Custom color per method
+        linewidth=1.5,  # Thicker boxplot lines
+        width=0.7,  # Adjust box width
+    )
+
+    # Adjust labels and formatting
+    ax.set_xlabel("")
+    ax.xaxis.label.set_visible(False)
+    ax.set_ylabel(metric, fontsize=default_fontsize)
+    ax.set_xticklabels(
+        ax.get_xticklabels(), rotation=45, ha="right", fontsize=default_fontsize
+    )
+    ax.tick_params(axis="both", labelsize=default_fontsize)
+
+    # Move legend outside the plot (useful for LaTeX layout)
+    # ax.legend(title="Method", fontsize=default_fontsize, frameon=True, bbox_to_anchor=(1.05, 1), loc='upper left')
+
+    # Adjust layout for better visibility
+    ax.grid(True, linestyle="--", alpha=0.6)
 
 
 def make_subplots_all(
@@ -903,6 +1098,364 @@ def make_subplots_all(
     fig.savefig(output_path, format="png", dpi=300)
 
 
+# bar plots clustered by the dataset type
+def make_subplots_all2(
+    df: pd.DataFrame,
+    output_path: Path,
+    metrics: List[str],
+    excluded_datasets: List[str] = default_exclude_datasets,
+    xor_series_df: pd.DataFrame | None = None,
+    ucr2018_series_df: pd.DataFrame | None = None,
+    embeddings_series_df: pd.DataFrame | None = None,
+):
+    """
+    Create subplots for all metrics arranged in 3 columns and display as a single figure.
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        The dataset containing the necessary columns.
+    metrics : list
+        List of metrics to visualize.
+    """
+    separated_dir = output_path.parent.joinpath(output_path.stem)
+    os.makedirs(separated_dir, exist_ok=True)
+
+    # Modify df to add DatasetType, exclude unnecessary methods, and remove specific datasets
+    df = df.copy()
+    df.reset_index(inplace=True)
+    df["DatasetType"] = df["Time Series"].map(
+        {True: "Time-Series", False: "Non-Time-Series"}
+    )
+    df = df[~df["Method"].isin(default_omit_methods())]
+    df = df[~df["Dataset"].isin(excluded_datasets)]
+
+    num_metrics = len(metrics)
+    num_cols = 3  # Set the number of columns
+    num_rows = math.ceil(num_metrics / num_cols)  # Compute required rows
+
+    axes: np.ndarray[plt.Axes]
+    fig, axes = plt.subplots(nrows=num_rows, ncols=num_cols, figsize=(15, 3 * num_rows))
+    axes = axes.flatten()  # Convert to 1D array for easy iteration
+
+    ax_for_legend: plt.Axes = None
+    for ax, metric in zip(axes, metrics):
+        ax: plt.Axes
+        if metric in ["Comp Ratio", "Comp Throughput", "DeComp Throughput"]:
+            plot_bar_chart2(
+                df, ax, metric, xor_series_df, ucr2018_series_df, embeddings_series_df
+            )
+            ax_for_legend = ax
+        else:
+            plot_bar_chart2(df, ax, metric)
+
+        # Save each subplot separately
+        metric_filename = separated_dir / f"{metric.replace(' ', '_')}.png"
+        single_fig, single_ax = plt.subplots(1, 1, figsize=(7, 3))
+        if metric in ["Comp Ratio", "Comp Throughput", "DeComp Throughput"]:
+            plot_bar_chart2(
+                df,
+                single_ax,
+                metric,
+                xor_series_df,
+                ucr2018_series_df,
+                embeddings_series_df,
+            )
+        else:
+            plot_bar_chart2(df, single_ax, metric)
+
+        single_fig.tight_layout()
+        single_fig.savefig(metric_filename, format="png", dpi=300)
+
+    handles, labels = ax_for_legend.get_legend_handles_labels()
+
+    # Hide unused subplots
+    for i in range(len(metrics), len(axes)):
+        fig.delaxes(axes[i])
+
+    # Add a single legend for the entire figure
+    fig.legend(
+        handles,
+        labels,
+        loc="upper center",
+        bbox_to_anchor=(0.5, 1.01),
+        ncol=3
+        + len(
+            list(
+                filter(
+                    lambda x: x is not None,
+                    [xor_series_df, ucr2018_series_df, embeddings_series_df],
+                )
+            )
+        ),
+        fontsize=12,
+        frameon=True,
+    )
+
+    # save only the legend
+    # Add a single legend for the entire figure
+    n_col = 3 + len(
+        list(
+            filter(
+                lambda x: x is not None,
+                [xor_series_df, ucr2018_series_df, embeddings_series_df],
+            )
+        )
+    )
+    legend_fig, legend_ax = plt.subplots(figsize=(1.8 * n_col, 1))
+    legend_ax.legend(
+        handles,
+        labels,
+        loc="center",
+        ncol=n_col,
+        fontsize=12,
+        frameon=True,
+    )
+    legend_ax.axis("off")  # Hide axes for legend-only figure
+    legend_filename = separated_dir / "legend.png"
+    legend_fig.savefig(legend_filename, format="png", dpi=600)
+    plt.close(legend_fig)  # Close the legend figure
+
+    fig.tight_layout(rect=[0, 0, 1, 0.95])
+    fig.savefig(output_path, format="png", dpi=300)
+
+
+# boxplot for each metric
+def make_subplots_all3(
+    df: pd.DataFrame,
+    output_path: Path,
+    metrics: List[str],
+    excluded_datasets: List[str] = default_exclude_datasets,
+    xor_series_df: pd.DataFrame | None = None,
+    ucr2018_series_df: pd.DataFrame | None = None,
+    embeddings_series_df: pd.DataFrame | None = None,
+):
+    """
+    Create subplots for all metrics arranged in 3 columns and display as a single figure.
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        The dataset containing the necessary columns.
+    metrics : list
+        List of metrics to visualize.
+    """
+    separated_dir = output_path.parent.joinpath(output_path.stem)
+    os.makedirs(separated_dir, exist_ok=True)
+
+    # Modify df to add DatasetType, exclude unnecessary methods, and remove specific datasets
+    df = df.copy()
+    df.reset_index(inplace=True)
+    df["DatasetType"] = df["Time Series"].map(
+        {True: "Time-Series", False: "Non-Time-Series"}
+    )
+    df = df[~df["Method"].isin(default_omit_methods())]
+    df = df[~df["Dataset"].isin(excluded_datasets)]
+
+    num_metrics = len(metrics)
+    num_cols = 3  # Set the number of columns
+    num_rows = math.ceil(num_metrics / num_cols)  # Compute required rows
+
+    axes: np.ndarray[plt.Axes]
+    fig, axes = plt.subplots(nrows=num_rows, ncols=num_cols, figsize=(15, 3 * num_rows))
+    axes = axes.flatten()  # Convert to 1D array for easy iteration
+
+    ax_for_legend: plt.Axes = None
+    for ax, metric in zip(axes, metrics):
+        ax: plt.Axes
+        plot_boxplot(df, ax, metric)
+        ax_for_legend = ax
+
+        # Save each subplot separately
+        metric_filename = separated_dir / f"{metric.replace(' ', '_')}.png"
+        single_fig, single_ax = plt.subplots(1, 1, figsize=(7, 3))
+        plot_boxplot(df, single_ax, metric)
+
+        single_fig.tight_layout()
+        single_fig.savefig(metric_filename, format="png", dpi=300)
+
+    handles, labels = ax_for_legend.get_legend_handles_labels()
+
+    # Hide unused subplots
+    for i in range(len(metrics), len(axes)):
+        fig.delaxes(axes[i])
+
+    # Add a single legend for the entire figure
+    fig.legend(
+        handles,
+        labels,
+        loc="upper center",
+        bbox_to_anchor=(0.5, 1.01),
+        ncol=3
+        + len(
+            list(
+                filter(
+                    lambda x: x is not None,
+                    [xor_series_df, ucr2018_series_df, embeddings_series_df],
+                )
+            )
+        ),
+        fontsize=12,
+        frameon=True,
+    )
+
+    # save only the legend
+    # Add a single legend for the entire figure
+    n_col = 3 + len(
+        list(
+            filter(
+                lambda x: x is not None,
+                [xor_series_df, ucr2018_series_df, embeddings_series_df],
+            )
+        )
+    )
+    legend_fig, legend_ax = plt.subplots(figsize=(1.8 * n_col, 1))
+    legend_ax.legend(
+        handles,
+        labels,
+        loc="center",
+        ncol=n_col,
+        fontsize=12,
+        frameon=True,
+    )
+    legend_ax.axis("off")  # Hide axes for legend-only figure
+    legend_filename = separated_dir / "legend.png"
+    legend_fig.savefig(legend_filename, format="png", dpi=600)
+    plt.close(legend_fig)  # Close the legend figure
+
+    fig.tight_layout(rect=[0, 0, 1, 0.95])
+    fig.savefig(output_path, format="png", dpi=300)
+
+
+def plot_ml_bar_chart(
+    ax: plt.Axes,
+    metric: str,
+    xor_series_df: pd.DataFrame,
+    ucr2018_series_df: pd.DataFrame,
+    embeddings_series_df: pd.DataFrame,
+    with_legend: bool = True,
+):
+    """
+    Generate a grouped bar chart using only the provided datasets,
+    where each dataset type is a separate cluster,
+    and within each cluster, different compression methods are compared.
+
+    Parameters
+    ----------
+    ax : matplotlib.axes.Axes
+        The axis on which to plot the bar chart.
+    metric : str
+        The metric to visualize.
+    """
+    default_fontsize = 12
+
+    # Compute mean values for each dataset type
+    dataset_series = []
+    if xor_series_df is not None:
+        dataset_series.append(
+            xor_series_df.groupby("Method")[metric].mean().rename("XOR Synthetic")
+        )
+    if ucr2018_series_df is not None:
+        dataset_series.append(
+            ucr2018_series_df.groupby("Method")[metric].mean().rename("UCR2018")
+        )
+    if embeddings_series_df is not None:
+        dataset_series.append(
+            embeddings_series_df.groupby("Method")[metric].mean().rename("Embeddings")
+        )
+
+    if not dataset_series:
+        print("No valid data provided for plotting.")
+        return
+
+    # Combine all series into a DataFrame where columns represent datasets
+    # and rows represent methods
+    plot_df = pd.concat(dataset_series, axis=1)
+
+    # Sort methods in the order specified by default_compression_method_order
+    plot_df.index = pd.Categorical(
+        plot_df.index, categories=default_compression_method_order(), ordered=True
+    )
+    plot_df.sort_index(inplace=True)
+
+    # Transpose so that x-axis represents dataset types,
+    # with each cluster containing different compression methods
+    plot_df = plot_df.transpose()
+
+    small_default = 10
+
+    # Plot grouped bar chart
+    bars = plot_df.plot(
+        kind="bar",
+        ax=ax,
+        color=[get_color(method) for method in plot_df.columns],
+        fontsize=small_default,
+        legend=with_legend,
+        width=0.85,
+    )
+
+    # Apply hatch patterns to each bar
+    for bar_container, method in zip(bars.containers, plot_df.columns):
+        for bar in bar_container:
+            bar.set_hatch(get_hatch(method))
+
+    # Set labels
+    ax.set_xlabel("Dataset Type", fontsize=default_fontsize)
+    if "Throughput" in metric:
+        ax.set_ylabel(f"{metric} (GB/s)", fontsize=default_fontsize)
+    elif "Comp Ratio" == metric:
+        ax.set_ylabel("Comp Ratio (Lower is Better)", fontsize=default_fontsize)
+    else:
+        ax.set_ylabel(metric, fontsize=default_fontsize)
+
+    ax.xaxis.label.set_visible(False)
+    ax.set_xticklabels(
+        ax.get_xticklabels(), rotation=0, ha="center", fontsize=small_default
+    )
+    ax.tick_params(axis="both", labelsize=small_default)
+    if with_legend:
+        ax.legend(fontsize=small_default, frameon=True)
+
+
+def make_ml_bars(
+    xor_series_df: pd.DataFrame,
+    ucr2018_series_df: pd.DataFrame,
+    embeddings_series_df: pd.DataFrame,
+    output_path: Path,
+):
+    for height_squashed in [False, True]:
+        for with_legend in [True, False]:
+            fig, ax = plt.subplots(1, 1, figsize=(7, 3 if height_squashed else 5))
+            plot_ml_bar_chart(
+                ax,
+                "Comp Ratio",
+                xor_series_df=xor_series_df,
+                ucr2018_series_df=ucr2018_series_df,
+                embeddings_series_df=embeddings_series_df,
+                with_legend=with_legend,
+            )
+            fig.tight_layout()
+            fig.savefig(
+                output_path.with_name(
+                    f"ml_bars_{'squashed' if height_squashed else 'normal'}_{'legend' if with_legend else 'no_legend'}.png"
+                ),
+                format="png",
+                dpi=300,
+            )
+            plt.close(fig)
+    single_fig, single_ax = plt.subplots(1, 1, figsize=(7, 5))
+    plot_ml_bar_chart(
+        single_ax,
+        "Comp Ratio",
+        xor_series_df=xor_series_df,
+        ucr2018_series_df=ucr2018_series_df,
+        embeddings_series_df=embeddings_series_df,
+    )
+
+    single_fig.tight_layout()
+    single_fig.savefig(output_path, format="png", dpi=300)
+
+
 def default_processing_types_order():
     pts = list(mapped_processing_types)
     pts.remove("IO Read")
@@ -946,6 +1499,38 @@ def get_hatch_exe(label: str) -> str:
     hatch_map_exe[label] = hatches[next_index]
 
     return hatch_map_exe[label]
+
+
+hatch_map: dict[str, str] = {}
+
+
+def get_hatch(label: str) -> str:
+    global hatch_map
+    plt.rcParams["hatch.linewidth"] = 0.3
+    hatches = [
+        "O.",
+        "//",
+        "++",
+        "//",
+        "\\\\",
+        "||",
+        "--",
+        "++",
+        "xx",
+        "oo",
+        "OO",
+        "..",
+        "**",
+    ]
+    hatches.reverse()
+
+    if label in hatch_map:
+        return hatch_map[label]
+
+    next_index = len(hatch_map) % len(hatches)
+    hatch_map[label] = hatches[next_index]
+
+    return hatch_map[label]
 
 
 def plot_absolute_stacked_execution_times_for_methods(
@@ -1572,7 +2157,6 @@ def main():
         ucr2018_df = None
         embeddings_df = None
 
-    # averaged() を呼び出し、AveragedAllOutput へ変換
     averaged_all_output = all_output.averaged()
 
     data_existence_table = create_data_existence_table(averaged_all_output)
@@ -1656,6 +2240,46 @@ def main():
         ucr2018_series_df=ucr2018_df,
         embeddings_series_df=embeddings_df,
     )
+    make_subplots_all2(
+        merged,
+        out_dir.joinpath("bar2").joinpath("bars.png"),
+        [
+            "Comp Ratio",
+            "Comp Throughput",
+            "DeComp Throughput",
+            "Filter Gt 90 Throughput",
+            "Max Throughput",
+            "Sum Throughput",
+        ],
+    )
+    make_subplots_all2(
+        merged,
+        out_dir.joinpath("bar2").joinpath("bars_with_other_datasets.png"),
+        [
+            "Comp Ratio",
+            "Comp Throughput",
+            "DeComp Throughput",
+            "Filter Gt 90 Throughput",
+            "Max Throughput",
+            "Sum Throughput",
+        ],
+        xor_series_df=xor_df,
+        ucr2018_series_df=ucr2018_df,
+        embeddings_series_df=embeddings_df,
+    )
+    make_subplots_all3(
+        merged,
+        out_dir.joinpath("boxplot").joinpath("boxplot_all.png"),
+        [
+            "Comp Ratio",
+            "Comp Throughput",
+            "DeComp Throughput",
+            "Filter Gt 90 Throughput",
+            "Max Throughput",
+            "Sum Throughput",
+        ],
+    )
+    make_ml_bars(xor_df, ucr2018_df, embeddings_df, out_dir.joinpath("ml_bars.png"))
     print("===== Comp Ratio Table =====")
     print(merged.groupby(level="Method")["Comp Throughput"].mean())
     print(merged.groupby(level="Method")["DeComp Throughput"].mean())

@@ -7,7 +7,7 @@ def default_omit_methods():
     return ["RLE", "Uncompressed"]
 
 
-def default_compression_method_order():
+def default_compression_method_order() -> List[str]:
     compression_methods_ordered: List[str] = copy.deepcopy(compression_methods)
     # if "Uncompressed" in compression_methods_ordered:
     #     compression_methods_ordered.remove("Uncompressed")

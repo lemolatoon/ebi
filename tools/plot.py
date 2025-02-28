@@ -1538,6 +1538,7 @@ color_map: dict[str, tuple[float, float, float, float]] = {}
 
 
 def get_color(label: str) -> tuple[float, float, float, float]:
+    # Define a set of distinct colors for up to 11 methods
     global color_map
     if label in color_map:
         return color_map[label]
