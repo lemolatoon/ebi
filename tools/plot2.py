@@ -883,20 +883,22 @@ def plot_bar_chart2(
         for bar in bar_container:
             bar.set_hatch(get_hatch(method))
 
+    label_font_size = default_fontsize + 2
+
     # Set labels
-    ax.set_xlabel("Dataset Type", fontsize=default_fontsize)
+    # ax.set_xlabel("Dataset Type", fontsize=default_fontsize)
     if "Throughput" in metric:
-        ax.set_ylabel(f"{metric} (GB/s)", fontsize=default_fontsize)
+        ax.set_ylabel(f"{metric} (GB/s)", fontsize=label_font_size)
     elif "Comp Ratio" == metric:
-        ax.set_ylabel("Comp Ratio (Lower is Better)", fontsize=default_fontsize)
+        ax.set_ylabel("Comp Ratio (Lower is Better)", fontsize=label_font_size)
     else:
-        ax.set_ylabel(metric, fontsize=default_fontsize)
+        ax.set_ylabel(metric, fontsize=label_font_size)
 
     ax.xaxis.label.set_visible(False)
     ax.set_xticklabels(
-        ax.get_xticklabels(), rotation=0, ha="right", fontsize=default_fontsize
+        ax.get_xticklabels(), rotation=0, ha="right", fontsize=label_font_size
     )
-    ax.tick_params(axis="both", labelsize=small_default)
+    ax.tick_params(axis="both", labelsize=label_font_size)
     # ax.legend(fontsize=small_default, frameon=True)
 
 
@@ -1151,7 +1153,7 @@ def make_subplots_all2(
 
         # Save each subplot separately
         metric_filename = separated_dir / f"{metric.replace(' ', '_')}.png"
-        single_fig, single_ax = plt.subplots(1, 1, figsize=(7, 3))
+        single_fig, single_ax = plt.subplots(1, 1, figsize=(7, 4))
         if metric in ["Comp Ratio", "Comp Throughput", "DeComp Throughput"]:
             plot_bar_chart2(
                 df,
