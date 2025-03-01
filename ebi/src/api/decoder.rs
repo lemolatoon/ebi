@@ -214,7 +214,7 @@ impl<R: Read + Seek> Decoder<R> {
         for chunk_handle in chunk_handles
             .iter_mut()
             .enumerate()
-            .filter(|(i, _)| chunk_id.map_or(true, |x| x.index() == *i))
+            .filter(|(i, _)| chunk_id.is_none_or(|x| x.index() == *i))
             .map(|(_, x)| x)
         {
             let mut chunk_range_bitmap = RoaringBitmap::new();
@@ -256,7 +256,7 @@ impl<R: Read + Seek> Decoder<R> {
         for chunk_handle in chunk_handles
             .iter_mut()
             .enumerate()
-            .filter(|(i, _)| chunk_id.map_or(true, |x| x.index() == *i))
+            .filter(|(i, _)| chunk_id.is_none_or(|x| x.index() == *i))
             .map(|(_, x)| x)
         {
             let mut chunk_range_bitmap = RoaringBitmap::new();
@@ -296,7 +296,7 @@ impl<R: Read + Seek> Decoder<R> {
         for chunk_handle in chunk_handles
             .iter_mut()
             .enumerate()
-            .filter(|(i, _)| chunk_id.map_or(true, |x| x.index() == *i))
+            .filter(|(i, _)| chunk_id.is_none_or(|x| x.index() == *i))
             .map(|(_, x)| x)
         {
             let mut chunk_range_bitmap = RoaringBitmap::new();
@@ -336,7 +336,7 @@ impl<R: Read + Seek> Decoder<R> {
         for chunk_handle in chunk_handles
             .iter_mut()
             .enumerate()
-            .filter(|(i, _)| chunk_id.map_or(true, |x| x.index() == *i))
+            .filter(|(i, _)| chunk_id.is_none_or(|x| x.index() == *i))
             .map(|(_, x)| x)
         {
             let mut chunk_range_bitmap = RoaringBitmap::new();
@@ -376,7 +376,7 @@ impl<R: Read + Seek> Decoder<R> {
         for chunk_handle in chunk_handles
             .iter_mut()
             .enumerate()
-            .filter(|(i, _)| chunk_id.map_or(true, |x| x.index() == *i))
+            .filter(|(i, _)| chunk_id.is_none_or(|x| x.index() == *i))
             .map(|(_, x)| x)
         {
             let mut chunk_range_bitmap = RoaringBitmap::new();
@@ -416,7 +416,7 @@ impl<R: Read + Seek> Decoder<R> {
         for chunk_handle in chunk_handles
             .iter_mut()
             .enumerate()
-            .filter(|(i, _)| chunk_id.map_or(true, |x| x.index() == *i))
+            .filter(|(i, _)| chunk_id.is_none_or(|x| x.index() == *i))
             .map(|(_, x)| x)
         {
             let mut chunk_range_bitmap = RoaringBitmap::new();

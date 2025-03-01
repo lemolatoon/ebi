@@ -246,7 +246,7 @@ impl ElfXorEncoder {
                 if center_bits <= 16 {
                     // case 10
                     w.write_bits(
-                        (((0x2 << 3) | leading_repr) << 4 | (center_bits & 0xf)) as u64,
+                        ((((0x2 << 3) | leading_repr) << 4) | (center_bits & 0xf)) as u64,
                         9,
                     );
                     w.write_bits(xor >> (self.stored_trailing_zeros + 1), center_bits - 1);
@@ -255,7 +255,7 @@ impl ElfXorEncoder {
                 } else {
                     // case 11
                     w.write_bits(
-                        ((0x3 << 3 | leading_repr) << 6 | (center_bits & 0x3f)) as u64,
+                        ((((0x3 << 3) | leading_repr) << 6) | (center_bits & 0x3f)) as u64,
                         11,
                     );
                     w.write_bits(xor >> (self.stored_trailing_zeros + 1), center_bits - 1);

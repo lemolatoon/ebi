@@ -129,10 +129,10 @@ impl ElfXorDecoder {
         self.first = false;
         let trailing_zeros = r.read_bits(7).ok_or(DecoderError::UnexpectedEndOfChunk)? as u32;
         if trailing_zeros < 64 {
-            self.stored_val = (r
+            self.stored_val = ((r
                 .read_bits(63 - trailing_zeros as u8)
                 .ok_or(DecoderError::UnexpectedEndOfChunk)?
-                << 1
+                << 1)
                 | 1)
                 << trailing_zeros;
         } else {
@@ -163,10 +163,10 @@ impl ElfXorDecoder {
                     center_bits = 64;
                 }
                 self.stored_trailing_zeros = 64 - self.stored_leading_zeros - center_bits;
-                let mut value = (r
+                let mut value = ((r
                     .read_bits((center_bits - 1) as u8)
                     .ok_or(DecoderError::UnexpectedEndOfChunk)?
-                    << 1
+                    << 1)
                     | 1)
                     << self.stored_trailing_zeros;
                 value ^= self.stored_val;
@@ -191,9 +191,9 @@ impl ElfXorDecoder {
                 let mut value = if center_bits == 1 {
                     1 << self.stored_trailing_zeros
                 } else {
-                    (r.read_bits((center_bits - 1) as u8)
+                    ((r.read_bits((center_bits - 1) as u8)
                         .ok_or(DecoderError::UnexpectedEndOfChunk)?
-                        << 1
+                        << 1)
                         | 1)
                         << self.stored_trailing_zeros
                 };
