@@ -56,7 +56,7 @@ impl BUFFReader {
     /// Set the precision to be used when materializing the data
     pub fn with_controlled_precision(&mut self, precision: u32) {
         // If the precision is higher than the current precision, we need to clear the cached decompressed data
-        if self.precision.map_or(true, |old_p| old_p < precision) {
+        if self.precision.is_none_or(|old_p| old_p < precision) {
             self.decompressed = None;
         }
         self.precision = Some(precision);
