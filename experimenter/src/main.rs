@@ -2444,13 +2444,13 @@ fn embedding_command(
     input_dir: impl AsRef<Path>,
     // dataaset_name -> method_name -> result
 ) -> anyhow::Result<HashMap<String, HashMap<String, SimpleCompressionPerformanceForOneDataset>>> {
-    let datasets_exclude = "Cohere_wikipedia-22-12-simple-embeddings_emb";
+    let datasets_exclude = [];
 
     let dataset_entries = entry_file_iter(input_dir.as_ref())?
         .filter(|entry| {
             let dataset_name = entry.file_stem().unwrap().to_string_lossy();
             let ext = entry.as_path().extension().unwrap().to_string_lossy();
-            !datasets_exclude.contains(dataset_name.as_ref()) && ext == "bin"
+            !datasets_exclude.contains(&dataset_name.as_ref()) && ext == "bin"
         })
         .collect::<Vec<_>>();
 
@@ -2463,18 +2463,10 @@ fn embedding_command(
         .into_iter()
         .map(|(k, v)| (k, v.round() as u64))
         .collect();
-    let scale_map: HashMap<String, u64> = precision_map
+    let scale_map: HashMap<String, Option<u64>> = precision_map
         .clone()
         .into_iter()
-        .map(|(k, v)| {
-            (
-                k,
-                10u64
-                    .checked_pow(v as u32)
-                    .context(format!("Failed to calculate scale with precision: {v}"))
-                    .unwrap(),
-            )
-        })
+        .map(|(k, v)| (k, 10u64.checked_pow(v as u32)))
         .collect();
     // scale is set to 10^precision later
     let configs: Vec<CompressorConfig> = vec![
@@ -2511,7 +2503,32 @@ fn embedding_command(
         for config in tqdm(configs.clone()) {
             let config = {
                 let mut config = config;
-                config.set_scale(scale);
+                if matches!(
+                    config.compression_scheme(),
+                    CompressionScheme::DeltaSprintz | CompressionScheme::BUFF
+                ) {
+                    let scale = match scale {
+                        // if precision > 12, skip for the method
+                        Some(scale) if scale > 10u64.pow(12) => {
+                            eprintln!(
+                                "Scale is too large for {}, skipping for the method {:?}",
+                                dataset_key,
+                                config.compression_scheme()
+                            );
+                            continue;
+                        }
+                        None => {
+                            eprintln!(
+                                "Failed to get scale for {}, skipping for the method {:?}",
+                                dataset_key,
+                                config.compression_scheme()
+                            );
+                            continue;
+                        }
+                        Some(scale) => scale,
+                    };
+                    config.set_scale(scale);
+                }
                 config
             };
             let mut compression_elapsed_time_nanos = Vec::with_capacity(n);
