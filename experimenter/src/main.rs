@@ -29,6 +29,7 @@ use ebi::{
     compressor::CompressorConfig,
     decoder::query::{Predicate, Range, RangeValue},
     encoder::ChunkOption,
+    format::CompressionScheme,
     time::SerializableSegmentedExecutionTimes,
 };
 
@@ -73,6 +74,8 @@ impl ConfigPath {
 struct AllPatchArgs {
     #[arg(long)]
     create_config: bool,
+    #[arg(long)]
+    exact_precision: bool,
     #[arg(long)]
     in_memory: bool,
     #[arg(long, short('c'))]
@@ -149,6 +152,7 @@ impl AllPatchArgs {
     ) -> Self {
         Self {
             create_config: args.create_config,
+            exact_precision: args.exact_precision,
             in_memory: args.in_memory,
             compressor_config_dir: args.compressor_config_dir,
             filter_config_dir: args.filter_config_dir,
@@ -165,6 +169,8 @@ impl AllPatchArgs {
 struct AllArgs {
     #[arg(long)]
     create_config: bool,
+    #[arg(long)]
+    exact_precision: bool,
     #[arg(long)]
     in_memory: bool,
     #[arg(long, short('c'))]
@@ -265,6 +271,8 @@ enum Commands {
     CreateDefaultCompressorConfig {
         #[arg(long, short)]
         output_dir: Option<PathBuf>,
+        #[arg(long)]
+        exact_precision: bool,
     },
     AllPatch(AllPatchArgs),
     Compress(ConfigPath),
@@ -560,8 +568,11 @@ fn process_file(filename: impl AsRef<Path>, cli: Cli) -> anyhow::Result<()> {
         Commands::CreateFilterConfig { output_dir } => {
             return create_config_command(filename, output_dir);
         }
-        Commands::CreateDefaultCompressorConfig { output_dir } => {
-            return create_default_compressor_config(filename, output_dir);
+        Commands::CreateDefaultCompressorConfig {
+            output_dir,
+            exact_precision,
+        } => {
+            return create_default_compressor_config(filename, output_dir, exact_precision);
         }
         Commands::Max(args) => max_command(
             args.in_memory.unwrap_or(false),
@@ -715,7 +726,35 @@ fn process_experiment_for_compressor(
     save_dir: impl AsRef<Path>,
     all_output_inner: &mut AllOutputInner,
     n: usize,
+    max_value: f64,
 ) -> anyhow::Result<()> {
+    let compression_scheme = compression_config.compressor_config.compression_scheme();
+    if compression_scheme == CompressionScheme::BUFF
+        || compression_scheme == CompressionScheme::DeltaSprintz
+    {
+        let scale = compression_config.compressor_config.scale().unwrap();
+        let precision = if scale == 0 {
+            0
+        } else {
+            (scale as f64).log10() as usize
+        };
+        // Check if the quantization will be done correctly
+        let quantized = max_value * scale as f64;
+        if !quantized.is_finite() || quantized.abs() > i64::MAX as f64 {
+            eprintln!(
+                "Quantization will not be done correctly. Skip: {:?}",
+                compressor_config
+            );
+            return Ok(());
+        }
+        if compression_scheme == CompressionScheme::BUFF && precision > 12 {
+            eprintln!(
+                "Precision({}) is too high for BUFF. Skip: {:?}",
+                precision, compressor_config
+            );
+            return Ok(());
+        }
+    }
     let binary_file_stem = binary_file
         .as_ref()
         .file_stem()
@@ -861,6 +900,21 @@ fn process_experiment_for_dataset(
                 sum: Vec::with_capacity(n),
             });
 
+        // Find the max value for the dataset
+        let max_value = {
+            let mut max_value: f64 = 0.0;
+            let mut reader = BufReader::new(File::open(&binary_file)?);
+            let mut buffer = [0; 8];
+            while let Ok(n) = reader.read(&mut buffer) {
+                if n == 0 {
+                    break;
+                }
+                let value = u64::from_le_bytes(buffer);
+                max_value = max_value.max(f64::from_bits(value));
+            }
+            max_value
+        };
+
         process_experiment_for_compressor(
             in_memory,
             &binary_file,
@@ -870,6 +924,7 @@ fn process_experiment_for_dataset(
             &save_dir,
             all_output_inner,
             n,
+            max_value,
         )?;
     }
 
@@ -880,6 +935,7 @@ fn all_patch_command(args: AllPatchArgs, mut patched: AllOutput) -> anyhow::Resu
     args.verify()?;
     let AllPatchArgs {
         create_config,
+        exact_precision,
         in_memory,
         compressor_config_dir,
         filter_config_dir,
@@ -889,6 +945,10 @@ fn all_patch_command(args: AllPatchArgs, mut patched: AllOutput) -> anyhow::Resu
         patch_dataset,
         patch_compressor,
     } = args;
+    assert!(
+        !exact_precision || create_config,
+        "Exact precision requires create config"
+    );
 
     let n = n.unwrap_or(10);
 
@@ -925,9 +985,11 @@ fn all_patch_command(args: AllPatchArgs, mut patched: AllOutput) -> anyhow::Resu
                 "Failed to get csv path, stem: {}",
                 binary_file_stem.to_string_lossy()
             ))?;
-            if let Err(e) =
-                create_default_compressor_config(csv_path.as_path(), Some(compressor_config_dir))
-            {
+            if let Err(e) = create_default_compressor_config(
+                csv_path.as_path(),
+                Some(compressor_config_dir),
+                exact_precision,
+            ) {
                 eprintln!(
                     "Failed to create compressor config. Add to skip list...: {:?}",
                     e
@@ -1106,16 +1168,14 @@ fn get_compress_statistics<R: Read + Seek>(
 fn create_default_compressor_config(
     filename: impl AsRef<Path>,
     output_dir: Option<PathBuf>,
+    exact_precision: bool,
 ) -> anyhow::Result<()> {
     let reader = BufReader::new(File::open(filename.as_ref()).context(format!(
         "Failed to open file.: {}",
         filename.as_ref().display()
     ))?);
     println!("get scale for {}", filename.as_ref().display());
-    let prec = get_appropriate_precision(reader, ',')?;
-    let scale = 10u64
-        .checked_pow(prec)
-        .context("Failed to get appropriate scale")?;
+    let prec = get_appropriate_precision(reader, ',', exact_precision)?;
     let mut configs: Vec<(&'static str, CompressorConfig)> = vec![
         (
             "uncompressed",
@@ -1135,14 +1195,21 @@ fn create_default_compressor_config(
         ("snappy", CompressorConfig::snappy().build().into()),
         ("ffi_alp", CompressorConfig::ffi_alp().build().into()),
     ];
-    configs.push((
-        "delta_sprintz",
-        CompressorConfig::delta_sprintz()
-            .scale(scale)
-            .build()
-            .into(),
-    ));
-    configs.push(("buff", CompressorConfig::buff().scale(scale).build().into()));
+    if let Some(scale) = 10u64.checked_pow(prec) {
+        configs.push((
+            "delta_sprintz",
+            CompressorConfig::delta_sprintz()
+                .scale(scale)
+                .build()
+                .into(),
+        ));
+        configs.push(("buff", CompressorConfig::buff().scale(scale).build().into()));
+    } else {
+        eprintln!(
+            "Precision is too high for delta_sprintz and buff. Skip creating config for them of {}",
+            filename.as_ref().display()
+        );
+    }
     let configs = configs.into_iter().map(|(name, config)| {
         (
             name,
@@ -1997,7 +2064,7 @@ fn ucr2018_command(
             File::open(&train_file)
                 .context(format!("Failed to open file.: {}", train_file.display()))?,
         );
-        let prec = get_appropriate_precision(train_file_reader, '\t').context(format!(
+        let prec = get_appropriate_precision(train_file_reader, '\t', false).context(format!(
             "Failed to get appropriate prec for {}, Fallback to precision 9, scale: 10^9",
             &dataset_name
         ))?;

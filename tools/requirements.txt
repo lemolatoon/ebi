@@ -17,10 +17,14 @@ frozenlist==1.4.1
 fsspec==2024.6.1
 huggingface-hub==0.25.2
 idna==3.10
+Jinja2==3.1.5
+joblib==1.4.2
 kiwisolver==1.4.5
+MarkupSafe==3.0.2
 matplotlib==3.9.2
 multidict==6.1.0
 multiprocess==0.70.16
+mypy==1.15.0
 mypy-extensions==1.0.0
 numpy==2.0.1
 packaging==24.1
@@ -37,7 +41,11 @@ pytz==2024.1
 PyYAML==6.0.2
 requests==2.32.3
 ruff==0.6.8
+scikit-learn==1.6.1
+scipy==1.15.2
+seaborn==0.13.2
 six==1.16.0
+threadpoolctl==3.5.0
 tomli==2.0.1
 tqdm==4.66.5
 typing_extensions==4.12.2
@@ -45,3 +53,4 @@ tzdata==2024.1
 urllib3==2.2.3
 xxhash==3.5.0
 yarl==1.15.2
+yellowbrick==1.5
