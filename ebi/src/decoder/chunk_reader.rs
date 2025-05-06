@@ -15,7 +15,6 @@ pub mod zstd;
 
 use std::io::{Read, Write};
 
-use cuda_binding::GemmConfig;
 use iter_enum::Iterator;
 use quick_impl::QuickImpl;
 use roaring::RoaringBitmap;
@@ -261,7 +260,7 @@ impl<'handle, T: FileMetadataLike, R: Read> GeneralChunkReader<'handle, T, R> {
         b: &[f64],
         c: &mut [f64],
         swap_a_b: bool,
-        cfg: GemmConfig<f64>,
+        cfg: cuda_binding::GemmConfig<f64>,
     ) -> Result<()> {
         let decompressed = self.reader.decompress(&mut self.timer)?;
         let a = &decompressed[a_range];

@@ -34,7 +34,7 @@ ffi_alp = ["dep:alp-binding"]
 ffi = ["ffi_alp"]
 serde = ["dep:serde"]
 cuda = ["dep:cudarc", "dep:cuda-binding"]
-default = ["ffi", "cuda"]
+default = ["ffi"]
 
 [[bench]]
 name = "bench"
