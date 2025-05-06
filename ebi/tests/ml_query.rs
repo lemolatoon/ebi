@@ -164,6 +164,103 @@ mod helper {
             test_name, expected, result
         );
     }
+
+    #[cfg(feature = "cuda")]
+    pub fn test_matmul_cuda(
+        config: CompressorConfig,
+        // (Batch, m, k)
+        data: &[&[&[f64]]],
+        chunk_option: ChunkOption,
+        // (k, n)
+        target: &[&[f64]],
+        // (Batch, m, n)
+        expected: &[&[&[f64]]],
+        test_name: impl Display,
+    ) {
+        println!("=========== {} (CUDA) ===========", test_name);
+        let data_batch = data.len();
+        let m = data[0].len();
+        assert_eq!(
+            data_batch,
+            expected.len(),
+            "Data batch dimention mismatch: {} != {}",
+            data_batch,
+            expected.len()
+        );
+        let k = data[0][0].len();
+        assert_eq!(
+            k,
+            target.len(),
+            "Data width and target height dimention mismatch: {} != {}",
+            k,
+            target.len()
+        );
+        let n = target[0].len();
+        assert_eq!(
+            n,
+            expected[0][0].len(),
+            "Target width and expected width dimention mismatch: {} != {}",
+            n,
+            expected[0][0].len()
+        );
+
+        let data = data
+            .iter()
+            .flat_map(|batch| batch.iter().flat_map(|row| row.iter().copied()))
+            .collect::<Box<[f64]>>();
+
+        let target = target
+            .iter()
+            .flat_map(|row| row.iter().copied())
+            .collect::<Box<[f64]>>();
+
+        let expected = expected
+            .iter()
+            .flat_map(|batch| batch.iter().flat_map(|row| row.iter().copied()))
+            .collect::<Box<[f64]>>();
+
+        // chunk_option check
+        assert!(
+            matches!(chunk_option, ChunkOption::RecordCount(_)),
+            "ChunkOption must be RecordCount"
+        );
+
+        let chunk_option_record_count = match chunk_option {
+            ChunkOption::RecordCount(record_count) => record_count,
+            _ => unreachable!(),
+        };
+
+        assert!(
+            chunk_option_record_count % (m * k) == 0,
+            "ChunkOption record count must be multiple of data size: {} % {} != 0",
+            chunk_option_record_count,
+            m * k
+        );
+
+        let encoded = {
+            let encoder_input = EncoderInput::from_f64_slice(&data);
+            let encoder_output = EncoderOutput::from_vec(Vec::new());
+            let mut encoder = Encoder::new(encoder_input, encoder_output, chunk_option, config);
+            encoder.encode().unwrap();
+            encoder.into_output().into_vec()
+        };
+
+        let result = {
+            let input_cursor = Cursor::new(&encoded[..]);
+            let decoder_input = DecoderInput::from_reader(input_cursor);
+            let mut decoder = Decoder::new(decoder_input).unwrap();
+
+            decoder
+                .matmul_cuda(&target, (k, n), (m, k))
+                .unwrap_or_else(|e| panic!("{}: matmul_cuda failed: {:?}", test_name, e))
+        };
+
+        assert_eq!(
+            result, expected,
+            "{}: Expected result mismatch, expected: {:?}, got: {:?}",
+            test_name, expected, result
+        );
+    }
 }
 
 pub fn test_knn1_manual(config: impl Into<CompressorConfig>) {
@@ -354,6 +451,130 @@ pub fn test_matmul_manual(config: impl Into<CompressorConfig>) {
     );
 }
 
+#[cfg(feature = "cuda")]
+pub fn test_matmul_cuda_manual(config: impl Into<CompressorConfig>) {
+    let config = config.into();
+
+    // Test case 1: batch=2, m=2, k=3, n=4
+    let data: &[&[&[f64]]] = &[
+        &[&[-1.0, -2.0, 3.0], &[-3.0, 3.0, 1.0]],
+        &[&[-3.0, -1.0, 0.0], &[2.0, 0.0, -3.0]],
+    ];
+    let target: &[&[f64]] = &[
+        &[1.0, -2.0, -1.0, -1.0],
+        &[2.0, -2.0, 1.0, 0.0],
+        &[0.0, 1.0, 1.0, -2.0],
+    ];
+    let expected: &[&[&[f64]]] = &[
+        &[&[-5.0, 9.0, 2.0, -5.0], &[3.0, 1.0, 7.0, 1.0]],
+        &[&[-5.0, 8.0, 2.0, 3.0], &[2.0, -7.0, -5.0, 4.0]],
+    ];
+
+    helper::test_matmul_cuda(
+        config,
+        data,
+        ChunkOption::RecordCount(12),
+        target,
+        expected,
+        "Test 1: matmul m=2 k=3 n=4",
+    );
+
+    // Test case 2: batch=1, m=3, k=2, n=2
+    let data: &[&[&[f64]]] = &[&[&[1.0, 1.0], &[-3.0, -1.0], &[0.0, -1.0]]];
+    let target: &[&[f64]] = &[&[0.0, 2.0], &[-2.0, 1.0]];
+    let expected: &[&[&[f64]]] = &[&[&[-2.0, 3.0], &[2.0, -7.0], &[2.0, -1.0]]];
+
+    helper::test_matmul_cuda(
+        config,
+        data,
+        ChunkOption::RecordCount(6),
+        target,
+        expected,
+        "Test 2: matmul m=3 k=2 n=2",
+    );
+
+    // Test case 3: batch=3, m=1, k=2, n=3
+    let data: &[&[&[f64]]] = &[&[&[-1.0, -3.0]], &[&[3.0, -1.0]], &[&[2.0, 0.0]]];
+    let target: &[&[f64]] = &[&[-2.0, 0.0, 1.0], &[0.0, -2.0, -1.0]];
+    let expected: &[&[&[f64]]] = &[
+        &[&[2.0, 6.0, 2.0]],
+        &[&[-6.0, 2.0, 4.0]],
+        &[&[-4.0, 0.0, 2.0]],
+    ];
+
+    helper::test_matmul_cuda(
+        config,
+        data,
+        ChunkOption::RecordCount(6),
+        target,
+        expected,
+        "Test 3: matmul m=1 k=2 n=3",
+    );
+
+    // Test case 4: batch=2, m=2, k=2, n=1
+    let data: &[&[&[f64]]] = &[
+        &[&[1.0, 3.0], &[-1.0, -1.0]],
+        &[&[2.0, -1.0], &[-2.0, -2.0]],
+    ];
+    let target: &[&[f64]] = &[&[0.0], &[-1.0]];
+    let expected: &[&[&[f64]]] = &[&[&[-3.0], &[1.0]], &[&[1.0], &[2.0]]];
+
+    helper::test_matmul_cuda(
+        config,
+        data,
+        ChunkOption::RecordCount(8),
+        target,
+        expected,
+        "Test 4: matmul m=2 k=2 n=1",
+    );
+
+    // Test case 5: batch=4, m=1, k=3, n=2
+    let data: &[&[&[f64]]] = &[
+        &[&[1.0, -2.0, 0.0]],
+        &[&[3.0, 1.0, -3.0]],
+        &[&[-2.0, 3.0, 1.0]],
+        &[&[-3.0, 1.0, 3.0]],
+    ];
+    let target: &[&[f64]] = &[&[-2.0, -1.0], &[2.0, 0.0], &[1.0, -2.0]];
+    let expected: &[&[&[f64]]] = &[
+        &[&[-6.0, -1.0]],
+        &[&[-7.0, 3.0]],
+        &[&[11.0, 0.0]],
+        &[&[11.0, -3.0]],
+    ];
+
+    helper::test_matmul_cuda(
+        config,
+        data,
+        ChunkOption::RecordCount(12),
+        target,
+        expected,
+        "Test 5: matmul m=1 k=3 n=2",
+    );
+
+    // Test case 6: batch=3, m=2, k=2, n=5
+    let data: &[&[&[f64]]] = &[
+        &[&[1.0, -2.0], &[1.0, 0.0]],
+        &[&[1.0, -1.0], &[-1.0, -1.0]],
+        &[&[0.0, 2.0], &[0.0, 2.0]],
+    ];
+    let target: &[&[f64]] = &[&[1.0, 2.0, 0.0, 2.0, 0.0], &[2.0, 0.0, 1.0, 1.0, 0.0]];
+    let expected: &[&[&[f64]]] = &[
+        &[&[-3.0, 2.0, -2.0, 0.0, 0.0], &[1.0, 2.0, 0.0, 2.0, 0.0]],
+        &[&[-1.0, 2.0, -1.0, 1.0, 0.0], &[-3.0, -2.0, -1.0, -3.0, 0.0]],
+        &[&[4.0, 0.0, 2.0, 2.0, 0.0], &[4.0, 0.0, 2.0, 2.0, 0.0]],
+    ];
+
+    helper::test_matmul_cuda(
+        config,
+        data,
+        ChunkOption::RecordCount(12),
+        target,
+        expected,
+        "Test 6: matmul m=2 k=2 n=5",
+    );
+}
+
 macro_rules! declare_ml_query_tests {
     ($($method:ident,)*) => {
         $(
@@ -368,6 +589,13 @@ macro_rules! declare_ml_query_tests {
                 fn test_matmul() {
                     let config = super::CompressorConfig::$method().build();
                     super::test_matmul_manual(config);
+                }
+
+                #[cfg(feature = "cuda")]
+                #[test]
+                fn test_matmul_cuda() {
+                    let config = super::CompressorConfig::$method().build();
+                    super::test_matmul_cuda_manual(config);
                 }
             }
         )*
