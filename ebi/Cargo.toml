@@ -20,9 +20,6 @@ zstd = "0.13.2"
 flate2 = "1.0"
 snap = "1"
 alp-binding = { path = "../alp-binding", optional = true }
-cudarc = { version = "0.16", features = [
-    "cuda-version-from-build-system",
-], optional = true }
 cuda-binding = { path = "../cuda-binding", optional = true }
 
 [dev-dependencies]
@@ -33,7 +30,7 @@ rand_chacha = "0.3"
 ffi_alp = ["dep:alp-binding"]
 ffi = ["ffi_alp"]
 serde = ["dep:serde"]
-cuda = ["dep:cudarc", "dep:cuda-binding"]
+cuda = ["dep:cuda-binding", "cuda-binding/cuda"]
 default = ["ffi"]
 
 [[bench]]
