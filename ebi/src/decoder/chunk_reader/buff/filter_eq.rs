@@ -83,7 +83,7 @@ pub(crate) fn buff_simd256_equal_filter(
     let fixed_base64_lower = bitpack.read_u32().unwrap();
     let fixed_base64_higher = bitpack.read_u32().unwrap();
     let fixed_base64_bits = (fixed_base64_lower as u64) | ((fixed_base64_higher as u64) << 32);
-    let fixed_base64 = unsafe { std::mem::transmute::<u64, i64>(fixed_base64_bits) };
+    let fixed_base64 = u64::cast_signed(fixed_base64_bits);
     let number_of_records = bitpack.read_u32().unwrap();
     let fixed_representation_bits_length = bitpack.read_u32().unwrap();
     let fractional_part_bits_length = bitpack.read_u32().unwrap();

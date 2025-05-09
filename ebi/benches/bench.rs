@@ -21,7 +21,7 @@ pub fn run_length_compressor_bench(c: &mut Criterion) {
         c.bench_with_input(
             BenchmarkId::new(
                 "RunLengthCompressor Compress Chunk at Once with Allocated Compressor",
-                format!("{} floating values with high cardinality", record_count),
+                format!("{record_count} floating values with high cardinality"),
             ),
             &&high_cardinality_random_floats[..record_count],
             |b, random_values| {
@@ -50,7 +50,7 @@ pub fn run_length_compressor_bench(c: &mut Criterion) {
         c.bench_with_input(
             BenchmarkId::new(
                 "RunLengthCompressor Compress Chunk at Once with Allocated Compressor",
-                format!("{} floating values with high cardinality", record_count),
+                format!("{record_count} floating values with high cardinality"),
             ),
             &&high_cardinality_random_floats[..record_count],
             |b, random_values| {

@@ -429,10 +429,7 @@ pub fn get_appropriate_scale<R: BufRead>(reader: R, pat: char) -> anyhow::Result
         .collect();
     for (&precision, strs) in tqdm::tqdm(float_strs.iter().rev()) {
         let number_of_records_of_precision = number_of_records_so_far[&precision];
-        println!(
-            "number_of_records_of_precision: {}",
-            number_of_records_of_precision
-        );
+        println!("number_of_records_of_precision: {number_of_records_of_precision}");
         if (number_of_records_of_precision as f64 / number_of_records as f64) < IGNORE_THRESHOLD {
             println!(
                 "Skipping precision: {}, {} / {} ({}) < THRESHOLD ({})",
@@ -445,8 +442,7 @@ pub fn get_appropriate_scale<R: BufRead>(reader: R, pat: char) -> anyhow::Result
             continue;
         }
         scale = Some(10u32.checked_pow(precision as u32).context(format!(
-            "Failed to calculate appropriate scale. decimal_precision: {}, decimal_repr: {:?}",
-            max_decimal_precision, strs
+            "Failed to calculate appropriate scale. decimal_precision: {max_decimal_precision}, decimal_repr: {strs:?}"
         ))?);
         println!(
             "Use precision: {}, {} / {} ({})",
@@ -459,8 +455,7 @@ pub fn get_appropriate_scale<R: BufRead>(reader: R, pat: char) -> anyhow::Result
     }
 
     scale.context(format!(
-        "Failed to calculate appropriate scale from {:?}",
-        float_strs
+        "Failed to calculate appropriate scale from {float_strs:?}"
     ))
 }
 
@@ -521,10 +516,7 @@ pub fn get_appropriate_precision<R: BufRead>(
         .collect();
     for (&precision, strs) in tqdm::tqdm(float_strs.iter().rev()) {
         let number_of_records_of_precision = number_of_records_so_far[&precision];
-        println!(
-            "number_of_records_of_precision: {}",
-            number_of_records_of_precision
-        );
+        println!("number_of_records_of_precision: {number_of_records_of_precision}");
         if (number_of_records_of_precision as f64 / number_of_records as f64) < ignore_threshold {
             println!(
                 "Skipping precision: {}, {} / {} ({}) < THRESHOLD ({})",
@@ -537,8 +529,7 @@ pub fn get_appropriate_precision<R: BufRead>(
             continue;
         }
         appropriate_precision = Some(precision.try_into().context(format!(
-            "Failed to calculate appropriate precision. decimal_precision: {}, decimal_repr: {:?}",
-            max_decimal_precision, strs
+            "Failed to calculate appropriate precision. decimal_precision: {max_decimal_precision}, decimal_repr: {strs:?}"
         ))?);
         println!(
             "Use precision: {}, {} / {} ({})",
@@ -551,8 +542,7 @@ pub fn get_appropriate_precision<R: BufRead>(
     }
 
     appropriate_precision.context(format!(
-        "Failed to calculate appropriate scale from {:?}",
-        float_strs
+        "Failed to calculate appropriate scale from {float_strs:?}"
     ))
 }
 

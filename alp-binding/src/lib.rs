@@ -60,9 +60,7 @@ pub fn compress_double(input: &[f64], buffer: &mut Vec<u8>) {
     let compressed_size = compressor.as_mut().get_size();
     debug_assert!(
         compressed_size <= buf_size,
-        "Compressed size exceeds buffer size: {} > {}",
-        compressed_size,
-        buf_size
+        "Compressed size exceeds buffer size: {compressed_size} > {buf_size}"
     );
     unsafe {
         buffer.set_len(compressed_size);

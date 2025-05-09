@@ -33,8 +33,7 @@ impl KindIndexable for SegmentKind {
         let index = self as usize;
         debug_assert!(
             index < Self::N_SEGMENT_KINDS,
-            "Invalid segment kind: {:?}",
-            self
+            "Invalid segment kind: {self:?}"
         );
         index
     }

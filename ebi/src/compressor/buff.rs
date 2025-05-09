@@ -222,7 +222,6 @@ impl Precalculated {
 }
 
 mod internal {
-    use std::mem;
 
     use crate::{
         compression_common::buff::{bit_packing::BitPack, flip},
@@ -253,7 +252,7 @@ mod internal {
         let bit_packing_timer = timer.start_measurement(SegmentKind::BitPacking);
         let mut bitpack_vec = BitPack::<Vec<u8>>::with_capacity(precalculated.compressed_size());
 
-        let base_fixed64_bits: u64 = unsafe { mem::transmute(base_fixed64) };
+        let base_fixed64_bits: u64 = i64::cast_unsigned(base_fixed64);
         let base_fixed64_low = base_fixed64_bits as u32;
         let base_fixed64_high = (base_fixed64_bits >> 32) as u32;
 

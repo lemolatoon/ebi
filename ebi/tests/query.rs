@@ -47,7 +47,7 @@ pub mod helper {
         expected: RoaringBitmap,
         test_name: String,
     ) {
-        println!("=========== {} ===========", test_name);
+        println!("=========== {test_name} ===========");
         let encoded = {
             let encoder_input = EncoderInput::from_f64_slice(&values);
             let encoder_output = EncoderOutput::from_vec(Vec::new());
@@ -145,7 +145,7 @@ pub mod helper {
                 .chunks_exact(8)
                 .map(|chunk| {
                     let fp = f64::from_ne_bytes(chunk.try_into().unwrap());
-                    print!("{} ", fp);
+                    print!("{fp} ");
                     if let Some(scale) = round_scale {
                         (fp * scale as f64).round() / scale as f64
                     } else {
@@ -161,7 +161,7 @@ pub mod helper {
             .enumerate()
             .filter_map(|(i, f)| {
                 if expected.contains(i as u32) {
-                    print!("{} ", f);
+                    print!("{f} ");
                     Some(if let Some(scale) = round_scale {
                         (f * scale as f64).round() / scale as f64
                     } else {
@@ -180,8 +180,8 @@ pub mod helper {
             "[{test_name}]: Filter materialize result length mismatch"
         );
 
-        println!("materialized: {:?}", materialized);
-        println!("expected: {:?}", expected);
+        println!("materialized: {materialized:?}");
+        println!("expected: {expected:?}");
         assert_eq!(
             materialized, expected,
             "[{test_name}]: Filter materialize result mismatch"
@@ -843,7 +843,7 @@ pub mod helper {
         };
         let mean = mean.unwrap_or_else(gen_random_float);
         let std_dev = std_dev.unwrap_or_else(|| rng.gen_range(0.001..=10.0));
-        println!("mean: {}, std_dev: {}", mean, std_dev);
+        println!("mean: {mean}, std_dev: {std_dev}");
         let distribution = rand_distr::Normal::new(mean, std_dev).unwrap();
         #[cfg(not(miri))]
         let mut n_records = *[10, 100, 1000, 10000, 100000, 1000000]
@@ -862,7 +862,7 @@ pub mod helper {
             let byte_size = rng.gen_range(100..=1024 * 10);
             ChunkOption::ByteSizeBestEffort(byte_size)
         };
-        println!("n_records: {}, chunk_option: {:?}", n_records, chunk_option);
+        println!("n_records: {n_records}, chunk_option: {chunk_option:?}");
         let gen_values = || {
             let mut rng = StdRng::from_entropy();
             let mut values = Vec::with_capacity(n_records);

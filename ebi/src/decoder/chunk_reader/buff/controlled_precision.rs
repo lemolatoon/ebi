@@ -1,5 +1,3 @@
-use std::mem;
-
 use crate::compression_common::buff::{bit_packing::BitPack, flip, precision_bound::PRECISION_MAP};
 
 pub fn decode_with_precision(bytes: &[u8], precision: u32) -> Vec<f64> {
@@ -8,7 +6,7 @@ pub fn decode_with_precision(bytes: &[u8], precision: u32) -> Vec<f64> {
     let lower = bitpack.read_u32().unwrap();
     let higher = bitpack.read_u32().unwrap();
     let base_fixed64_bits = (lower as u64) | ((higher as u64) << 32);
-    let base_fixed64 = unsafe { mem::transmute::<u64, i64>(base_fixed64_bits) };
+    let base_fixed64 = u64::cast_signed(base_fixed64_bits);
 
     // Number of records
     let number_of_records = bitpack.read_u32().unwrap();

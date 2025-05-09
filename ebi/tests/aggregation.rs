@@ -35,7 +35,7 @@ mod helper {
         round_scale: Option<u32>,
         test_name: impl Display,
     ) {
-        println!("=========== {} ===========", test_name);
+        println!("=========== {test_name} ===========");
         let encoded = {
             let encoder_input = EncoderInput::from_f64_slice(&values);
             let encoder_output = EncoderOutput::from_vec(Vec::new());
@@ -52,7 +52,7 @@ mod helper {
             decoder.sum(bitmask, chunk_id).unwrap()
         };
 
-        println!("(sum, expected): ({}, {})", sum, expected);
+        println!("(sum, expected): ({sum}, {expected})");
         let sum = match round_scale {
             Some(scale) => round_at(sum, scale),
             None => sum,
@@ -61,7 +61,7 @@ mod helper {
             Some(scale) => round_at(expected, scale),
             None => expected,
         };
-        println!("(sum, expected): ({}, {})", sum, expected);
+        println!("(sum, expected): ({sum}, {expected})");
 
         let eps = if let CompressorConfig::BUFF(_) = config {
             0.5 * values.len() as f64
@@ -86,7 +86,7 @@ mod helper {
         round_scale: Option<u32>,
         test_name: impl Display,
     ) {
-        println!("=========== {} ===========", test_name);
+        println!("=========== {test_name} ===========");
         let encoded = {
             let encoder_input = EncoderInput::from_f64_slice(&values);
             let encoder_output = EncoderOutput::from_vec(Vec::new());
@@ -103,7 +103,7 @@ mod helper {
             decoder.max(bitmask, chunk_id).unwrap()
         };
 
-        println!("(max, expected): ({}, {})", max, expected);
+        println!("(max, expected): ({max}, {expected})");
         let max = match round_scale {
             Some(scale) => round_at(max, scale),
             None => max,
@@ -112,7 +112,7 @@ mod helper {
             Some(scale) => round_at(expected, scale),
             None => expected,
         };
-        println!("(max, expected): ({}, {})", max, expected);
+        println!("(max, expected): ({max}, {expected})");
 
         assert_eq!(
             max, expected,
@@ -131,7 +131,7 @@ mod helper {
         round_scale: Option<u32>,
         test_name: impl Display,
     ) {
-        println!("=========== {} ===========", test_name);
+        println!("=========== {test_name} ===========");
         let encoded = {
             let encoder_input = EncoderInput::from_f64_slice(&values);
             let encoder_output = EncoderOutput::from_vec(Vec::new());
@@ -259,7 +259,7 @@ fn test_sum(
     } else {
         (values, expected)
     };
-    println!("Random Info: {:?}", gen);
+    println!("Random Info: {gen:?}");
     helper::test_sum_inner(
         config,
         values,
@@ -307,7 +307,7 @@ fn test_max(
     } else {
         values.iter().copied().fold(f64::NEG_INFINITY, f64::max)
     };
-    println!("Random Info: {:?}", gen);
+    println!("Random Info: {gen:?}");
     helper::test_max_inner(
         config,
         values,
@@ -354,7 +354,7 @@ fn test_min(
     } else {
         values.iter().copied().fold(f64::INFINITY, f64::min)
     };
-    println!("Random Info: {:?}", gen);
+    println!("Random Info: {gen:?}");
     helper::test_min_inner(
         config,
         values,

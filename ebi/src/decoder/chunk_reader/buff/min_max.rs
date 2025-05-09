@@ -1,5 +1,3 @@
-use std::mem;
-
 use roaring::RoaringBitmap;
 
 use crate::{
@@ -49,7 +47,7 @@ pub(super) fn max_with_bitmask<const IS_MIN: bool>(
     let lower = bitpack.read_u32().unwrap();
     let higher = bitpack.read_u32().unwrap();
     let base_fixed64_bits = (lower as u64) | ((higher as u64) << 32);
-    let base_fixed64 = unsafe { mem::transmute::<u64, i64>(base_fixed64_bits) };
+    let base_fixed64 = u64::cast_signed(base_fixed64_bits);
 
     let number_of_records = bitpack.read_u32().unwrap();
 
@@ -164,7 +162,7 @@ pub(super) fn max_without_bitmask(bytes: &[u8], logical_offset: u32) -> decoder:
     let lower = bitpack.read_u32().unwrap();
     let higher = bitpack.read_u32().unwrap();
     let base_fixed64_bits = (lower as u64) | ((higher as u64) << 32);
-    let base_fixed64 = unsafe { mem::transmute::<u64, i64>(base_fixed64_bits) };
+    let base_fixed64 = u64::cast_signed(base_fixed64_bits);
 
     let number_of_records = bitpack.read_u32().unwrap();
 
@@ -324,7 +322,7 @@ pub(super) fn min_without_bitmask(bytes: &[u8]) -> decoder::Result<f64> {
         .read_u32()
         .map_err(|_| DecoderError::UnexpectedEndOfChunk)?;
     let base_fixed64_bits = (lower as u64) | ((higher as u64) << 32);
-    let base_fixed64 = unsafe { mem::transmute::<u64, i64>(base_fixed64_bits) };
+    let base_fixed64 = u64::cast_signed(base_fixed64_bits);
 
     // number of records and fixed representation bits length are not used in min
     bitpack

@@ -455,7 +455,7 @@ mod tests {
         match file_header {
             Ok(_) => {}
             Err(e) => {
-                panic!("Failed to parse written FileHeader: {:?}", e);
+                panic!("Failed to parse written FileHeader: {e:?}");
             }
         }
         let file_header = file_header.unwrap();
@@ -496,8 +496,7 @@ mod tests {
         let number_of_chunks = file_footer0.number_of_chunks;
         assert!(
             number_of_chunks <= 10,
-            "number_of_chunks: {} must be less than or equal to 10",
-            number_of_chunks
+            "number_of_chunks: {number_of_chunks} must be less than or equal to 10"
         );
         let number_of_records = file_footer0.number_of_records;
         assert_eq!(number_of_records, 1000);

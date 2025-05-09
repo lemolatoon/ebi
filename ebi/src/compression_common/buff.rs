@@ -27,7 +27,7 @@ fn into_fixed_representation(value: f64, decimal_length: i32) -> i64 {
         fixed = !(fixed - 1);
     }
 
-    unsafe { std::mem::transmute::<u64, i64>(fixed) }
+    u64::cast_signed(fixed)
 }
 
 pub(crate) mod precision_bound {
