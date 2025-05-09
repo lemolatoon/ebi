@@ -20,7 +20,7 @@ mod helper {
         expected_index: usize,
         test_name: impl Display,
     ) {
-        println!("=========== {test_name} ===========");
+        println!("=========== {} ===========", test_name);
         // Dimention check
         assert!(
             data.len() % target.len() == 0,
@@ -48,12 +48,13 @@ mod helper {
 
             decoder
                 .knn1(target)
-                .unwrap_or_else(|_| panic!("{test_name}: knn1 failed"))
+                .unwrap_or_else(|_| panic!("{}: knn1 failed", test_name))
         };
 
         assert_eq!(
             nearest.index, expected_index,
-            "{test_name}: Expected index mismatch, expected: {expected_index}, got: {nearest:?}"
+            "{}: Expected index mismatch, expected: {}, got: {:?}",
+            test_name, expected_index, nearest
         );
     }
 
@@ -68,7 +69,7 @@ mod helper {
         expected: &[&[&[f64]]],
         test_name: impl Display,
     ) {
-        println!("=========== {test_name} ===========");
+        println!("=========== {} ===========", test_name);
         let data_batch = data.len();
         let data_h = data[0].len();
         let data_w = data[0][0].len();
@@ -98,23 +99,27 @@ mod helper {
         // Check multipliable
         assert_eq!(
             data_w, target_h,
-            "Data height and target width dimention mismatch: {data_w} != {target_h}"
+            "Data height and target width dimention mismatch: {} != {}",
+            data_w, target_h
         );
 
         // Check expected dimention
         assert_eq!(
             data_batch, expected_batch,
-            "Data batch dimention mismatch: {data_batch} != {expected_batch}"
+            "Data batch dimention mismatch: {} != {}",
+            data_batch, expected_batch
         );
 
         assert_eq!(
             data_h, expected_h,
-            "Data height dimention mismatch: {data_h} != {expected_h}"
+            "Data height dimention mismatch: {} != {}",
+            data_h, expected_h
         );
 
         assert_eq!(
             target_w, expected_w,
-            "Data width dimention mismatch: {target_w} != {expected_w}"
+            "Data width dimention mismatch: {} != {}",
+            target_w, expected_w
         );
 
         // chunk_option check
@@ -150,12 +155,13 @@ mod helper {
 
             decoder
                 .matmul(&target, (target_h, target_w), (data_h, data_w))
-                .unwrap_or_else(|_| panic!("{test_name}: matmul failed"))
+                .unwrap_or_else(|_| panic!("{}: matmul failed", test_name))
         };
 
         assert_eq!(
             result, expected,
-            "{test_name}: Expected result mismatch, expected: {expected:?}, got: {result:?}"
+            "{}: Expected result mismatch, expected: {:?}, got: {:?}",
+            test_name, expected, result
         );
     }
 

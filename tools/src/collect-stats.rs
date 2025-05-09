@@ -99,14 +99,14 @@ fn main() -> Result<()> {
                     }
                 }
             }
-            Err(e) => eprintln!("Failed to read path: {e:?}"),
+            Err(e) => eprintln!("Failed to read path: {:?}", e),
         }
     }
 
     let out_file = "stats.json";
     let json_str = serde_json::to_string_pretty(&results)?;
     std::fs::write(out_file, json_str)?;
-    eprintln!("Wrote final JSON to {out_file}");
+    eprintln!("Wrote final JSON to {}", out_file);
 
     Ok(())
 }
@@ -325,6 +325,6 @@ fn get_non_unique_value_ratio(values: &[f64]) -> f64 {
         eprintln!("Distinct value: {}", f64::from_bits(*v));
     }
     let total_count = values.len();
-    println!("Distinct count: {distinct_count}\t/\t{total_count}");
+    println!("Distinct count: {}\t/\t{}", distinct_count, total_count);
     (total_count as f64 - distinct_count as f64) / total_count as f64
 }

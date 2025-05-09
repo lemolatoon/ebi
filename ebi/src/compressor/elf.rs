@@ -1,3 +1,5 @@
+use std::mem;
+
 use crate::{
     compression_common::elf,
     format::deserialize,
@@ -129,7 +131,7 @@ impl<T: XorEncoder> ElfEncoderWrapper<T> {
                 } else {
                     // case 11, 2 + 4 = 6
                     self.size += 6;
-                    let bits: u32 = i32::cast_unsigned(beta_star | 0x30);
+                    let bits: u32 = unsafe { mem::transmute(beta_star | 0x30) };
                     w.write_bits(bits as u64, 6);
                     self.last_beta_star = beta_star;
                 }

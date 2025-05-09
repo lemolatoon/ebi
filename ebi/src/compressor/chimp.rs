@@ -158,7 +158,7 @@ impl ChimpEncoder {
     /// # Returns
     ///
     /// * `u32` - The size of the encoded data in bits after adding the value.
-    /// # Example
+    ///     /// # Example
     ///
     /// ```
     /// use ebi::compressor::chimp::ChimpEncoder;

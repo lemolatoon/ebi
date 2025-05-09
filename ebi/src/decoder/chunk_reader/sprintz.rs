@@ -104,7 +104,7 @@ impl QueryExecutor for DeltaSprintzReader {
             .bit_reader
             .read_bits(64)
             .ok_or(DecoderError::UnexpectedEndOfChunk)?;
-        let initial_value = u64::cast_signed(initial_value_bits);
+        let initial_value = unsafe { std::mem::transmute::<u64, i64>(initial_value_bits) };
         let scale = self
             .bit_reader
             .read_bits(32)
@@ -276,7 +276,7 @@ fn sum(
     let initial_value_bits = bit_reader
         .read_bits(64)
         .ok_or(DecoderError::UnexpectedEndOfChunk)?;
-    let initial_value = u64::cast_signed(initial_value_bits);
+    let initial_value = unsafe { std::mem::transmute::<u64, i64>(initial_value_bits) };
     let scale = bit_reader
         .read_bits(32)
         .ok_or(DecoderError::UnexpectedEndOfChunk)? as u32;
@@ -324,7 +324,7 @@ fn sum_without_bitmask(
     let initial_value_bits = bit_reader
         .read_bits(64)
         .ok_or(DecoderError::UnexpectedEndOfChunk)?;
-    let initial_value = u64::cast_signed(initial_value_bits);
+    let initial_value = unsafe { std::mem::transmute::<u64, i64>(initial_value_bits) };
     let scale = bit_reader
         .read_bits(32)
         .ok_or(DecoderError::UnexpectedEndOfChunk)? as u32;
@@ -362,7 +362,7 @@ fn min_max<const IS_MIN: bool>(
     let initial_value_bits = bit_reader
         .read_bits(64)
         .ok_or(DecoderError::UnexpectedEndOfChunk)?;
-    let initial_value = u64::cast_signed(initial_value_bits);
+    let initial_value = unsafe { std::mem::transmute::<u64, i64>(initial_value_bits) };
     let scale = bit_reader
         .read_bits(32)
         .ok_or(DecoderError::UnexpectedEndOfChunk)? as u32;
@@ -415,7 +415,7 @@ fn min_max_without_bitmask<const IS_MIN: bool>(
     let initial_value_bits = bit_reader
         .read_bits(64)
         .ok_or(DecoderError::UnexpectedEndOfChunk)?;
-    let initial_value = u64::cast_signed(initial_value_bits);
+    let initial_value = unsafe { std::mem::transmute::<u64, i64>(initial_value_bits) };
     let scale = bit_reader
         .read_bits(32)
         .ok_or(DecoderError::UnexpectedEndOfChunk)? as u32;
@@ -459,7 +459,7 @@ impl<R: BitRead2> DeltaSprintzDecompressIteratorImpl<R> {
         let initial_value_bits = bit_reader
             .read_bits(64)
             .ok_or(DecoderError::UnexpectedEndOfChunk)?;
-        let initial_value = u64::cast_signed(initial_value_bits);
+        let initial_value = unsafe { std::mem::transmute::<u64, i64>(initial_value_bits) };
         let scale = bit_reader
             .read_bits(32)
             .ok_or(DecoderError::UnexpectedEndOfChunk)? as u32;

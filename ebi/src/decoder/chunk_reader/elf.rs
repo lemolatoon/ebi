@@ -7,6 +7,7 @@ use crate::{
     decoder::{self, error::DecoderError},
     io::bit_read::BitRead2,
 };
+use std::mem;
 
 type ElfOnTReader<T> = GeneralXorReader<ElfDecoderWrapper<T>>;
 type ElfOnTDecompressIterator<'a, T> = GeneralXorDecompressIterator<'a, ElfDecoderWrapper<T>>;
@@ -51,8 +52,11 @@ impl<T: XorDecoder> ElfDecoderWrapper<T> {
         {
             v = self.xor_decompress(r)?; // case 10
         } else {
-            self.last_beta_star =
-                u32::cast_signed(r.read_bits(4).ok_or(DecoderError::UnexpectedEndOfChunk)? as u32); // case 11
+            self.last_beta_star = unsafe {
+                mem::transmute::<u32, i32>(
+                    r.read_bits(4).ok_or(DecoderError::UnexpectedEndOfChunk)? as u32,
+                )
+            }; // case 11
             v = self.recover_v_by_beta_star(r)?;
         }
         Ok(v)

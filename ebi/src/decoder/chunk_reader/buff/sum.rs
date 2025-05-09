@@ -1,3 +1,5 @@
+use std::mem;
+
 use crate::{
     compression_common::buff::{bit_packing::BitPack, flip},
     decoder::{self, error::DecoderError},
@@ -65,7 +67,7 @@ pub(super) fn sum_with_bitmask(
     let lower = bitpack.read_u32().unwrap();
     let higher = bitpack.read_u32().unwrap();
     let base_fixed64_bits = (lower as u64) | ((higher as u64) << 32);
-    let base_fixed64 = u64::cast_signed(base_fixed64_bits);
+    let base_fixed64 = unsafe { mem::transmute::<u64, i64>(base_fixed64_bits) };
 
     let number_of_records = bitpack.read_u32().unwrap();
 

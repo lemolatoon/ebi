@@ -37,7 +37,7 @@ fn main() {
                     );
                 }
             }
-            Err(e) => eprintln!("Error reading path: {e:?}"),
+            Err(e) => eprintln!("Error reading path: {:?}", e),
         }
     }
 }

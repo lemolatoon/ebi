@@ -1,3 +1,5 @@
+use std::mem;
+
 use derive_builder::Builder;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
@@ -127,7 +129,7 @@ impl<W: BitWrite> Compressor for DeltaSprintzCompressorImpl<W> {
 }
 
 mod delta_impl {
-    use std::iter;
+    use std::{iter, mem};
 
     use crate::time::{SegmentKind, SegmentedExecutionTimes};
 
@@ -156,7 +158,7 @@ mod delta_impl {
         delta_encode_timer.stop();
 
         // write header
-        let initial_number_bits = i64::cast_unsigned(initial_number);
+        let initial_number_bits = unsafe { mem::transmute::<i64, u64>(initial_number) };
         w.write_bits(initial_number_bits, 64);
         w.write_bits(scale, 32);
         w.write_byte(number_of_bits_needed);
@@ -230,5 +232,5 @@ mod delta_impl {
 #[inline]
 pub const fn zigzag(origin: i64) -> u64 {
     let zzu = (origin << 1) ^ (origin >> 63);
-    i64::cast_unsigned(zzu)
+    unsafe { mem::transmute::<i64, u64>(zzu) }
 }

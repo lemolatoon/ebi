@@ -336,7 +336,7 @@ impl Commands {
     }
 
     pub fn is_matrix_cuda(&self) -> bool {
-        matches!(self, Commands::MatrixCuda { .. })
+        return matches!(self, Commands::MatrixCuda { .. });
     }
 }
 
@@ -372,7 +372,7 @@ fn main() -> anyhow::Result<()> {
         // Determine the next available directory name
         let mut dir_number = 0;
         let output_dir = loop {
-            let output_dirname = save_dir.join(format!("{dir_number:03}"));
+            let output_dirname = save_dir.join(format!("{:03}", dir_number));
             if !output_dirname.exists() {
                 break output_dirname;
             }
@@ -386,7 +386,8 @@ fn main() -> anyhow::Result<()> {
         for precision in precisions {
             assert!(
                 10u32.checked_pow(precision).is_some(),
-                "10^{precision} is too large for u32"
+                "10^{} is too large for u32",
+                precision
             );
         }
         let mut matrix_sizes = vec![128, 512, 1024];
@@ -397,7 +398,10 @@ fn main() -> anyhow::Result<()> {
             match DEFAULT_CHUNK_OPTION {
                 ChunkOption::RecordCount(c) => assert!(
                     c % (matrix_size * matrix_size) == 0,
-                    "{c} % ({matrix_size} * {matrix_size}) != 0"
+                    "{} % ({} * {}) != 0",
+                    c,
+                    matrix_size,
+                    matrix_size
                 ),
                 ChunkOption::ByteSizeBestEffort(_) | ChunkOption::Full => unreachable!(),
             }
@@ -407,9 +411,9 @@ fn main() -> anyhow::Result<()> {
                 tqdm(matrix_sizes.iter()).desc(Some(format!("Matrix Size(p:{precision})")))
             {
                 let filename = if is_matrix_cuda {
-                    format!("matrix_cuda_{matrix_size}_{precision}.json")
+                    format!("matrix_cuda_{}_{}.json", matrix_size, precision)
                 } else {
-                    format!("matrix_{matrix_size}_{precision}.json")
+                    format!("matrix_{}_{}.json", matrix_size, precision)
                 };
                 let do_with_only_compression_methods_with_controlled_precision_support =
                     precision != 8;
@@ -493,7 +497,8 @@ fn main() -> anyhow::Result<()> {
         for precision in precisions {
             assert!(
                 10u32.checked_pow(precision).is_some(),
-                "10^{precision} is too large for u32"
+                "10^{} is too large for u32",
+                precision
             );
         }
 
@@ -501,7 +506,7 @@ fn main() -> anyhow::Result<()> {
         // Determine the next available directory name
         let mut dir_number = 0;
         let unique_output_dir = loop {
-            let output_dirname = save_dir.join(format!("{dir_number:03}"));
+            let output_dirname = save_dir.join(format!("{:03}", dir_number));
             if !output_dirname.exists() {
                 break output_dirname;
             }
@@ -535,7 +540,7 @@ fn main() -> anyhow::Result<()> {
         // Determine the next available directory name
         let mut dir_number = 0;
         let unique_output_dir = loop {
-            let output_dirname = save_dir.join(format!("{dir_number:03}"));
+            let output_dirname = save_dir.join(format!("{:03}", dir_number));
             if !output_dirname.exists() {
                 break output_dirname;
             }
@@ -668,7 +673,7 @@ fn save_output_json(output: Output, save_dir: impl AsRef<Path>) -> anyhow::Resul
     // Determine the next available filename
     let mut file_number = 0;
     let output_file = loop {
-        let output_filename = save_dir.as_ref().join(format!("{file_number:03}.json"));
+        let output_filename = save_dir.as_ref().join(format!("{:03}.json", file_number));
         if !output_filename.exists() {
             break output_filename;
         }
@@ -692,8 +697,8 @@ fn save_ucr2018_json(
     // Write the output to JSON
     for (dataset, result) in output.results.into_iter() {
         let filename = match precision {
-            Some(precision) => format!("{dataset}_{precision}.json"),
-            None => format!("{dataset}.json"),
+            Some(precision) => format!("{}_{}.json", dataset, precision),
+            None => format!("{}.json", dataset),
         };
         let output_file = save_dir.as_ref().join(filename);
         write_output_json(result, output_file)?;
@@ -731,7 +736,7 @@ fn write_output_json(
         Ok(file) => file,
         Err(e) => {
             eprintln!("{}\n", output_filename.as_ref().display());
-            eprintln!("{output_json}");
+            eprintln!("{}", output_json);
             return Err(e);
         }
     };
@@ -742,7 +747,7 @@ fn write_output_json(
         .context("Failed to write output");
     if let Err(e) = write_result {
         eprintln!("{}\n", output_filename.as_ref().display());
-        eprintln!("{output_json}");
+        eprintln!("{}", output_json);
         return Err(e);
     }
 
@@ -790,11 +795,17 @@ fn process_experiment_for_compressor(
         // Check if the quantization will be done correctly
         let quantized = max_value * scale as f64;
         if !quantized.is_finite() || quantized.abs() > i64::MAX as f64 {
-            eprintln!("Quantization will not be done correctly. Skip: {compressor_config:?}");
+            eprintln!(
+                "Quantization will not be done correctly. Skip: {:?}",
+                compressor_config
+            );
             return Ok(());
         }
         if compression_scheme == CompressionScheme::BUFF && precision > 12 {
-            eprintln!("Precision({precision}) is too high for BUFF. Skip: {compressor_config:?}");
+            eprintln!(
+                "Precision({}) is too high for BUFF. Skip: {:?}",
+                precision, compressor_config
+            );
             return Ok(());
         }
     }
@@ -929,7 +940,7 @@ fn process_experiment_for_dataset(
         };
         let compression_config: CompressionConfig = compressor_config.read()?;
         let compression_scheme = compression_config.compressor_config.compression_scheme();
-        let compression_scheme_key = format!("{compression_scheme:?}");
+        let compression_scheme_key = format!("{:?}", compression_scheme);
 
         // Clear all the result for this compression
         let all_output_inner = outputs
@@ -1017,7 +1028,10 @@ fn all_patch_command(args: AllPatchArgs, mut patched: AllOutput) -> anyhow::Resu
             if let Err(e) =
                 create_config_command(binary_file.as_path(), Some(filter_config_dir.clone()))
             {
-                eprintln!("Failed to create filter config. Add to skip list...: {e:?}");
+                eprintln!(
+                    "Failed to create filter config. Add to skip list...: {:?}",
+                    e
+                );
                 skip_files.insert(binary_file_stem.to_string_lossy().to_string());
                 continue;
             }
@@ -1030,7 +1044,10 @@ fn all_patch_command(args: AllPatchArgs, mut patched: AllOutput) -> anyhow::Resu
                 Some(compressor_config_dir),
                 exact_precision,
             ) {
-                eprintln!("Failed to create compressor config. Add to skip list...: {e:?}");
+                eprintln!(
+                    "Failed to create compressor config. Add to skip list...: {:?}",
+                    e
+                );
                 skip_files.insert(binary_file_stem.to_string_lossy().to_string());
             }
         }
@@ -1257,7 +1274,7 @@ fn create_default_compressor_config(
             output_filename.as_path().display()
         ))?;
         serde_json::to_writer_pretty(&mut f, &config)
-            .context(format!("Failed to write {name} compressor config"))?;
+            .context(format!("Failed to write {} compressor config", name))?;
     }
 
     Ok(())
@@ -1316,7 +1333,7 @@ fn create_config_command(
     );
     floats.sort_by(|a, b| {
         a.partial_cmp(b)
-            .unwrap_or_else(|| panic!("Failed to compare {a} and {b}"))
+            .unwrap_or_else(|| panic!("Failed to compare {} and {}", a, b))
     });
     let ten_percentile = floats[(number_of_records * 10 / 100) as usize];
     let half_percentile = floats[(number_of_records / 2) as usize];
@@ -1370,7 +1387,7 @@ fn create_config_command(
                 bitmask: None,
             },
         )
-        .context(format!("Failed to write {name} predicate config"))?;
+        .context(format!("Failed to write {} predicate config", name))?;
 
         // validness check
         drop(f);
@@ -1595,7 +1612,7 @@ fn filter_command(
         )
     };
 
-    let result_string = format!("{bitmask:?}");
+    let result_string = format!("{:?}", bitmask);
 
     let output = OutputWrapper {
         in_memory,
@@ -1687,7 +1704,7 @@ fn filter_materialize_command(
             compressor_config: *decoder.footer().compressor_config(),
         };
         let metadata = decoder_output.into_writer().into_inner()?.metadata()?;
-        let result_string = format!("{metadata:?}");
+        let result_string = format!("{:?}", metadata);
 
         (
             compression_config,
@@ -1785,7 +1802,7 @@ fn materialize_command(
         };
 
         let metadata = decoder_output.into_writer().into_inner()?.metadata()?;
-        let result_string = format!("{metadata:?}");
+        let result_string = format!("{:?}", metadata);
 
         (
             compression_config,
@@ -2068,7 +2085,7 @@ fn ucr2018_command(
             .unwrap()
             .to_string_lossy()
             .to_string();
-        let train_file = dataset_entry.join(format!("{dataset_name}_TRAIN.tsv"));
+        let train_file = dataset_entry.join(format!("{}_TRAIN.tsv", dataset_name));
         let train_file_reader = BufReader::new(
             File::open(&train_file)
                 .context(format!("Failed to open file.: {}", train_file.display()))?,
@@ -2122,7 +2139,7 @@ fn ucr2018_command(
             .unwrap()
             .to_string_lossy()
             .to_string();
-        let test_file = dataset_entry.join(format!("{dataset_name}_TEST.tsv"));
+        let test_file = dataset_entry.join(format!("{}_TEST.tsv", dataset_name));
         let test_data = slurp_file(&test_file, dataset_scales[&dataset_name] as i32);
         let test_vectors = test_data
             .iter()
@@ -2156,8 +2173,8 @@ fn ucr2018_command(
                 config.set_scale(dataset_scales[&dataset_name]);
                 config
             };
-            let train_file = dataset_entry.join(format!("{dataset_name}_TRAIN.tsv"));
-            let test_file = dataset_entry.join(format!("{dataset_name}_TEST.tsv"));
+            let train_file = dataset_entry.join(format!("{}_TRAIN.tsv", dataset_name));
+            let test_file = dataset_entry.join(format!("{}_TEST.tsv", dataset_name));
 
             let train_data = slurp_file(&train_file, dataset_scales[&dataset_name] as i32);
             let test_data = slurp_file(&test_file, dataset_scales[&dataset_name] as i32);
@@ -2181,7 +2198,7 @@ fn ucr2018_command(
 
                 encoder
                     .encode()
-                    .context(format!("Failed to encode {dataset_name}"))?;
+                    .context(format!("Failed to encode {}", dataset_name))?;
 
                 encoder.into_output().into_inner().into_inner()
             };
@@ -2196,7 +2213,7 @@ fn ucr2018_command(
                     let decoder_input =
                         DecoderInput::from_reader(Cursor::new(&train_vectors_encoded[..]));
                     let mut decoder = Decoder::new(decoder_input)
-                        .context(format!("Failed to create decoder for {dataset_name}"))?;
+                        .context(format!("Failed to create decoder for {}", dataset_name))?;
                     statistics = Some(get_compress_statistics(&decoder)?);
                     if precision >= 0
                         && do_with_only_compression_methods_with_controlled_precision_support
@@ -2250,7 +2267,7 @@ fn ucr2018_command(
                     let decoder_input =
                         DecoderInput::from_reader(Cursor::new(&train_vectors_encoded[..]));
                     let mut decoder = Decoder::new(decoder_input)
-                        .context(format!("Failed to create decoder for {dataset_name}"))?;
+                        .context(format!("Failed to create decoder for {}", dataset_name))?;
 
                     if precision >= 0
                         && do_with_only_compression_methods_with_controlled_precision_support
@@ -2362,7 +2379,10 @@ fn matrix_command(
     match DEFAULT_CHUNK_OPTION {
         ChunkOption::RecordCount(c) => assert!(
             c % (matrix_size * matrix_size) == 0,
-            "{c} % ({matrix_size} * {matrix_size}) != 0"
+            "{} % ({} * {}) != 0",
+            c,
+            matrix_size,
+            matrix_size
         ),
         ChunkOption::ByteSizeBestEffort(_) | ChunkOption::Full => unreachable!(),
     }
