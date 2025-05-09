@@ -81,7 +81,7 @@ def load_json_files_from_directory(
 
 
 precisions = [1, 3, 5, 8]
-matrix_sizes = [128, 512, 1024]
+matrix_sizes = [128, 512, 1024, 2048, 4096]
 
 compression_methods_with_precision = [
     *compression_methods,
@@ -96,16 +96,24 @@ def main():
 
     path = sys.argv[1]
 
-    out_dir = "results/matmul/"
+    cuda_enabled = len(sys.argv) == 3 and sys.argv[2] == "-cuda"
+    cuda_prefix = "_cuda" if cuda_enabled else ""
+    if cuda_enabled:
+        print("Plotting CUDA results...")
+
+    out_dir = f"results/matmul{cuda_prefix}/"
     os.makedirs(out_dir, exist_ok=True)
 
     results = load_json_files_from_directory(path)
 
+    if not cuda_enabled:
+        matrix_sizes = [128, 512, 1024]
+
     results_reformed: Dict[int, Dict[str, MatrixResult]] = {
         size: {
-            **results[f"matrix_{size}_8"],
+            **results[f"matrix{cuda_prefix}_{size}_8"],
             **{
-                f"BUFF_{precision}": results[f"matrix_{size}_{precision}"]["BUFF"]
+                f"BUFF_{precision}": results[f"matrix{cuda_prefix}_{size}_{precision}"]["BUFF"]
                 for precision in precisions
             },
         }
@@ -113,40 +121,16 @@ def main():
     }
 
     segmented_execution_times_prec8: Dict[int, Dict[str, ExecutionTimesWithOthers]] = {
-        128: {
+        size: {
             method_name: {
-                **results["matrix_128_8"][method_name][
-                    "matmul_segmented_execution_times"
-                ],
-                "others": results["matrix_128_8"][method_name][
-                    "matmul_elapsed_time_nano_secs"
-                ],
+                **results[f"matrix{cuda_prefix}_{size}_8"][method_name]["matmul_segmented_execution_times"],
+                "others": results[f"matrix{cuda_prefix}_{size}_8"][method_name]["matmul_elapsed_time_nano_secs"],
             }
             for method_name in compression_methods
-        },
-        512: {
-            method_name: {
-                **results["matrix_512_8"][method_name][
-                    "matmul_segmented_execution_times"
-                ],
-                "others": results["matrix_512_8"][method_name][
-                    "matmul_elapsed_time_nano_secs"
-                ],
-            }
-            for method_name in compression_methods
-        },
-        1024: {
-            method_name: {
-                **results["matrix_1024_8"][method_name][
-                    "matmul_segmented_execution_times"
-                ],
-                "others": results["matrix_1024_8"][method_name][
-                    "matmul_elapsed_time_nano_secs"
-                ],
-            }
-            for method_name in compression_methods
-        },
+        }
+        for size in matrix_sizes
     }
+
     for matrix_size in matrix_sizes:
         result = results_reformed[matrix_size]
         execution_times = {}
@@ -161,7 +145,7 @@ def main():
                 "uncompressed_size"
             ]
             print(
-                f"{matrix_size}: {result[method_name]["matmul_elapsed_time_nano_secs"]}"
+                f"{matrix_size}: {result[method_name]['matmul_elapsed_time_nano_secs']}"
             )
             execution_times[method_name] = result[method_name][
                 "matmul_elapsed_time_nano_secs"

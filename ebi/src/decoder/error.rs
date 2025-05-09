@@ -15,6 +15,9 @@ pub enum DecoderError {
     UnexpectedEndOfChunk,
     #[error("Preconditions not met")]
     PreconditionsNotMet,
+    #[cfg(feature = "cuda")]
+    #[error("CUDA error: {0}")]
+    CudaError(#[from] cuda_binding::CudaError),
 }
 cfg_if!(
     if #[cfg(debug_assertions)] {

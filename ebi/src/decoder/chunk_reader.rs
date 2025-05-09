@@ -251,6 +251,27 @@ impl<'handle, T: FileMetadataLike, R: Read> GeneralChunkReader<'handle, T, R> {
         self.reader
             .dot_product(offset_in_chunk, target, &mut self.timer)
     }
+
+    #[cfg(feature = "cuda")]
+    pub fn gemm(
+        &mut self,
+        ctx: &mut cuda_binding::Context,
+        a_range: std::ops::Range<usize>,
+        b: &[f64],
+        c: &mut [f64],
+        swap_a_b: bool,
+        cfg: cuda_binding::GemmConfig<f64>,
+    ) -> Result<()> {
+        let decompressed = self.reader.decompress(&mut self.timer)?;
+        let a = &decompressed[a_range];
+        if swap_a_b {
+            ctx.gemm(b, a, c, cfg)?;
+        } else {
+            ctx.gemm(a, b, c, cfg)?;
+        }
+
+        Ok(())
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]

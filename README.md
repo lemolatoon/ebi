@@ -23,6 +23,12 @@ $ cargo run --release -- -i DATA_DICT/UCRArchive_2018/ ucr2018 -o DATA_DICT
 ```
 Results will be saved in `DATA_DICT/result`
 
+### Matrix Multiplication with CUDA
+```bash
+$ cd experimenter
+$ cargo run --release --features=cuda -- matrix-cuda -o OUTDIR
+```
+
 ### embeddings
 ```bash
 $ cd experimenter
@@ -36,6 +42,7 @@ $ cd tools
 $ python3 plot.py DATA_DICT/result/000.json
 $ python3 ucr2018_plot.py DATA_DICT/result/ucr2018/000
 $ python3 embedding_plot.py DATA_DICT/result/embedding/000/embedding_result.json
+$ python3 matrix_plot.py OUTDIR/result/matrix_cuda/000 -cuda
 ```
 
 ## License

@@ -16,3 +16,7 @@ tqdm = "0.7.0"
 either = "1.13.0"
 rand_chacha = { version = "0.3.1", features = ["std", "simd"] }
 rand = "0.8.5"
+cfg-if = "1.0.0"
+
+[features]
+cuda = ["ebi/cuda"]

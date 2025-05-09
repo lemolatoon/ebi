@@ -653,6 +653,74 @@ impl<R: Read + Seek> Decoder<R> {
         Ok(result_matrices.into_boxed_slice())
     }
 
+    #[cfg(feature = "cuda")]
+    pub fn matmul_cuda(
+        &mut self,
+        target_matrix: &[f64],
+        target_matrix_shape: (usize, usize),
+        data_matrix_shape: (usize, usize),
+    ) -> decoder::Result<Box<[f64]>> {
+        let mut timer = SegmentedExecutionTimes::new();
+        let mut context = cuda_binding::Context::new_at(0)?;
+        let number_of_records = self.footer().number_of_records() as usize;
+
+        let (data_rows, data_columns) = data_matrix_shape;
+        let (target_rows, target_columns) = target_matrix_shape;
+
+        let is_matrix_shape_invalid = data_columns != target_rows;
+        let data_matrix_size = data_rows * data_columns;
+        let is_data_matrix_shape_aligned_to_number_of_records_invalid =
+            number_of_records % data_matrix_size != 0;
+        let is_target_matrix_shape_invalid = target_rows * target_columns != target_matrix.len();
+        if is_matrix_shape_invalid
+            || is_data_matrix_shape_aligned_to_number_of_records_invalid
+            || is_target_matrix_shape_invalid
+        {
+            return Err(DecoderError::PreconditionsNotMet.into());
+        }
+
+        let result_matrix_size = data_rows * target_columns;
+        let batch_size = number_of_records / data_matrix_size;
+
+        let mut result_matrices = Vec::with_capacity(batch_size * result_matrix_size);
+        result_matrices.resize(batch_size * result_matrix_size, 0.0);
+
+        let mut offset_in_chunk = 0;
+        let mut chunk_index = 0;
+        let mut chunk_reader = self.chunk_reader(ChunkId::new(chunk_index))?;
+
+        // TODO: we should add timer for like `computation` if we examine segmented mesurements for matmul cuda
+
+        // A: m x k = data_rows x data_columns
+        // B: k x n = target_rows x target_columns
+        // C: m x n = data_rows x target_columns
+        let cfg =
+            cuda_binding::Context::config_matmul_row_major(data_rows, target_columns, data_columns);
+        for result_matrix_dest in result_matrices.chunks_exact_mut(result_matrix_size) {
+            if offset_in_chunk >= chunk_reader.number_of_records() as usize {
+                offset_in_chunk = 0;
+                chunk_index += 1;
+                timer += chunk_reader.segmented_execution_times();
+                chunk_reader = self.chunk_reader(ChunkId::new(chunk_index))?;
+            }
+            chunk_reader.gemm(
+                &mut context,
+                offset_in_chunk..offset_in_chunk + data_matrix_size,
+                target_matrix,
+                result_matrix_dest,
+                true,
+                cfg,
+            )?;
+            offset_in_chunk += data_matrix_size;
+        }
+        debug_assert!(chunk_reader.is_last_chunk());
+        timer += chunk_reader.segmented_execution_times();
+
+        self.timer = timer;
+
+        Ok(result_matrices.into_boxed_slice())
+    }
+
     pub fn chunk_reader(
         &mut self,
         chunk_id: ChunkId,

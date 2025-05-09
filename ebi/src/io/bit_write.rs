@@ -317,7 +317,7 @@ impl BitWrite for BufferedBitWriter {
     /// assert_eq!(writer.as_slice(), &[]);
     /// ```
     fn set_cursor_at_in_bit(&mut self, bit_cursor: usize) {
-        let byte_pos = (bit_cursor + 7) / 8;
+        let byte_pos = bit_cursor.div_ceil(8);
         self.bit_pos = bit_cursor % 8;
         if self.bit_pos == 0 {
             self.bit_pos = 8;
