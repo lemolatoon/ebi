@@ -1,12 +1,17 @@
+#[cfg(feature = "cuda")]
+pub mod matmul_cuda;
 use std::{
     collections::{BTreeMap, HashMap, HashSet},
-    io::BufRead,
+    io::{BufRead, Read, Seek},
 };
 
 use anyhow::Context as _;
 use ebi::{
-    api::decoder::ChunkId, compressor::CompressorConfig, decoder::query::Predicate,
-    encoder::ChunkOption, time::SerializableSegmentedExecutionTimes,
+    api::decoder::{ChunkId, Decoder},
+    compressor::CompressorConfig,
+    decoder::query::Predicate,
+    encoder::ChunkOption,
+    time::SerializableSegmentedExecutionTimes,
 };
 use quick_impl::QuickImpl;
 use serde::{Deserialize, Serialize};
@@ -550,3 +555,34 @@ pub fn get_appropriate_precision<R: BufRead>(
         float_strs
     ))
 }
+
+pub fn round_by_scale(value: f64, scale: usize) -> f64 {
+    let scale = scale as f64;
+    (value * scale).round() / scale
+}
+
+pub fn get_compress_statistics<R: Read + Seek>(
+    decoder: &Decoder<R>,
+) -> anyhow::Result<CompressStatistics> {
+    let compression_elapsed_time_nano_secs = decoder
+        .footer()
+        .compression_elapsed_time_nano_secs()
+        .try_into()
+        .unwrap_or(u64::MAX);
+    let uncompressed_size = decoder.footer().number_of_records() * size_of::<f64>() as u64;
+    let compressed_size = decoder.total_file_size();
+    let compressed_size_chunk_only = decoder.total_chunk_size();
+    let compression_ratio = compressed_size as f64 / uncompressed_size as f64;
+    let compression_ratio_chunk_only = compressed_size_chunk_only as f64 / uncompressed_size as f64;
+
+    Ok(CompressStatistics {
+        compression_elapsed_time_nano_secs,
+        uncompressed_size,
+        compressed_size,
+        compressed_size_chunk_only,
+        compression_ratio,
+        compression_ratio_chunk_only,
+    })
+}
+
+pub const DEFAULT_CHUNK_OPTION: ChunkOption = ChunkOption::RecordCount(128 * 1024 * 1024 / 8);

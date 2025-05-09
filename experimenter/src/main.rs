@@ -1,10 +1,14 @@
+use cfg_if::cfg_if;
 use either::Either;
+#[cfg(feature = "cuda")]
+use experimenter::matmul_cuda::matrix_cuda_command;
 use experimenter::{
-    get_appropriate_precision, AllOutput, AllOutputInner, CompressStatistics, CompressionConfig,
-    FilterConfig, FilterFamilyOutput, FilterMaterializeConfig, MaterializeConfig, MatrixResult,
-    MaxConfig, Output, OutputWrapper, SimpleCompressionPerformanceForOneDataset, SumConfig,
-    UCR2018Config, UCR2018DecompressionResult, UCR2018ForAllCompressionMethodsResult,
-    UCR2018Result, UCR2018ResultForOneDataset,
+    get_appropriate_precision, get_compress_statistics, round_by_scale, AllOutput, AllOutputInner,
+    CompressStatistics, CompressionConfig, FilterConfig, FilterFamilyOutput,
+    FilterMaterializeConfig, MaterializeConfig, MatrixResult, MaxConfig, Output, OutputWrapper,
+    SimpleCompressionPerformanceForOneDataset, SumConfig, UCR2018Config,
+    UCR2018DecompressionResult, UCR2018ForAllCompressionMethodsResult, UCR2018Result,
+    UCR2018ResultForOneDataset, DEFAULT_CHUNK_OPTION,
 };
 use glob::glob;
 use rand::Rng as _;
@@ -49,8 +53,6 @@ struct ConfigPath {
     #[arg(long, short)]
     in_memory: Option<bool>,
 }
-
-const DEFAULT_CHUNK_OPTION: ChunkOption = ChunkOption::RecordCount(128 * 1024 * 1024 / 8);
 
 impl ConfigPath {
     fn read<T: serde::de::DeserializeOwned>(&self) -> anyhow::Result<T> {
@@ -290,6 +292,10 @@ enum Commands {
         #[arg(long, short('o'))]
         output_dir: PathBuf,
     },
+    MatrixCuda {
+        #[arg(long, short('o'))]
+        output_dir: PathBuf,
+    },
     Embedding {
         #[arg(long, short('o'))]
         output_dir: PathBuf,
@@ -311,8 +317,26 @@ impl Commands {
             Commands::Sum { .. } => "sum",
             Commands::UCR2018 { .. } => "ucr2018",
             Commands::Matrix { .. } => "matrix",
+            Commands::MatrixCuda { .. } => "matrix_cuda",
             Commands::Embedding { .. } => "embedding",
         }
+    }
+
+    pub fn is_matrix_type(&self) -> Option<&PathBuf> {
+        if let Commands::Matrix { output_dir } = self {
+            return Some(output_dir);
+        }
+
+        #[cfg(feature = "cuda")]
+        if let Commands::MatrixCuda { output_dir } = self {
+            return Some(output_dir);
+        }
+
+        None
+    }
+
+    pub fn is_matrix_cuda(&self) -> bool {
+        return matches!(self, Commands::MatrixCuda { .. });
     }
 }
 
@@ -333,10 +357,17 @@ fn main() -> anyhow::Result<()> {
         return Ok(());
     }
 
-    if let Commands::Matrix { output_dir } = &cli.command {
-        let save_dir = output_dir.join("result").join("matrix");
+    if let Some(output_dir) = cli.command.is_matrix_type() {
+        let is_matrix_cuda = cli.command.is_matrix_cuda();
+        let mut save_dir = output_dir.join("result");
+        if is_matrix_cuda {
+            save_dir = save_dir.join("matrix_cuda");
+        } else {
+            save_dir = save_dir.join("matrix");
+        }
         // Create the directory if it doesn't exist
         std::fs::create_dir_all(&save_dir)?;
+        println!("Save dir: {}", save_dir.display());
 
         // Determine the next available directory name
         let mut dir_number = 0;
@@ -359,8 +390,11 @@ fn main() -> anyhow::Result<()> {
                 precision
             );
         }
-        let matrix_sizes = [128, 512, 1024];
-        for matrix_size in matrix_sizes {
+        let mut matrix_sizes = vec![128, 512, 1024];
+        if is_matrix_cuda {
+            matrix_sizes.extend_from_slice(&[2048, 4096]);
+        }
+        for &matrix_size in matrix_sizes.iter() {
             match DEFAULT_CHUNK_OPTION {
                 ChunkOption::RecordCount(c) => assert!(
                     c % (matrix_size * matrix_size) == 0,
@@ -373,16 +407,35 @@ fn main() -> anyhow::Result<()> {
             }
         }
         for precision in tqdm(precisions).desc(Some("Precision")) {
-            for matrix_size in tqdm(matrix_sizes).desc(Some(format!("Matrix Size(p:{precision})")))
+            for &matrix_size in
+                tqdm(matrix_sizes.iter()).desc(Some(format!("Matrix Size(p:{precision})")))
             {
-                let filename = format!("matrix_{}_{}.json", matrix_size, precision);
+                let filename = if is_matrix_cuda {
+                    format!("matrix_cuda_{}_{}.json", matrix_size, precision)
+                } else {
+                    format!("matrix_{}_{}.json", matrix_size, precision)
+                };
                 let do_with_only_compression_methods_with_controlled_precision_support =
                     precision != 8;
-                let output = matrix_command(
-                    precision,
-                    matrix_size,
-                    do_with_only_compression_methods_with_controlled_precision_support,
-                )?;
+                let output = if is_matrix_cuda {
+                    cfg_if! {
+                        if #[cfg(feature = "cuda")] {
+                            matrix_cuda_command(
+                                precision,
+                                matrix_size,
+                                do_with_only_compression_methods_with_controlled_precision_support,
+                            )?
+                        } else {
+                            panic!("Matrix CUDA command is not supported in this build. Please enable the 'cuda' feature.")
+                        }
+                    }
+                } else {
+                    matrix_command(
+                        precision,
+                        matrix_size,
+                        do_with_only_compression_methods_with_controlled_precision_support,
+                    )?
+                };
 
                 serde_json::to_writer(
                     BufWriter::new(File::create(output_dir.join(filename))?),
@@ -592,6 +645,7 @@ fn process_file(filename: impl AsRef<Path>, cli: Cli) -> anyhow::Result<()> {
         Commands::All { .. } => unreachable!(),
         Commands::UCR2018 { .. } => unreachable!(),
         Commands::Matrix { .. } => unreachable!(),
+        Commands::MatrixCuda { .. } => unreachable!(),
         Commands::Embedding { .. } => unreachable!(),
     };
 
@@ -1139,30 +1193,6 @@ fn all_command(args: AllArgs) -> anyhow::Result<AllOutput> {
         .collect::<Vec<_>>();
     let patch_args = AllPatchArgs::from_all_args(args, patch_dataset, patch_compressor);
     all_patch_command(patch_args, all_outputs)
-}
-
-fn get_compress_statistics<R: Read + Seek>(
-    decoder: &Decoder<R>,
-) -> anyhow::Result<CompressStatistics> {
-    let compression_elapsed_time_nano_secs = decoder
-        .footer()
-        .compression_elapsed_time_nano_secs()
-        .try_into()
-        .unwrap_or(u64::MAX);
-    let uncompressed_size = decoder.footer().number_of_records() * size_of::<f64>() as u64;
-    let compressed_size = decoder.total_file_size();
-    let compressed_size_chunk_only = decoder.total_chunk_size();
-    let compression_ratio = compressed_size as f64 / uncompressed_size as f64;
-    let compression_ratio_chunk_only = compressed_size_chunk_only as f64 / uncompressed_size as f64;
-
-    Ok(CompressStatistics {
-        compression_elapsed_time_nano_secs,
-        uncompressed_size,
-        compressed_size,
-        compressed_size_chunk_only,
-        compression_ratio,
-        compression_ratio_chunk_only,
-    })
 }
 
 fn create_default_compressor_config(
@@ -1972,10 +2002,6 @@ fn sum_command(
     Ok(output)
 }
 
-fn round_by_scale(value: f64, scale: usize) -> f64 {
-    let scale = scale as f64;
-    (value * scale).round() / scale
-}
 pub struct LabelPixel {
     pub label: isize,
     pub pixels: Vec<f64>,

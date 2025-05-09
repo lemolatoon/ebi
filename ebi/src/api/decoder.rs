@@ -689,6 +689,8 @@ impl<R: Read + Seek> Decoder<R> {
         let mut chunk_index = 0;
         let mut chunk_reader = self.chunk_reader(ChunkId::new(chunk_index))?;
 
+        // TODO: we should add timer for like `computation` if we examine segmented mesurements for matmul cuda
+
         // A: m x k = data_rows x data_columns
         // B: k x n = target_rows x target_columns
         // C: m x n = data_rows x target_columns
