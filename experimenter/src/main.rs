@@ -336,7 +336,7 @@ impl Commands {
     }
 
     pub fn is_matrix_cuda(&self) -> bool {
-        return matches!(self, Commands::MatrixCuda { .. });
+        matches!(self, Commands::MatrixCuda { .. })
     }
 }
 
