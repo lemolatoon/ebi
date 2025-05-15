@@ -1,10 +1,22 @@
 import duckdb
 import os
+import sys
 
 conn = duckdb.connect()
 base_dir = "tpch_data"
 os.makedirs(base_dir, exist_ok=True)
 os.chdir(base_dir)
+
+if len(sys.argv) == 2 and sys.argv[1] == "-r":
+    import pyarrow.parquet as pq
+    for f in ["h01.parquet", "h06.parquet"]:
+        print(f"=== {f} ===")
+        table = pq.read_table(f)
+        print(table.schema)
+    sys.exit(0)
+elif len(sys.argv) >= 2:
+    print("use '-r' flag to read parquet. or no flag to generate parquet")
+    sys.exit(0)
 
 def exec_print(sql: str):
     print(conn.execute(sql).fetchall())
@@ -49,7 +61,7 @@ COPY (
 ) TO 'h01.parquet' (FORMAT PARQUET);
 """)
 print("please execute operations in EBI:")
-"""
+print("""
 -- h01_ebi.sql  (no GROUP-BY; global roll-up)
 SELECT
        SUM(l_quantity)                                        AS sum_qty,
@@ -59,6 +71,35 @@ SELECT
        AVG(l_quantity)                                        AS avg_qty,
        AVG(l_extendedprice)                                   AS avg_price,
        AVG(l_discount)                                        AS avg_disc,
-       SUM(1.0)                                               AS row_count   -- COUNT emulation
+       COUNT(*)                                               AS row_count
 FROM read_parquet('h01.parquet');
-"""
+""")
+print("h06")
+print("all executed on DuckDB:")
+exec_print("""
+SELECT sum(l_extendedprice * l_discount) AS revenue
+FROM lineitem
+WHERE l_shipdate >= '1994-01-01'
+  AND l_shipdate < '1995-01-01'
+  AND l_discount BETWEEN 0.05 AND 0.07
+  AND l_quantity < 24
+;
+""")
+print("preprocess in DuckDB:")
+print("all executed on DuckDB:")
+exec_print("""
+COPY (
+    SELECT l_extendedprice, l_discount, l_quantity
+    FROM lineitem
+    WHERE l_shipdate >= '1994-01-01'
+    AND l_shipdate < '1995-01-01'
+) TO 'h06.parquet' (FORMAT PARQUET);
+""")
+print("please execute operations in EBI:")
+print("""
+SELECT SUM(l_extendedprice * l_discount) AS revenue
+WHERE
+  AND l_discount BETWEEN 0.05 AND 0.07
+  AND l_quantity < 24
+FROM read_parquet('h06.parquet');
+""")

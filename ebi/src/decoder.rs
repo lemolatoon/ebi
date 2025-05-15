@@ -1,5 +1,6 @@
 pub mod chunk_reader;
 pub mod error;
+pub mod expr;
 pub mod query;
 pub mod timer;
 
