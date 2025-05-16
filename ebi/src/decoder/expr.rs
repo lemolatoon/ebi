@@ -61,9 +61,9 @@ impl Expr {
         None
     }
 
-    pub fn calculate<'handle, T: FileMetadataLike, R: Read>(
+    pub fn calculate<T: FileMetadataLike, R: Read>(
         &self,
-        readers: &mut Vec<GeneralChunkReader<'handle, T, R>>,
+        readers: &mut Vec<GeneralChunkReader<'_, T, R>>,
         bitmask: &RoaringBitmap,
     ) -> decoder::Result<Vec<f64>> {
         match self {
@@ -74,7 +74,7 @@ impl Expr {
                     let rhs = rhs.calculate(readers, bitmask)?;
                     Ok(lhs
                         .into_iter()
-                        .zip(rhs.into_iter())
+                        .zip(rhs)
                         .map(|(l, r)| op.doit(l, r))
                         .collect())
                 }
@@ -94,15 +94,16 @@ impl Expr {
                 let raw_buffer_ptr = raw_buffer.as_mut_ptr();
                 let raw_buffer_capacity = raw_buffer.capacity();
                 std::mem::forget(raw_buffer);
-                let raw_buffer_byte_slice = unsafe {
-                    std::slice::from_raw_parts_mut(raw_buffer_ptr as *mut u8, number_of_records * 8)
+                let len = { // Lifetime of `&mut [u8]`
+                    let raw_buffer_byte_slice = unsafe {
+                        std::slice::from_raw_parts_mut(raw_buffer_ptr as *mut u8, number_of_records * 8)
+                    };
+
+                    let mut writer = Cursor::new(raw_buffer_byte_slice);
+                    readers[*i].materialize(&mut writer, Some(bitmask))?;
+
+                   writer.position() as usize
                 };
-
-                let mut writer = Cursor::new(raw_buffer_byte_slice);
-                readers[*i].materialize(&mut writer, Some(bitmask))?;
-
-                let len = writer.position() as usize;
-                drop(writer);
 
                 let buffer_written =
                     unsafe { Vec::from_raw_parts(raw_buffer_ptr, len / 8, raw_buffer_capacity) };
@@ -130,7 +131,7 @@ mod tests {
     fn encode(values: &[f64]) -> Cursor<Vec<u8>> {
         let compressor_config: CompressorConfig = CompressorConfig::uncompressed().build().into();
         let encoded = {
-            let encoder_input = EncoderInput::from_f64_slice(&values);
+            let encoder_input = EncoderInput::from_f64_slice(values);
             let encoder_output = EncoderOutput::from_vec(Vec::new());
             let mut encoder = Encoder::new(
                 encoder_input,
@@ -170,6 +171,7 @@ mod tests {
     // Test Expr::Literal: should immediately return an error.
     #[test]
     fn test_literal_expr() {
+        #[allow(clippy::approx_constant)]
         let expr = Expr::Literal(3.14);
         let mut readers: Vec<GeneralChunkReader<Metadata, Cursor<Vec<u8>>>> = vec![];
         let bitmask = RoaringBitmap::full();
