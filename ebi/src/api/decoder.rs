@@ -1,3 +1,5 @@
+pub use decoder::expr::Expr;
+use quick_impl::QuickImpl;
 use std::{
     fs::File,
     io::{self, BufReader, BufWriter, Cursor, Read, Seek, Write},
@@ -747,5 +749,124 @@ impl<R: Read + Seek> Decoder<R> {
         }
 
         Ok(chunk_reader)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AggregationKind {
+    None,
+    Max,
+    Min,
+    Sum,
+    Count,
+}
+
+#[derive(Debug, Clone, PartialEq, QuickImpl)]
+pub enum AggregationResult {
+    #[quick_impl(impl From)]
+    Array(Vec<f64>),
+    #[quick_impl(impl From)]
+    Scalar(f64),
+    #[quick_impl(impl From)]
+    Integer(usize),
+}
+
+impl AggregationResult {
+    pub fn zero(kind: AggregationKind) -> Self {
+        match kind {
+            AggregationKind::None => Self::Array(vec![]),
+            AggregationKind::Max => Self::Scalar(f64::NEG_INFINITY),
+            AggregationKind::Min => Self::Scalar(f64::INFINITY),
+            AggregationKind::Sum => Self::Scalar(0.0),
+            AggregationKind::Count => Self::Integer(0),
+        }
+    }
+
+    pub fn concat(&mut self, other: Self, kind: AggregationKind) -> decoder::Result<()> {
+        match (self, other) {
+            (Self::Array(a), Self::Array(b)) => {
+                a.extend_from_slice(&b);
+            }
+            (Self::Scalar(a), Self::Scalar(b)) => {
+                match kind {
+                    AggregationKind::Max => *a = a.max(b),
+                    AggregationKind::Min => *a = a.min(b),
+                    AggregationKind::Sum => *a += b,
+                    AggregationKind::Count => *a += b,
+                    _ => return Err(DecoderError::PreconditionsNotMet.into()),
+                };
+            }
+            (Self::Integer(a), Self::Integer(b)) => {
+                match kind {
+                    AggregationKind::Count => *a += b,
+                    _ => return Err(DecoderError::PreconditionsNotMet.into()),
+                };
+            }
+            _ => return Err(DecoderError::PreconditionsNotMet.into()),
+        }
+        Ok(())
+    }
+}
+
+impl AggregationKind {
+    pub fn dispatch<R: Read + Seek>(
+        &self,
+        decoders: &mut Decoder<R>,
+        bitmask: &RoaringBitmap,
+    ) -> decoder::Result<AggregationResult> {
+        Ok(match self {
+            AggregationKind::None => todo!(),
+            AggregationKind::Max => decoders.max(Some(bitmask), None)?.into(),
+            AggregationKind::Min => decoders.min(Some(bitmask), None)?.into(),
+            AggregationKind::Sum => decoders.sum(Some(bitmask), None)?.into(),
+            AggregationKind::Count => {
+                let count = bitmask.len() as usize;
+                count.into()
+            }
+        })
+    }
+
+    pub fn dispatch_on_vec(&self, target: Vec<f64>) -> decoder::Result<AggregationResult> {
+        Ok(match self {
+            AggregationKind::None => target.into(),
+            AggregationKind::Max => target.into_iter().fold(f64::NEG_INFINITY, f64::max).into(),
+            AggregationKind::Min => target.into_iter().fold(f64::INFINITY, f64::min).into(),
+            AggregationKind::Sum => target.iter().cloned().sum::<f64>().into(),
+            AggregationKind::Count => target.len().into(),
+        })
+    }
+}
+
+pub struct Aggregation {
+    kind: AggregationKind,
+    expr: Expr,
+}
+
+impl Aggregation {
+    pub fn new(kind: AggregationKind, expr: Expr) -> Self {
+        Self { kind, expr }
+    }
+
+    pub fn compute<R: Read + Seek>(
+        &self,
+        decoders: &mut [Decoder<R>],
+        bitmask: &RoaringBitmap,
+    ) -> decoder::Result<AggregationResult> {
+        if let Expr::Index(index) = &self.expr {
+            // We can directly access the chunk reader using in-situ query execution if possible.
+            return self.kind.dispatch(&mut decoders[*index], bitmask);
+        }
+        let number_of_chunks = decoders[0].footer().number_of_chunks() as usize;
+        let mut result = AggregationResult::zero(self.kind);
+        for i in (0..number_of_chunks).map(ChunkId::new) {
+            let mut readers = decoders
+                .iter_mut()
+                .map(|d| d.chunk_reader(i))
+                .collect::<decoder::Result<Vec<_>>>()?;
+            let computed_chunk = self.expr.compute_chunk(&mut readers, bitmask)?;
+            result.concat(self.kind.dispatch_on_vec(computed_chunk)?, self.kind)?;
+        }
+
+        Ok(result)
     }
 }

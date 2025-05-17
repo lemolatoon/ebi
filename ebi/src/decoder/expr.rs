@@ -33,7 +33,7 @@ pub enum Expr {
         lhs: Box<Expr>,
         rhs: Box<Expr>,
     },
-    ChunkReader(usize),
+    Index(usize),
 }
 
 impl Expr {
@@ -50,7 +50,7 @@ impl Expr {
                     (Some(l), Some(r)) => Some(l.max(r)),
                 }
             }
-            Expr::ChunkReader(index) => Some(*index),
+            Expr::Index(index) => Some(*index),
         }
     }
 
@@ -61,7 +61,7 @@ impl Expr {
         None
     }
 
-    pub fn calculate<T: FileMetadataLike, R: Read>(
+    pub fn compute_chunk<T: FileMetadataLike, R: Read>(
         &self,
         readers: &mut Vec<GeneralChunkReader<'_, T, R>>,
         bitmask: &RoaringBitmap,
@@ -70,8 +70,8 @@ impl Expr {
             Expr::Literal(_) => Err(DecoderError::PreconditionsNotMet.into()),
             Expr::Binary { op, lhs, rhs } => match (lhs.literal(), rhs.literal()) {
                 (None, None) => {
-                    let lhs = lhs.calculate(readers, bitmask)?;
-                    let rhs = rhs.calculate(readers, bitmask)?;
+                    let lhs = lhs.compute_chunk(readers, bitmask)?;
+                    let rhs = rhs.compute_chunk(readers, bitmask)?;
                     Ok(lhs
                         .into_iter()
                         .zip(rhs)
@@ -79,16 +79,16 @@ impl Expr {
                         .collect())
                 }
                 (None, Some(rhs)) => {
-                    let lhs = lhs.calculate(readers, bitmask)?;
+                    let lhs = lhs.compute_chunk(readers, bitmask)?;
                     Ok(lhs.into_iter().map(|lhs| op.doit(lhs, rhs)).collect())
                 }
                 (Some(lhs), None) => {
-                    let rhs = rhs.calculate(readers, bitmask)?;
+                    let rhs = rhs.compute_chunk(readers, bitmask)?;
                     Ok(rhs.into_iter().map(|rhs| op.doit(lhs, rhs)).collect())
                 }
                 (Some(_), Some(_)) => Err(DecoderError::PreconditionsNotMet.into()),
             },
-            Expr::ChunkReader(i) => {
+            Expr::Index(i) => {
                 let number_of_records = readers[*i].number_of_records() as usize;
                 let mut raw_buffer = Vec::<f64>::with_capacity(number_of_records);
                 let raw_buffer_ptr = raw_buffer.as_mut_ptr();
@@ -162,12 +162,12 @@ mod tests {
 
         let expr = Expr::Binary {
             op: Op::Add,
-            lhs: Box::new(Expr::ChunkReader(0)),
-            rhs: Box::new(Expr::ChunkReader(1)),
+            lhs: Box::new(Expr::Index(0)),
+            rhs: Box::new(Expr::Index(1)),
         };
         let mut readers = vec![r1, r2];
         let bitmask = RoaringBitmap::full();
-        let result = expr.calculate(&mut readers, &bitmask).unwrap();
+        let result = expr.compute_chunk(&mut readers, &bitmask).unwrap();
         assert_eq!(result.len(), 4);
         assert_eq!(&result[0..4], &[9.0, 9.0, 26.0, 10.0]);
     }
@@ -179,7 +179,7 @@ mod tests {
         let expr = Expr::Literal(3.14);
         let mut readers: Vec<GeneralChunkReader<Metadata, Cursor<Vec<u8>>>> = vec![];
         let bitmask = RoaringBitmap::full();
-        let res = expr.calculate(&mut readers, &bitmask);
+        let res = expr.compute_chunk(&mut readers, &bitmask);
         assert!(res.is_err());
     }
 
@@ -193,7 +193,7 @@ mod tests {
         };
         let mut readers: Vec<GeneralChunkReader<Metadata, Cursor<Vec<u8>>>> = vec![];
         let bitmask = RoaringBitmap::full();
-        let res = expr.calculate(&mut readers, &bitmask);
+        let res = expr.compute_chunk(&mut readers, &bitmask);
         assert!(res.is_err());
     }
 
@@ -209,11 +209,11 @@ mod tests {
         let expr = Expr::Binary {
             op: Op::Mul,
             lhs: Box::new(Expr::Literal(10.0)),
-            rhs: Box::new(Expr::ChunkReader(0)),
+            rhs: Box::new(Expr::Index(0)),
         };
         let mut readers = vec![r];
         let bitmask = RoaringBitmap::full();
-        let result = expr.calculate(&mut readers, &bitmask).unwrap();
+        let result = expr.compute_chunk(&mut readers, &bitmask).unwrap();
         // Expect every value multiplied by 10.0.
         let expected: Vec<f64> = values.into_iter().map(|v| v * 10.0).collect();
         assert_eq!(result, expected);
@@ -230,12 +230,12 @@ mod tests {
         // Expression: ChunkReader subtracted by literal 2.0.
         let expr = Expr::Binary {
             op: Op::Sub,
-            lhs: Box::new(Expr::ChunkReader(0)),
+            lhs: Box::new(Expr::Index(0)),
             rhs: Box::new(Expr::Literal(2.0)),
         };
         let mut readers = vec![r];
         let bitmask = RoaringBitmap::full();
-        let result = expr.calculate(&mut readers, &bitmask).unwrap();
+        let result = expr.compute_chunk(&mut readers, &bitmask).unwrap();
         let expected: Vec<f64> = values.into_iter().map(|v| v - 2.0).collect();
         assert_eq!(result, expected);
     }
@@ -247,13 +247,13 @@ mod tests {
         let mut decoder = Decoder::new(DecoderInput::from_reader(encode(&values))).unwrap();
         let r = decoder.chunk_reader(ChunkId::new(0)).unwrap();
 
-        let expr = Expr::ChunkReader(0);
+        let expr = Expr::Index(0);
         let mut readers = vec![r];
         // For this test, use a bitmask that only selects even-indexed values (indices: 0 and 2).
         let mut bm = RoaringBitmap::new();
         bm.insert(0);
         bm.insert(2);
-        let result = expr.calculate(&mut readers, &bm).unwrap();
+        let result = expr.compute_chunk(&mut readers, &bm).unwrap();
 
         // Expect only the values at indices 0 and 2.
         let expected = vec![5.0, 7.0];
