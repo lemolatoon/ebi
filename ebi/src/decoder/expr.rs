@@ -94,15 +94,19 @@ impl Expr {
                 let raw_buffer_ptr = raw_buffer.as_mut_ptr();
                 let raw_buffer_capacity = raw_buffer.capacity();
                 std::mem::forget(raw_buffer);
-                let len = { // Lifetime of `&mut [u8]`
+                let len = {
+                    // Lifetime of `&mut [u8]`
                     let raw_buffer_byte_slice = unsafe {
-                        std::slice::from_raw_parts_mut(raw_buffer_ptr as *mut u8, number_of_records * 8)
+                        std::slice::from_raw_parts_mut(
+                            raw_buffer_ptr as *mut u8,
+                            number_of_records * 8,
+                        )
                     };
 
                     let mut writer = Cursor::new(raw_buffer_byte_slice);
                     readers[*i].materialize(&mut writer, Some(bitmask))?;
 
-                   writer.position() as usize
+                    writer.position() as usize
                 };
 
                 let buffer_written =
