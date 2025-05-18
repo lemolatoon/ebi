@@ -481,7 +481,7 @@ fn main() -> anyhow::Result<()> {
         std::fs::create_dir_all(&unique_output_dir)?;
         println!("Save dir: {}", unique_output_dir.display());
 
-        const N_BATCH: usize = 0;
+        const N_BATCH: usize = 5;
         let mut results_01 = Vec::with_capacity(N_BATCH);
         let mut results_06 = Vec::with_capacity(N_BATCH);
         for _ in 0..N_BATCH {

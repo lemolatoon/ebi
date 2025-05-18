@@ -9,7 +9,7 @@ fn main() -> miette::Result<()> {
         b.compiler("clang++");
     }
 
-    if let Some(target_cpu) = std::env::var("TARGET_CPU").ok() {
+    if let Ok(target_cpu) = std::env::var("TARGET_CPU") {
         b.flag(format!("-march={}", target_cpu));
     }
 
