@@ -460,16 +460,15 @@ fn main() -> anyhow::Result<()> {
         output_dir,
     } = &cli.command
     {
-        let output_dir = output_dir.join("result").join("tpch");
+        let save_dir = output_dir.join("result").join("tpch");
         anyhow::ensure!(
             input_dir.is_dir(),
             "Input directory does not exist or not directory: {}",
             input_dir.display()
         );
 
-        std::fs::create_dir_all(&output_dir)?;
+        std::fs::create_dir_all(&save_dir)?;
 
-        let save_dir = output_dir.join("tpch");
         // Determine the next available directory name
         let mut dir_number = 0;
         let unique_output_dir = loop {
@@ -479,12 +478,20 @@ fn main() -> anyhow::Result<()> {
             }
             dir_number += 1;
         };
-
         std::fs::create_dir_all(&unique_output_dir)?;
         println!("Save dir: {}", unique_output_dir.display());
-        let (result01, result06) = tpch::tpch_command(input_dir)?;
-        save_json_safely(&result01, unique_output_dir.join("tpch_01.json"))?;
-        save_json_safely(&result06, unique_output_dir.join("tpch_06.json"))?;
+
+        const N_BATCH: usize = 0;
+        let mut results_01 = Vec::with_capacity(N_BATCH);
+        let mut results_06 = Vec::with_capacity(N_BATCH);
+        for _ in 0..N_BATCH {
+            let (result01, result06) = tpch::tpch_command(input_dir)?;
+            results_01.push(result01);
+            results_06.push(result06);
+        }
+
+        save_json_safely(&results_01, unique_output_dir.join("tpch_01.json"))?;
+        save_json_safely(&results_06, unique_output_dir.join("tpch_06.json"))?;
 
         return Ok(());
     }
