@@ -36,6 +36,13 @@ $ cargo run --release -- -i DATA_DICT embedding -o DATA_DICT
 ```
 Results will be saved in `DATA_DICT/result`
 
+### TPC-H
+```bash
+$ cd experimenter
+$ cargo run --release -- tpch -i DATA_DIR -o OUT_DIR
+```
+Results will be saved in `OUT_DIR/tpch`
+
 ### Plotting
 ```bash
 $ cd tools
