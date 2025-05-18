@@ -52,6 +52,8 @@ exec_print("""
 -- h01_duckdb.sql  →  h01.parquet
 COPY (
     SELECT                                   -- All DATE/VARCHAR filters already applied
+           l_returnflag,
+           l_linestatus,
            l_quantity,
            l_extendedprice,
            l_discount,

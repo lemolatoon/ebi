@@ -3,10 +3,11 @@ use either::Either;
 #[cfg(feature = "cuda")]
 use experimenter::matmul_cuda::matrix_cuda_command;
 use experimenter::{
-    get_appropriate_precision, get_compress_statistics, round_by_scale, AllOutput, AllOutputInner,
-    CompressStatistics, CompressionConfig, FilterConfig, FilterFamilyOutput,
-    FilterMaterializeConfig, MaterializeConfig, MatrixResult, MaxConfig, Output, OutputWrapper,
-    SimpleCompressionPerformanceForOneDataset, SumConfig, UCR2018Config,
+    get_appropriate_precision, get_compress_statistics, round_by_scale, save_json_safely,
+    tpch::{self},
+    AllOutput, AllOutputInner, CompressStatistics, CompressionConfig, FilterConfig,
+    FilterFamilyOutput, FilterMaterializeConfig, MaterializeConfig, MatrixResult, MaxConfig,
+    Output, OutputWrapper, SimpleCompressionPerformanceForOneDataset, SumConfig, UCR2018Config,
     UCR2018DecompressionResult, UCR2018ForAllCompressionMethodsResult, UCR2018Result,
     UCR2018ResultForOneDataset, DEFAULT_CHUNK_OPTION,
 };
@@ -300,6 +301,12 @@ enum Commands {
         #[arg(long, short('o'))]
         output_dir: PathBuf,
     },
+    Tpch {
+        #[arg(long, short('i'))]
+        input_dir: PathBuf,
+        #[arg(long, short('o'))]
+        output_dir: PathBuf,
+    },
 }
 
 impl Commands {
@@ -319,6 +326,7 @@ impl Commands {
             Commands::Matrix { .. } => "matrix",
             Commands::MatrixCuda { .. } => "matrix_cuda",
             Commands::Embedding { .. } => "embedding",
+            Commands::Tpch { .. } => "tpch",
         }
     }
 
@@ -443,6 +451,40 @@ fn main() -> anyhow::Result<()> {
                 )?;
             }
         }
+
+        return Ok(());
+    }
+
+    if let Commands::Tpch {
+        input_dir,
+        output_dir,
+    } = &cli.command
+    {
+        let output_dir = output_dir.join("result").join("tpch");
+        anyhow::ensure!(
+            input_dir.is_dir(),
+            "Input directory does not exist or not directory: {}",
+            input_dir.display()
+        );
+
+        std::fs::create_dir_all(&output_dir)?;
+
+        let save_dir = output_dir.join("tpch");
+        // Determine the next available directory name
+        let mut dir_number = 0;
+        let unique_output_dir = loop {
+            let output_dirname = save_dir.join(format!("{:03}", dir_number));
+            if !output_dirname.exists() {
+                break output_dirname;
+            }
+            dir_number += 1;
+        };
+
+        std::fs::create_dir_all(&unique_output_dir)?;
+        println!("Save dir: {}", unique_output_dir.display());
+        let (result01, result06) = tpch::tpch_command(input_dir)?;
+        save_json_safely(&result01, unique_output_dir.join("tpch_01.json"))?;
+        save_json_safely(&result06, unique_output_dir.join("tpch_06.json"))?;
 
         return Ok(());
     }
@@ -647,6 +689,7 @@ fn process_file(filename: impl AsRef<Path>, cli: Cli) -> anyhow::Result<()> {
         Commands::Matrix { .. } => unreachable!(),
         Commands::MatrixCuda { .. } => unreachable!(),
         Commands::Embedding { .. } => unreachable!(),
+        Commands::Tpch { .. } => unreachable!(),
     };
 
     // Get the directory where the filename is located
