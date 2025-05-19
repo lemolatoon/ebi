@@ -64,7 +64,7 @@ $ cd tools
 $ python3 plot.py DATA_DICT/result/000.json
 $ python3 ucr2018_plot.py DATA_DICT/result/ucr2018/000
 $ python3 embedding_plot.py DATA_DICT/result/embedding/000/embedding_result.json
-$ python3 matrix_plot.py OUTDIR/result/matrix_cuda/000 -cuda
+$ uv run matrix_plot2.py OUTDIR/result/matrix_cuda/000 -cuda
 ```
 
 ## License
