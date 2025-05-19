@@ -1,0 +1,10 @@
+[project]
+name = "tools"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = [
+    "duckdb>=1.2.2",
+    "pyarrow>=20.0.0",
+]

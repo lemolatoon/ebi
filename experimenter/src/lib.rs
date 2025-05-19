@@ -1,8 +1,11 @@
 #[cfg(feature = "cuda")]
 pub mod matmul_cuda;
+pub mod tpch;
 use std::{
     collections::{BTreeMap, HashMap, HashSet},
-    io::{BufRead, Read, Seek},
+    fs::OpenOptions,
+    io::{BufRead, Read, Seek, Write as _},
+    path::Path,
 };
 
 use anyhow::Context as _;
@@ -586,3 +589,91 @@ pub fn get_compress_statistics<R: Read + Seek>(
 }
 
 pub const DEFAULT_CHUNK_OPTION: ChunkOption = ChunkOption::RecordCount(128 * 1024 * 1024 / 8);
+
+/// Serializes `value` to pretty JSON and writes it to `path`.
+///
+/// - Creates parent directories if they do not exist.
+/// - If the file already exists, prints the JSON to stdout instead of overwriting.
+/// - Propagates any serialization or I/O errors using `anyhow::Result`.
+pub fn save_json_safely<T: Serialize>(value: &T, path: impl AsRef<Path>) -> anyhow::Result<()> {
+    // 1) Serialize the value to pretty JSON
+    let json = serde_json::to_string_pretty(value).context("Failed to serialize value to JSON")?;
+
+    let path = path.as_ref();
+
+    // 2) Ensure parent directory exists
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir)
+            .with_context(|| format!("Failed to create directory `{}`", dir.display()))?;
+    }
+
+    // 3) Try to create the file if it doesn't already exist
+    let open_result = OpenOptions::new()
+        .write(true)
+        .create_new(true) // Return error if the file already exists
+        .open(path);
+
+    match open_result {
+        // If the file was successfully created, write the JSON into it
+        Ok(mut file) => {
+            file.write_all(json.as_bytes())
+                .with_context(|| format!("Failed to write JSON to `{}`", path.display()))?;
+        }
+
+        // If the file already exists, print the JSON to stdout
+        Err(ref e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+            println!("{}", json);
+        }
+
+        // Propagate any other errors
+        Err(e) => return Err(e).context(format!("Failed to open file `{}`", path.display()))?,
+    }
+
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde::Serialize;
+    use tempfile::tempdir;
+
+    #[derive(Serialize)]
+    struct TestStruct {
+        a: i32,
+        b: String,
+    }
+
+    #[test]
+    fn test_save_json_safely_create_and_prevent_overwrite() -> anyhow::Result<()> {
+        let dir = tempdir()?; // Create a temporary directory
+        let file_path = dir.path().join("data.json");
+
+        let data = TestStruct {
+            a: 123,
+            b: "hello".into(),
+        };
+
+        // 1. First save: file does not exist yet
+        save_json_safely(&data, &file_path)?;
+
+        // Verify that the file exists and contains correct JSON
+        let content = std::fs::read_to_string(&file_path)?;
+        let expected = serde_json::to_string_pretty(&data)?;
+        assert_eq!(content, expected);
+
+        let data2 = TestStruct {
+            a: 456,
+            b: "world".into(),
+        };
+
+        // 2. Second save: file already exists
+        save_json_safely(&data2, &file_path)?; // This should goes to stdout
+
+        // Re-read file to ensure it wasn't overwritten
+        let content2 = std::fs::read_to_string(&file_path)?;
+        assert_eq!(content2, expected);
+
+        Ok(())
+    }
+}

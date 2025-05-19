@@ -4,6 +4,19 @@ Float Compressions and Original File Format for databases
 Currently under developments.
 
 ## Reporoducing the results
+
+## About SIMD
+Configure target cpu by setting envvars when building:
+
+AVX2:
+```bash
+$ RUSTFLAGS="-C target-cpu=haswell" TARGET_CPU=haswell cargo build --release
+```
+AVX512: (if your CPU supports)
+```bash
+$ RUSTFLAGS="-C target-cpu=native" TARGET_CPU=native cargo build --release
+```
+
 ### [De]Compression and Queries
 Ensure that your datasets are in the `DATA_DICT`
 ```bash
@@ -35,6 +48,13 @@ $ cd experimenter
 $ cargo run --release -- -i DATA_DICT embedding -o DATA_DICT
 ```
 Results will be saved in `DATA_DICT/result`
+
+### TPC-H
+```bash
+$ cd experimenter
+$ cargo run --release -- tpch -i DATA_DIR -o OUT_DIR
+```
+Results will be saved in `OUT_DIR/tpch`
 
 ### Plotting
 ```bash

@@ -9,8 +9,13 @@ fn main() -> miette::Result<()> {
         b.compiler("clang++");
     }
 
+    if let Ok(target_cpu) = std::env::var("TARGET_CPU") {
+        b.flag(format!("-march={}", target_cpu));
+    }
+
     // This assumes all your C++ bindings are in main.rs
     b.compiler("clang++")
+        .inherit_rustflags(true)
         .flag("-std=c++17")
         .flag_if_supported("-Wno-unused-parameter")
         .file("ALP/src/falp.cpp")
@@ -20,6 +25,8 @@ fn main() -> miette::Result<()> {
         .file("ALP/src/fastlanes_generated_unffor.cpp")
         .compile("alp"); // arbitrary library name, pick anything
 
+    println!("cargo:rerun-if-env-changed=RUSTFLAGS");
+    println!("cargo:rerun-if-env-changed=TARGET_CPU");
     println!("cargo:rerun-if-changed=src/lib.rs");
     println!("cargo:rerun-if-changed=src/main.rs");
     println!("cargo:return-if-changed=ALP/src/falp.cpp");

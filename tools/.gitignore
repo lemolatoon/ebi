@@ -1,3 +1,5 @@
 /.venv
+/venv
 /results*
 .ruff_cache
+/tpch_data
