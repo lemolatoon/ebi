@@ -1,0 +1,207 @@
+import os
+import sys
+from collections import defaultdict
+import pandas as pd
+import json
+import matplotlib.pyplot as plt
+import seaborn as sns
+from common import default_compression_method_order
+
+def average_tpch_results(data: list[dict]) -> dict:
+    """
+    Compute average compression statistics and query elapsed time for each method.
+    Ignores the 'result' field.
+    """
+    n = len(data)
+    methods = data[0].keys()
+    aggregated = {}
+
+    for method in methods:
+        comp_acc = defaultdict(lambda: defaultdict(float))
+        query_acc = 0
+
+        for run in data:
+            m = run[method]
+            # Accumulate compression statistics
+            for col, stats in m['compression'].items():
+                for stat_name, value in stats.items():
+                    comp_acc[col][stat_name] += value
+            # Accumulate query elapsed time
+            query_acc += m['query_elapsed_time']
+
+        # Compute averages
+        comp_avg = {
+            col: {stat: comp_acc[col][stat] / n for stat in comp_acc[col]}
+            for col in comp_acc
+        }
+        query_avg = query_acc / n
+
+        aggregated[method] = {
+            'compression': comp_avg,
+            'query_elapsed_time': query_avg,
+        }
+
+    return aggregated
+
+def create_dataframe(aggregated: dict) -> pd.DataFrame:
+    """
+    Convert averaged results into a pandas DataFrame.
+
+    @return: 
+    DataFrame with methods as index and compression statistics as columns.
+    Columns are named as 'compression_(column)_(statistic)'.
+    Or 'query_elapsed_time' for query elapsed time.
+    e.g. compression_l_quantity_compression_elapsed_time_nano_secs, 
+    compression_l_extendedprice_compression_ratio,
+    compression_l_extendedprice_uncompressed_size,
+    """
+    rows = {}
+
+    for method, v in aggregated.items():
+        row = {}
+        for col, stats in v['compression'].items():
+            for stat_name, val in stats.items():
+                row[f"compression_{col}_{stat_name}"] = val
+        row['query_elapsed_time'] = v['query_elapsed_time']
+        rows[method] = row
+
+    return pd.DataFrame.from_dict(rows, orient='index')
+
+def load_result(path: str) -> pd.DataFrame:
+    with open(path, 'r') as f:
+        data = json.load(f)
+    avg = average_tpch_results(data)
+    return create_dataframe(avg)
+
+def main():
+    if len(sys.argv) < 2:
+        print("No directory path provided")
+        sys.exit(1)
+    base_dir = sys.argv[1]
+    assert os.path.isdir(base_dir)
+    save_dir = os.path.join(".", "results", "tpch")
+    if os.path.exists(save_dir):
+        print(f"Directory {save_dir} already exists. Please remove it first.")
+        if input("Do you want to remove it? (y/n): ").strip().lower() != 'y':
+            sys.exit(1)
+    os.makedirs(save_dir, exist_ok=True)
+    print(f"Saving results to '{save_dir}'")
+    
+    df01 = load_result(f"{base_dir}/tpch_01.json")
+    df06 = load_result(f"{base_dir}/tpch_06.json")
+
+    process_h01(df01, save_dir)
+    process_h06(df06, save_dir)
+
+def plot_bar_chart(data: pd.DataFrame, metric_cols: list[str], title: str, ylabel: str, save_path: str):
+    """
+    Plot a bar chart for specified metric columns and save the figure.
+    """
+    subset = data[metric_cols].copy()
+    subset = subset.rename_axis("method").reset_index()
+    melted = subset.melt(id_vars="method", var_name="Metric", value_name=ylabel)
+
+    plt.figure(figsize=(12, 6))
+    sns.barplot(data=melted, x="method", y=ylabel, hue="Metric")
+    plt.title(title)
+    plt.xticks(rotation=45)
+    plt.tight_layout()
+    plt.savefig(save_path)
+    plt.close()
+
+def plot_box_chart(data: pd.DataFrame, metric_cols: list[str], title: str, ylabel: str, save_path: str):
+    """
+    Plot a box chart for specified metric columns and save the figure.
+    """
+    subset = data[metric_cols].copy()
+    melted = subset.melt(var_name="Metric", value_name=ylabel)
+
+    plt.figure(figsize=(10, 6))
+    sns.boxplot(data=melted, y=ylabel)
+    plt.title(title)
+    plt.xticks(rotation=45)
+    plt.tight_layout()
+    plt.savefig(save_path)
+    plt.close()
+
+def process_tpch(df: pd.DataFrame, columns: list[str], tag: str, save_dir: str):
+    """
+    Process a TPCH DataFrame and generate compression ratio, throughput and query time plots.
+    """
+    # Compute compression throughput for each column
+    throughput_cols = []
+    for col in columns:
+        size_col = f"compression_{col}_uncompressed_size"
+        time_col = f"compression_{col}_compression_elapsed_time_nano_secs"
+        throughput_col = f"compression_{col}_compression_throughput"
+        df[throughput_col] = df[size_col] / 1024 / 1024 / (df[time_col] / 1e9)
+        throughput_cols.append(throughput_col)
+
+    # Plot bar charts for each column
+    for col in columns:
+        ratio_col = f"compression_{col}_compression_ratio"
+        throughput_col = f"compression_{col}_compression_throughput"
+        plot_bar_chart(
+            df,
+            [ratio_col],
+            f"{tag}: Compression Ratio for {col}",
+            "Compression Ratio",
+            os.path.join(save_dir, f"{tag}_{col}_compression_ratio_bar.png"),
+        )
+        plot_bar_chart(
+            df,
+            [throughput_col],
+            f"{tag}: Compression Throughput for {col}",
+            "Throughput (MB/s)",
+            os.path.join(save_dir, f"{tag}_{col}_compression_throughput_bar.png"),
+        )
+
+    # Plot box charts for all columns together
+    ratio_cols = [f"compression_{col}_compression_ratio" for col in columns]
+    plot_box_chart(
+        df,
+        ratio_cols,
+        f"{tag}: Compression Ratio (All Columns)",
+        "Compression Ratio",
+        os.path.join(save_dir, f"{tag}_compression_ratio_box.png"),
+    )
+
+    plot_box_chart(
+        df,
+        throughput_cols,
+        f"{tag}: Compression Throughput (All Columns)",
+        "Throughput (MB/s)",
+        os.path.join(save_dir, f"{tag}_compression_throughput_box.png"),
+    )
+
+    # Plot query elapsed time
+    df["query_elapsed_time_sec"] = df["query_elapsed_time"] / 1e9
+    plot_bar_chart(
+        df,
+        ["query_elapsed_time_sec"],
+        f"{tag}: Query Elapsed Time",
+        "Time (s)",
+        os.path.join(save_dir, f"{tag}_query_elapsed_time_bar.png"),
+    )
+
+tpch01_columns = [
+    "l_quantity",
+    "l_extendedprice",
+    "l_discount",
+    "l_tax",
+]
+# Define process_h01 and process_h06
+def process_h01(df: pd.DataFrame, save_dir: str):
+    process_tpch(df, tpch01_columns, "tpch_01", save_dir)
+
+
+tpch06_columns = [
+    "l_extendedprice",
+    "l_discount",
+    "l_quantity",
+]
+def process_h06(df: pd.DataFrame, save_dir: str):
+    process_tpch(df, tpch06_columns, "tpch_06", save_dir)
+
+if __name__ == "__main__":
+    main()
