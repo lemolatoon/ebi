@@ -414,6 +414,7 @@ fn main() -> anyhow::Result<()> {
                 ChunkOption::ByteSizeBestEffort(_) | ChunkOption::Full => unreachable!(),
             }
         }
+        const N_BATCH: usize = 5;
         for precision in tqdm(precisions).desc(Some("Precision")) {
             for &matrix_size in
                 tqdm(matrix_sizes.iter()).desc(Some(format!("Matrix Size(p:{precision})")))
@@ -428,21 +429,27 @@ fn main() -> anyhow::Result<()> {
                 let output = if is_matrix_cuda {
                     cfg_if! {
                         if #[cfg(feature = "cuda")] {
-                            matrix_cuda_command(
-                                precision,
-                                matrix_size,
-                                do_with_only_compression_methods_with_controlled_precision_support,
-                            )?
+                            (0..N_BATCH).map(|_| {
+                                matrix_cuda_command(
+                                    precision,
+                                    matrix_size,
+                                    do_with_only_compression_methods_with_controlled_precision_support,
+                                )
+                            }).collect::<anyhow::Result<Vec<_>>>()?
                         } else {
                             panic!("Matrix CUDA command is not supported in this build. Please enable the 'cuda' feature.")
                         }
                     }
                 } else {
-                    matrix_command(
-                        precision,
-                        matrix_size,
-                        do_with_only_compression_methods_with_controlled_precision_support,
-                    )?
+                    (0..N_BATCH)
+                        .map(|_| {
+                            matrix_command(
+                                precision,
+                                matrix_size,
+                                do_with_only_compression_methods_with_controlled_precision_support,
+                            )
+                        })
+                        .collect::<anyhow::Result<Vec<_>>>()?
                 };
 
                 serde_json::to_writer(
