@@ -25,7 +25,7 @@ $ cargo run --bin csv2bin --release -- "DATA_DICT/*"
 $ cd experimenter
 # create directory for saving experiment checkpoints
 $ mkdir save compressor_configs data/filter_config
-$ cargo run --release --bin experimenter -- all -c compressor_configs -f DATA_DICT/filter_config -b DATA_DICT/binary --create-config --n 10 --in-memory -s save
+$ cargo run --release --bin experimenter -- all -c compressor_configs --exact-precision -f DATA_DICT/filter_config -b DATA_DICT/binary --create-config --n 10 --in-memory -s save
 ```
 Results will be saved in `DATA_DICT/result`
 
@@ -51,6 +51,8 @@ Results will be saved in `DATA_DICT/result`
 
 ### TPC-H
 ```bash
+$ cd tools
+$ uv run gen-tpch.py # generate files on tools/tpch_data/
 $ cd experimenter
 $ cargo run --release -- tpch -i DATA_DIR -o OUT_DIR
 ```
