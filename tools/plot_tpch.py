@@ -97,7 +97,7 @@ def plot_bar_chart(data: pd.DataFrame, metric_cols: list[str], title: str, ylabe
     """
     Plot a bar chart for specified metric columns and save the figure.
     """
-    subset = data[metric_cols].copy()
+    subset = data.loc[default_compression_method_order(), metric_cols].copy()
     subset = subset.rename_axis("method").reset_index()
     melted = subset.melt(id_vars="method", var_name="Metric", value_name=ylabel)
 
@@ -111,13 +111,22 @@ def plot_bar_chart(data: pd.DataFrame, metric_cols: list[str], title: str, ylabe
 
 def plot_box_chart(data: pd.DataFrame, metric_cols: list[str], title: str, ylabel: str, save_path: str):
     """
-    Plot a box chart for specified metric columns and save the figure.
+    Plot a box chart for specified metric columns (one box per method across multiple columns).
     """
-    subset = data[metric_cols].copy()
-    melted = subset.melt(var_name="Metric", value_name=ylabel)
+    melted = []
+    for col in metric_cols:
+        for method in data.index:
+            melted.append({"method": method, ylabel: data.loc[method, col]})
+    melted_df = pd.DataFrame(melted)
+
+    melted_df["method"] = pd.Categorical(
+        melted_df["method"],
+        categories=default_compression_method_order(),
+        ordered=True
+    )
 
     plt.figure(figsize=(10, 6))
-    sns.boxplot(data=melted, y=ylabel)
+    sns.boxplot(data=melted_df, x="method", y=ylabel)
     plt.title(title)
     plt.xticks(rotation=45)
     plt.tight_layout()
@@ -128,16 +137,14 @@ def process_tpch(df: pd.DataFrame, columns: list[str], tag: str, save_dir: str):
     """
     Process a TPCH DataFrame and generate compression ratio, throughput and query time plots.
     """
-    # Compute compression throughput for each column
     throughput_cols = []
     for col in columns:
         size_col = f"compression_{col}_uncompressed_size"
         time_col = f"compression_{col}_compression_elapsed_time_nano_secs"
         throughput_col = f"compression_{col}_compression_throughput"
-        df[throughput_col] = df[size_col] / 1024 / 1024 / (df[time_col] / 1e9)
+        df[throughput_col] = df[size_col] / (1024 ** 3) / (df[time_col] / 1e9)  # GB/s
         throughput_cols.append(throughput_col)
 
-    # Plot bar charts for each column
     for col in columns:
         ratio_col = f"compression_{col}_compression_ratio"
         throughput_col = f"compression_{col}_compression_throughput"
@@ -152,11 +159,10 @@ def process_tpch(df: pd.DataFrame, columns: list[str], tag: str, save_dir: str):
             df,
             [throughput_col],
             f"{tag}: Compression Throughput for {col}",
-            "Throughput (MB/s)",
+            "Throughput (GB/s)",
             os.path.join(save_dir, f"{tag}_{col}_compression_throughput_bar.png"),
         )
 
-    # Plot box charts for all columns together
     ratio_cols = [f"compression_{col}_compression_ratio" for col in columns]
     plot_box_chart(
         df,
@@ -165,16 +171,14 @@ def process_tpch(df: pd.DataFrame, columns: list[str], tag: str, save_dir: str):
         "Compression Ratio",
         os.path.join(save_dir, f"{tag}_compression_ratio_box.png"),
     )
-
     plot_box_chart(
         df,
         throughput_cols,
         f"{tag}: Compression Throughput (All Columns)",
-        "Throughput (MB/s)",
+        "Throughput (GB/s)",
         os.path.join(save_dir, f"{tag}_compression_throughput_box.png"),
     )
 
-    # Plot query elapsed time
     df["query_elapsed_time_sec"] = df["query_elapsed_time"] / 1e9
     plot_bar_chart(
         df,
@@ -183,6 +187,7 @@ def process_tpch(df: pd.DataFrame, columns: list[str], tag: str, save_dir: str):
         "Time (s)",
         os.path.join(save_dir, f"{tag}_query_elapsed_time_bar.png"),
     )
+
 
 tpch01_columns = [
     "l_quantity",

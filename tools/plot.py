@@ -217,6 +217,9 @@ def compute_average(
             if k == "datetime":
                 # "Key 'datetime' values are not identical, but it's OK"
                 continue
+            if k == "result_string":
+                # "Key 'result_string' values are not identical, but it's OK"
+                continue
             raise ValueError(f"Key '{k}' values are not identical")
 
     first = outputs[0]
