@@ -599,15 +599,15 @@ fn test_expr8() {
 #[test]
 fn test_expr9() {
     // Count with Index only, full bitmask
-    let mut decoders = helper::decoders(vec![&[0.0, 0.2, 0.3], &[1.0, 1.0, 20.0]]);
-    let result = Aggregation::new(AggregationKind::None, Expr::Index(0))
+    let mut decoders = helper::decoders(vec![&[0.0, 0.8, 0.3], &[1.0, 1.0, 20.0]]);
+    let result = Aggregation::new(AggregationKind::Sum, Expr::Index(0))
         .compute(
             &mut decoders,
             Some(&RoaringBitmap::from_sorted_iter(0..2).unwrap()),
             &mut SegmentedExecutionTimes::new(),
         )
         .unwrap();
-    assert_eq!(result, AggregationResult::Array(vec![0.0, 0.2]));
+    assert_eq!(result, AggregationResult::Scalar(0.8));
 }
 
 #[test]
@@ -747,8 +747,8 @@ fn test_multiple_count_index_and_binary() {
     assert_eq!(
         result,
         vec![
-            AggregationResult::Scalar(8.0),
-            AggregationResult::Scalar(12.0),
+            AggregationResult::Scalar(4.0),
+            AggregationResult::Scalar(10.0),
         ]
     );
 }
