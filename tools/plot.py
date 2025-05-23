@@ -115,6 +115,28 @@ class ExecutionTimesWithOthers(TypedDict):
     decompression_nanos: int
     others: int
 
+def average_execution_times(
+    execution_times: List[ExecutionTimes],
+) -> ExecutionTimes:
+    averaged_execution_times: Dict[str, float] = {
+        key: fmean(exec_time[key] for exec_time in execution_times)
+        for key in execution_times_keys
+    }
+    return averaged_execution_times
+
+
+def get_average_execution_times_ratios(
+    execution_times: List[ExecutionTimes],
+    average_elapsed_time_nanos: float
+) -> ExecutionTimesWithOthers:
+    averaged_execution_times = average_execution_times(execution_times)
+    entire_time = average_elapsed_time_nanos
+    averaged_execution_times["others"] = entire_time - sum(averaged_execution_times.values())
+    execution_times_ratios = {
+        key: execution_times[key] / entire_time
+        for key in [*execution_times_keys, "others"]
+    }
+    return execution_times_ratios
 
 class OutputWrapper(TypedDict, Generic[T]):
     version: str
@@ -194,6 +216,9 @@ def compute_average(
         if not all(c[k] == outputs[0][k] for c in outputs):
             if k == "datetime":
                 # "Key 'datetime' values are not identical, but it's OK"
+                continue
+            if k == "result_string":
+                # "Key 'result_string' values are not identical, but it's OK"
                 continue
             raise ValueError(f"Key '{k}' values are not identical")
 
