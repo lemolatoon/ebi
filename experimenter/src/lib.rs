@@ -16,6 +16,7 @@ use ebi::{
     encoder::ChunkOption,
     time::SerializableSegmentedExecutionTimes,
 };
+use procfs::ProcResult;
 use quick_impl::QuickImpl;
 use serde::{Deserialize, Serialize};
 
@@ -630,6 +631,13 @@ pub fn save_json_safely<T: Serialize>(value: &T, path: impl AsRef<Path>) -> anyh
     }
 
     Ok(())
+}
+
+pub fn flush_cache() -> ProcResult<()> {
+    unsafe {
+        libc::sync();
+    }
+    procfs::sys::vm::drop_caches(procfs::sys::vm::DropCache::All)
 }
 
 #[cfg(test)]
