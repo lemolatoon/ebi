@@ -758,7 +758,6 @@ pub enum AggregationKind {
     Max,
     Min,
     Sum,
-    Count,
 }
 
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
@@ -779,7 +778,6 @@ impl AggregationResult {
             AggregationKind::Max => Self::Scalar(f64::NEG_INFINITY),
             AggregationKind::Min => Self::Scalar(f64::INFINITY),
             AggregationKind::Sum => Self::Scalar(0.0),
-            AggregationKind::Count => Self::Integer(0),
         }
     }
 
@@ -801,13 +799,6 @@ impl AggregationResult {
                     AggregationKind::Max => *a = a.max(b),
                     AggregationKind::Min => *a = a.min(b),
                     AggregationKind::Sum => *a += b,
-                    AggregationKind::Count => *a += b,
-                    _ => return Err(DecoderError::PreconditionsNotMet.into()),
-                };
-            }
-            (Self::Integer(a), Self::Integer(b)) => {
-                match kind {
-                    AggregationKind::Count => *a += b,
                     _ => return Err(DecoderError::PreconditionsNotMet.into()),
                 };
             }
@@ -821,17 +812,13 @@ impl AggregationKind {
     pub fn dispatch<R: Read + Seek>(
         &self,
         decoder: &mut Decoder<R>,
-        bitmask: &RoaringBitmap,
+        bitmask: Option<&RoaringBitmap>,
     ) -> decoder::Result<AggregationResult> {
         Ok(match self {
             AggregationKind::None => todo!(),
-            AggregationKind::Max => decoder.max(Some(bitmask), None)?.into(),
-            AggregationKind::Min => decoder.min(Some(bitmask), None)?.into(),
-            AggregationKind::Sum => decoder.sum(Some(bitmask), None)?.into(),
-            AggregationKind::Count => {
-                let count = bitmask.len() as usize;
-                count.into()
-            }
+            AggregationKind::Max => decoder.max(bitmask, None)?.into(),
+            AggregationKind::Min => decoder.min(bitmask, None)?.into(),
+            AggregationKind::Sum => decoder.sum(bitmask, None)?.into(),
         })
     }
 
@@ -841,7 +828,6 @@ impl AggregationKind {
             AggregationKind::Max => target.into_iter().fold(f64::NEG_INFINITY, f64::max).into(),
             AggregationKind::Min => target.into_iter().fold(f64::INFINITY, f64::min).into(),
             AggregationKind::Sum => target.iter().cloned().sum::<f64>().into(),
-            AggregationKind::Count => target.len().into(),
         })
     }
 }
@@ -865,9 +851,6 @@ impl Aggregation {
     pub fn max(expr: Expr) -> Self {
         Self::new(AggregationKind::Max, expr)
     }
-    pub fn count(expr: Expr) -> Self {
-        Self::new(AggregationKind::Count, expr)
-    }
     pub fn none(expr: Expr) -> Self {
         Self::new(AggregationKind::None, expr)
     }
@@ -875,7 +858,8 @@ impl Aggregation {
     pub fn compute<R: Read + Seek>(
         &self,
         decoders: &mut [Decoder<R>],
-        bitmask: &RoaringBitmap,
+        bitmask: Option<&RoaringBitmap>,
+        timer: &mut SegmentedExecutionTimes,
     ) -> decoder::Result<AggregationResult> {
         if let Expr::Index(index) = &self.expr {
             // We can directly access the chunk reader using in-situ query execution if possible.
@@ -888,7 +872,7 @@ impl Aggregation {
                 .iter_mut()
                 .map(|d| d.chunk_reader(i))
                 .collect::<decoder::Result<Vec<_>>>()?;
-            let computed_chunk = self.expr.compute_chunk(&mut readers, bitmask)?;
+            let computed_chunk = self.expr.compute_chunk(&mut readers, bitmask, timer)?;
             result.concat(self.kind.dispatch_on_vec(computed_chunk)?, self.kind)?;
         }
 
@@ -898,7 +882,8 @@ impl Aggregation {
     pub fn compute_multiple<R: Read + Seek>(
         aggregations: &[Self],
         decoders: &mut [Decoder<R>],
-        bitmask: &RoaringBitmap,
+        bitmask: Option<&RoaringBitmap>,
+        timer: &mut SegmentedExecutionTimes,
     ) -> decoder::Result<Vec<AggregationResult>> {
         let mut results = Vec::with_capacity(aggregations.len());
         let mut computed = vec![false; aggregations.len()];
@@ -906,6 +891,7 @@ impl Aggregation {
             if let Expr::Index(index) = &aggr.expr {
                 // We can directly access the chunk reader using in-situ query execution if possible.
                 results.push(aggr.kind.dispatch(&mut decoders[*index], bitmask)?);
+                *timer += decoders[*index].segmented_execution_times();
                 computed[aggr_i] = true;
             } else {
                 results.push(AggregationResult::zero(aggr.kind));
@@ -921,7 +907,7 @@ impl Aggregation {
                 if computed[aggr_i] {
                     continue;
                 }
-                let computed_chunk = aggr.expr.compute_chunk(&mut readers, bitmask)?;
+                let computed_chunk = aggr.expr.compute_chunk(&mut readers, bitmask, timer)?;
                 results[aggr_i].concat(aggr.kind.dispatch_on_vec(computed_chunk)?, aggr.kind)?;
             }
         }

@@ -25,27 +25,28 @@ $ cargo run --bin csv2bin --release -- "DATA_DICT/*"
 $ cd experimenter
 # create directory for saving experiment checkpoints
 $ mkdir save compressor_configs data/filter_config
-$ cargo run --release --bin experimenter -- all -c compressor_configs --exact-precision -f DATA_DICT/filter_config -b DATA_DICT/binary --create-config --n 10 --in-memory -s save
+$ sudo ../target/release/experimenter all -c compressor_configs --exact-precision -f DATA_DICT/filter_config -b DATA_DICT/binary --create-config --n 10 --in-memory -s save
 ```
 Results will be saved in `DATA_DICT/result`
 
 ### 1-NN on UCRArchive_2018
 ```bash
 $ cd experimenter
-$ cargo run --release -- -i DATA_DICT/UCRArchive_2018/ ucr2018 -o DATA_DICT
+$ sudo ../target/release/experimenter -i DATA_DICT/UCRArchive_2018/ ucr2018 -o DATA_DICT
 ```
 Results will be saved in `DATA_DICT/result`
 
 ### Matrix Multiplication with CUDA
 ```bash
 $ cd experimenter
-$ cargo run --release --features=cuda -- matrix-cuda -o OUTDIR
+$ cargo build --release --features=cuda # Please also specify your RUSTFLAGS and TARGET_CPU
+$ sudo ../target/release/experimenter matrix-cuda -o OUTDIR
 ```
 
 ### embeddings
 ```bash
 $ cd experimenter
-$ cargo run --release -- -i DATA_DICT embedding -o DATA_DICT
+$ sudo ../target/release/experimenter -i DATA_DICT embedding -o DATA_DICT
 ```
 Results will be saved in `DATA_DICT/result`
 
@@ -54,7 +55,7 @@ Results will be saved in `DATA_DICT/result`
 $ cd tools
 $ uv run gen-tpch.py # generate files on tools/tpch_data/
 $ cd experimenter
-$ cargo run --release -- tpch -i DATA_DIR -o OUT_DIR
+$ sudo ../target/release/experimenter tpch -i DATA_DIR -o OUT_DIR
 ```
 Results will be saved in `OUT_DIR/tpch`
 
