@@ -7,7 +7,7 @@ use std::{
 
 use anyhow::Context;
 use arrow::{
-    array::{Array as _, ArrayRef, Decimal128Array, StringArray},
+    array::{Array as _, ArrayRef, Decimal128Array},
     datatypes::DataType,
 };
 use ebi::{
@@ -18,54 +18,35 @@ use ebi::{
     compressor::CompressorConfig,
     decoder::{
         expr::Op,
-        query::{Predicate, Range, RangeValue, RoaringBitmap},
+        query::{Predicate, Range, RangeValue},
     },
     encoder::ChunkOption,
+    time::{SegmentedExecutionTimes, SerializableSegmentedExecutionTimes},
 };
 use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TpchResult01 {
     pub name: String,
     // Column name to Compression statistics
     pub compression: HashMap<String, CompressStatistics>,
+    pub queries_elapsed_time: Vec<u64>,
+    pub query_names: Vec<String>,
     pub query_elapsed_time: u64,
-    pub result: BTreeMap<(String, String), Vec<AggregationResult>>,
+    pub result: Vec<AggregationResult>,
+    pub timer: SerializableSegmentedExecutionTimes,
 }
-
-impl TpchResult01 {
-    fn into_serializable(self) -> SerializableTpchResult01 {
-        let mut result = BTreeMap::new();
-        for (key, value) in self.result {
-            let key = format!("{},{}", key.0, key.1);
-            result.insert(key, value);
-        }
-        SerializableTpchResult01 {
-            name: self.name,
-            compression: self.compression,
-            query_elapsed_time: self.query_elapsed_time,
-            result,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SerializableTpchResult01 {
-    pub name: String,
-    // Column name to Compression statistics
-    pub compression: HashMap<String, CompressStatistics>,
-    pub query_elapsed_time: u64,
-    pub result: BTreeMap<String, Vec<AggregationResult>>,
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TpchResult06 {
     pub name: String,
     // Column name to Compression statistics
     pub compression: HashMap<String, CompressStatistics>,
+    pub queries_elapsed_time: Vec<u64>,
+    pub query_names: Vec<String>,
     pub query_elapsed_time: u64,
     pub result: Vec<AggregationResult>,
+    pub timer: SerializableSegmentedExecutionTimes,
 }
 
 use crate::{get_compress_statistics, CompressStatistics, DEFAULT_CHUNK_OPTION};
@@ -127,10 +108,7 @@ fn extract_columns(file: File) -> anyhow::Result<BTreeMap<String, Vec<f64>>> {
 
 pub fn tpch_command(
     file_dir: impl AsRef<Path>,
-) -> anyhow::Result<(
-    HashMap<String, SerializableTpchResult01>,
-    HashMap<String, TpchResult06>,
-)> {
+) -> anyhow::Result<(HashMap<String, TpchResult01>, HashMap<String, TpchResult06>)> {
     let mut h01_result = None;
     let mut h06_result = None;
     for file in file_dir.as_ref().read_dir()? {
@@ -231,58 +209,7 @@ fn h01_aggregations(column_to_index: &HashMap<String, usize>) -> Vec<Aggregation
     ]
 }
 
-pub fn get_h01_group_by_bitmask(
-    file: File,
-) -> anyhow::Result<BTreeMap<(String, String), RoaringBitmap>> {
-    // ❶ Parquet → RecordBatch reader
-    let batch_reader = ParquetRecordBatchReaderBuilder::try_new(file)?
-        .with_batch_size(8192) // arbitrary (default is 1024)
-        .build()?;
-
-    // ❷ Map: group → mask
-    let mut group_masks: BTreeMap<(String, String), RoaringBitmap> = BTreeMap::new();
-    let mut global_row_id: u32 = 0; // Row index that spans batches
-
-    // ❸ Process record batches sequentially
-    for maybe_batch in batch_reader {
-        let batch = maybe_batch.context("Failed to read record batch")?;
-        let schema = batch.schema();
-
-        // Get indices of the required columns by name
-        let rf_idx = schema
-            .index_of("l_returnflag")
-            .context("Column l_returnflag not found")?;
-        let ls_idx = schema
-            .index_of("l_linestatus")
-            .context("Column l_linestatus not found")?;
-
-        // Downcast to Arrow `StringArray`
-        let rf_arr = batch
-            .column(rf_idx)
-            .as_any()
-            .downcast_ref::<StringArray>()
-            .context("l_returnflag must be StringArray")?;
-        let ls_arr = batch
-            .column(ls_idx)
-            .as_any()
-            .downcast_ref::<StringArray>()
-            .context("l_linestatus must be StringArray")?;
-
-        // ❹ Iterate over rows and set the corresponding bits
-        for row in 0..batch.num_rows() {
-            let key = (rf_arr.value(row).to_owned(), ls_arr.value(row).to_owned());
-            group_masks.entry(key).or_default().insert(global_row_id);
-
-            global_row_id += 1;
-        }
-    }
-
-    Ok(group_masks)
-}
-
-pub fn process_h01(
-    path: impl AsRef<Path>,
-) -> anyhow::Result<HashMap<String, SerializableTpchResult01>> {
+pub fn process_h01(path: impl AsRef<Path>) -> anyhow::Result<HashMap<String, TpchResult01>> {
     let mut results = HashMap::new();
     let file = File::open(path.as_ref())?;
     let columns = extract_columns(file).with_context(|| {
@@ -291,8 +218,6 @@ pub fn process_h01(
             path.as_ref().display()
         )
     })?;
-    let group = get_h01_group_by_bitmask(File::open(path.as_ref())?)?;
-
     let column_to_index = columns
         .keys()
         .enumerate()
@@ -300,7 +225,6 @@ pub fn process_h01(
         .collect::<HashMap<_, _>>();
 
     for comp_conf in tqdm::tqdm(all_configs(100)) {
-        let group = group.clone();
         let mut compression_statistics = HashMap::new();
         let method_name = format!("{:?}", comp_conf.compression_scheme());
         let mut decoders = Vec::with_capacity(columns.len());
@@ -312,44 +236,80 @@ pub fn process_h01(
 
         let h01_aggregations = h01_aggregations(&column_to_index);
 
-        let mut query_result = BTreeMap::new();
-        let start = std::time::Instant::now();
-        for (group, bitmask) in group {
-            let number_of_records = bitmask.len() as usize;
-            // run aggregations
-            let mut result =
-                Aggregation::compute_multiple(&h01_aggregations, &mut decoders, &bitmask)?;
-            // push avg,count results manually
+        let number_of_records = decoders[0].footer().number_of_records() as usize;
+        // run aggregations
+        let mut queries_elapsed_time = Vec::new();
+        let mut query_names = Vec::new();
+        let mut timer = SegmentedExecutionTimes::new();
+        let mut result = {
+            let start = std::time::Instant::now();
+            let result =
+                Aggregation::compute_multiple(&h01_aggregations, &mut decoders, None, &mut timer)?;
+            let elapsed_time = start.elapsed().as_nanos().try_into().unwrap_or(u64::MAX);
+            queries_elapsed_time.push(elapsed_time);
+            query_names.push(
+                [
+                    "SUM(l_quantity)",
+                    "SUM(l_extendedprice)",
+                    "SUM(l_extendedprice * (1 - l_discount))",
+                    "SUM((l_extendedprice * (1 - l_discount)) * (1 + l_tax))",
+                    "SUM(l_discount)",
+                ]
+                .into_iter()
+                .fold(String::new(), |acc, x| acc + "\n" + x),
+            );
+            result
+        };
+        // push avg,count results manually
 
+        {
             // result[0] is SUM(l_quantity)
-            result.push(AggregationResult::Scalar(
-                result[0].scalar().unwrap() / number_of_records as f64,
-            ));
+            let start = std::time::Instant::now();
+            let v =
+                AggregationResult::Scalar(result[0].scalar().unwrap() / number_of_records as f64);
+            let elapsed = start.elapsed().as_nanos().try_into().unwrap_or(u64::MAX);
+            result.push(v);
+            queries_elapsed_time.push(elapsed);
+            query_names.push("AVG(l_quantity)".to_string());
+        }
+        {
             // result[1] is SUM(l_extendedprice)
-            result.push(AggregationResult::Scalar(
-                result[1].scalar().unwrap() / number_of_records as f64,
-            ));
+            let start = std::time::Instant::now();
+            let v =
+                AggregationResult::Scalar(result[1].scalar().unwrap() / number_of_records as f64);
+            let elapsed = start.elapsed().as_nanos().try_into().unwrap_or(u64::MAX);
+            result.push(v);
+            queries_elapsed_time.push(elapsed);
+            query_names.push("AVG(l_extendedprice)".to_string());
+        }
+        {
             // result[4] is SUM(l_discount)
-            result[4] =
+            let start = std::time::Instant::now();
+            let v =
                 AggregationResult::Scalar(result[4].scalar().unwrap() / number_of_records as f64);
-            result.push(AggregationResult::Integer(number_of_records));
-            // count(*)
+            let elapsed = start.elapsed().as_nanos().try_into().unwrap_or(u64::MAX);
+            result[4] = v;
+            query_names.push("AVG(l_discount)".to_string());
+            queries_elapsed_time.push(elapsed);
+        }
+        result.push(AggregationResult::Integer(number_of_records));
+        // count(*)
 
-            query_result.insert(group.clone(), result);
-        }
-        let elapsed_time = start.elapsed().as_nanos().try_into().unwrap_or(u64::MAX);
+        let total_elapsed_time = queries_elapsed_time.iter().sum::<u64>();
         // swap the order of the result for the consistency with SQL
-        for (_, result) in query_result.iter_mut() {
-            result.swap(4, 6);
-        }
+        result.swap(4, 6);
+        query_names.swap(4 - 3, 6 - 3);
 
         let result = TpchResult01 {
             name: "h01".to_string(),
             compression: compression_statistics,
-            query_elapsed_time: elapsed_time,
-            result: query_result,
+            queries_elapsed_time,
+            query_names,
+            query_elapsed_time: total_elapsed_time,
+            result,
+            timer: timer.into(),
         };
-        results.insert(method_name, result.into_serializable());
+        results.insert(method_name, result);
     }
 
     Ok(results)
@@ -424,18 +384,52 @@ pub fn process_h06(path: impl AsRef<Path>) -> anyhow::Result<HashMap<String, Tpc
             .expect("Column not found");
         let h06_aggregations = h06_aggregations(&column_to_index);
 
-        let start = std::time::Instant::now();
+        let mut query_names = Vec::new();
+        let mut queries_elapsed_time = Vec::new();
+        let mut timer = SegmentedExecutionTimes::new();
+
         // generate bitmask
-        let bitmask = decoders[predicate0_index].filter(predicate0, None, None)?;
-        let bitmask = decoders[predicate1_index].filter(predicate1, Some(&bitmask), None)?;
+        let bitmask = {
+            let start = std::time::Instant::now();
+            let bitmask = decoders[predicate0_index].filter(predicate0, None, None)?;
+            let elapsed_time = start.elapsed().as_nanos().try_into().unwrap_or(u64::MAX);
+            queries_elapsed_time.push(elapsed_time);
+            query_names.push("l_discount BETWEEN 0.05 AND 0.07".to_string());
+            timer += decoders[predicate0_index].segmented_execution_times();
+            bitmask
+        };
+        let bitmask = {
+            let start = std::time::Instant::now();
+            let bitmask = decoders[predicate1_index].filter(predicate1, Some(&bitmask), None)?;
+            let elapsed_time = start.elapsed().as_nanos().try_into().unwrap_or(u64::MAX);
+            queries_elapsed_time.push(elapsed_time);
+            query_names.push("l_quantity < 24".to_string());
+            timer += decoders[predicate1_index].segmented_execution_times();
+            bitmask
+        };
         // run aggregations
-        let result = Aggregation::compute_multiple(&h06_aggregations, &mut decoders, &bitmask)?;
-        let elapsed_time = start.elapsed().as_nanos().try_into().unwrap_or(u64::MAX);
+        let result = {
+            let start = std::time::Instant::now();
+            let result = Aggregation::compute_multiple(
+                &h06_aggregations,
+                &mut decoders,
+                Some(&bitmask),
+                &mut timer,
+            )?;
+            let elapsed_time = start.elapsed().as_nanos().try_into().unwrap_or(u64::MAX);
+            queries_elapsed_time.push(elapsed_time);
+            query_names.push("SUM(l_extendedprice * l_discount)".to_string());
+            result
+        };
+        let total_elapsed_time = queries_elapsed_time.iter().sum::<u64>();
 
         let result = TpchResult06 {
             name: "h06".to_string(),
             compression: compression_statistics,
-            query_elapsed_time: elapsed_time,
+            query_elapsed_time: total_elapsed_time,
+            queries_elapsed_time,
+            query_names,
+            timer: timer.into(),
             result,
         };
         results.insert(method_name, result);

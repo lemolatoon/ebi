@@ -7,6 +7,7 @@ use ebi::{
     compressor::CompressorConfig,
     decoder::{self, expr::Op},
     encoder::ChunkOption,
+    time::SegmentedExecutionTimes,
 };
 use roaring::RoaringBitmap;
 
@@ -472,7 +473,7 @@ fn test_expr1() {
     // Test sum
     let mut decoders = helper::decoders(vec![&[0.0, 2.0, 3.0, 4.0, 5.0]]);
     let result = Aggregation::new(AggregationKind::Sum, Expr::Index(0))
-        .compute(&mut decoders, &RoaringBitmap::full())
+        .compute(&mut decoders, None, &mut SegmentedExecutionTimes::new())
         .unwrap();
     assert_eq!(result, AggregationResult::Scalar(14.0));
 }
@@ -498,7 +499,7 @@ fn test_expr2() {
     );
     assert_eq!(
         result
-            .compute(&mut decoders, &RoaringBitmap::full())
+            .compute(&mut decoders, None, &mut SegmentedExecutionTimes::new())
             .unwrap(),
         AggregationResult::Scalar(61.0)
     );
@@ -509,7 +510,7 @@ fn test_expr3() {
     // Sum with Index only
     let mut decoders = helper::decoders(vec![&[0.0, 2.0, 3.0, 4.0, 5.0]]);
     let result = Aggregation::new(AggregationKind::Sum, Expr::Index(0))
-        .compute(&mut decoders, &RoaringBitmap::full())
+        .compute(&mut decoders, None, &mut SegmentedExecutionTimes::new())
         .unwrap();
     assert_eq!(result, AggregationResult::Scalar(14.0));
 }
@@ -531,7 +532,7 @@ fn test_expr4() {
         rhs: Box::new(Expr::Index(1)),
     };
     let result = Aggregation::new(AggregationKind::Sum, sum_expr)
-        .compute(&mut decoders, &RoaringBitmap::full())
+        .compute(&mut decoders, None, &mut SegmentedExecutionTimes::new())
         .unwrap();
     // (-0*1+1) + (2*2+2) + (-3*3+3) + (4*4+4) + (7*5+5) = 1 + 6 + (-6) + 20 + 40 = 61
     assert_eq!(result, AggregationResult::Scalar(61.0));
@@ -544,7 +545,7 @@ fn test_expr5() {
     // Max with Index only
     let mut decoders = helper::decoders(vec![&[1.0, 5.0, 2.0, 4.0]]);
     let result = Aggregation::new(AggregationKind::Max, Expr::Index(0))
-        .compute(&mut decoders, &RoaringBitmap::full())
+        .compute(&mut decoders, None, &mut SegmentedExecutionTimes::new())
         .unwrap();
     assert_eq!(result, AggregationResult::Scalar(5.0));
 }
@@ -559,7 +560,7 @@ fn test_expr6() {
         rhs: Box::new(Expr::Index(1)),
     };
     let result = Aggregation::new(AggregationKind::Max, max_expr)
-        .compute(&mut decoders, &RoaringBitmap::full())
+        .compute(&mut decoders, None, &mut SegmentedExecutionTimes::new())
         .unwrap();
     // products: [2, 2, 12] → max = 12
     assert_eq!(result, AggregationResult::Scalar(12.0));
@@ -572,7 +573,7 @@ fn test_expr7() {
     // Min with Index only
     let mut decoders = helper::decoders(vec![&[1.0, 5.0, 2.0, 4.0]]);
     let result = Aggregation::new(AggregationKind::Min, Expr::Index(0))
-        .compute(&mut decoders, &RoaringBitmap::full())
+        .compute(&mut decoders, None, &mut SegmentedExecutionTimes::new())
         .unwrap();
     assert_eq!(result, AggregationResult::Scalar(1.0));
 }
@@ -587,7 +588,7 @@ fn test_expr8() {
         rhs: Box::new(Expr::Index(1)),
     };
     let result = Aggregation::new(AggregationKind::Min, min_expr)
-        .compute(&mut decoders, &RoaringBitmap::full())
+        .compute(&mut decoders, None, &mut SegmentedExecutionTimes::new())
         .unwrap();
     // differences: [1, -1, 3] → min = -1
     assert_eq!(result, AggregationResult::Scalar(-1.0));
@@ -598,14 +599,15 @@ fn test_expr8() {
 #[test]
 fn test_expr9() {
     // Count with Index only, full bitmask
-    let mut decoders = helper::decoders(vec![&[0.0, 0.0, 0.0], &[1.0, 1.0, 20.0]]);
-    let result = Aggregation::new(AggregationKind::Count, Expr::Index(0))
+    let mut decoders = helper::decoders(vec![&[0.0, 0.2, 0.3], &[1.0, 1.0, 20.0]]);
+    let result = Aggregation::new(AggregationKind::None, Expr::Index(0))
         .compute(
             &mut decoders,
-            &RoaringBitmap::from_sorted_iter(0..2).unwrap(),
+            Some(&RoaringBitmap::from_sorted_iter(0..2).unwrap()),
+            &mut SegmentedExecutionTimes::new(),
         )
         .unwrap();
-    assert_eq!(result, AggregationResult::Integer(2));
+    assert_eq!(result, AggregationResult::Array(vec![0.0, 0.2]));
 }
 
 #[test]
@@ -615,12 +617,16 @@ fn test_expr10() {
     let mut bm = RoaringBitmap::new();
     bm.insert(0);
     bm.insert(2);
-    let mut decoders = helper::decoders(vec![&[0.0, 0.0, 0.0, 0.0]]);
-    let result = Aggregation::new(AggregationKind::Count, Expr::Index(0))
-        .compute(&mut decoders, &bm)
+    let mut decoders = helper::decoders(vec![&[1.0, 2.2, 5.0, 4.0]]);
+    let result = Aggregation::new(AggregationKind::Sum, Expr::Index(0))
+        .compute(
+            &mut decoders,
+            Some(&bm),
+            &mut SegmentedExecutionTimes::new(),
+        )
         .unwrap();
     // from one decoder of length 4, bitmask len = 2
-    assert_eq!(result, AggregationResult::Integer(2));
+    assert_eq!(result, AggregationResult::Scalar(6.0));
 }
 
 #[test]
@@ -637,8 +643,13 @@ fn test_multiple_sum_index_and_binary() {
             },
         ),
     ];
-    let result =
-        Aggregation::compute_multiple(&aggs, &mut decoders, &RoaringBitmap::full()).unwrap();
+    let result = Aggregation::compute_multiple(
+        &aggs,
+        &mut decoders,
+        None,
+        &mut SegmentedExecutionTimes::new(),
+    )
+    .unwrap();
     assert_eq!(
         result,
         vec![
@@ -662,8 +673,13 @@ fn test_multiple_max_index_and_binary() {
             },
         ),
     ];
-    let result =
-        Aggregation::compute_multiple(&aggs, &mut decoders, &RoaringBitmap::full()).unwrap();
+    let result = Aggregation::compute_multiple(
+        &aggs,
+        &mut decoders,
+        None,
+        &mut SegmentedExecutionTimes::new(),
+    )
+    .unwrap();
     assert_eq!(
         result,
         vec![
@@ -687,8 +703,13 @@ fn test_multiple_min_index_and_binary() {
             },
         ),
     ];
-    let result =
-        Aggregation::compute_multiple(&aggs, &mut decoders, &RoaringBitmap::full()).unwrap();
+    let result = Aggregation::compute_multiple(
+        &aggs,
+        &mut decoders,
+        None,
+        &mut SegmentedExecutionTimes::new(),
+    )
+    .unwrap();
     assert_eq!(
         result,
         vec![
@@ -706,9 +727,9 @@ fn test_multiple_count_index_and_binary() {
     bm.insert(2); // only indices 0 and 2 will be counted
 
     let aggs = vec![
-        Aggregation::new(AggregationKind::Count, Expr::Index(0)), // count = 2
+        Aggregation::new(AggregationKind::Sum, Expr::Index(0)), // count = 2
         Aggregation::new(
-            AggregationKind::Count,
+            AggregationKind::Max,
             Expr::Binary {
                 op: Op::Add,
                 lhs: Box::new(Expr::Index(0)),
@@ -716,10 +737,19 @@ fn test_multiple_count_index_and_binary() {
             },
         ),
     ];
-    let result = Aggregation::compute_multiple(&aggs, &mut decoders, &bm).unwrap();
+    let result = Aggregation::compute_multiple(
+        &aggs,
+        &mut decoders,
+        Some(&bm),
+        &mut SegmentedExecutionTimes::new(),
+    )
+    .unwrap();
     assert_eq!(
         result,
-        vec![AggregationResult::Integer(2), AggregationResult::Integer(2),]
+        vec![
+            AggregationResult::Scalar(8.0),
+            AggregationResult::Scalar(12.0),
+        ]
     );
 }
 

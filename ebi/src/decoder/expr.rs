@@ -1,7 +1,10 @@
 use roaring::RoaringBitmap;
 use std::io::{Cursor, Read};
 
-use crate::decoder::{self, error::DecoderError};
+use crate::{
+    decoder::{self, error::DecoderError},
+    time::SegmentedExecutionTimes,
+};
 
 use super::{chunk_reader::GeneralChunkReader, FileMetadataLike};
 
@@ -64,14 +67,15 @@ impl Expr {
     pub fn compute_chunk<T: FileMetadataLike, R: Read>(
         &self,
         readers: &mut Vec<GeneralChunkReader<'_, T, R>>,
-        bitmask: &RoaringBitmap,
+        bitmask: Option<&RoaringBitmap>,
+        timer: &mut SegmentedExecutionTimes,
     ) -> decoder::Result<Vec<f64>> {
         match self {
             Expr::Literal(_) => Err(DecoderError::PreconditionsNotMet.into()),
             Expr::Binary { op, lhs, rhs } => match (lhs.literal(), rhs.literal()) {
                 (None, None) => {
-                    let lhs = lhs.compute_chunk(readers, bitmask)?;
-                    let rhs = rhs.compute_chunk(readers, bitmask)?;
+                    let lhs = lhs.compute_chunk(readers, bitmask, timer)?;
+                    let rhs = rhs.compute_chunk(readers, bitmask, timer)?;
                     Ok(lhs
                         .into_iter()
                         .zip(rhs)
@@ -79,11 +83,11 @@ impl Expr {
                         .collect())
                 }
                 (None, Some(rhs)) => {
-                    let lhs = lhs.compute_chunk(readers, bitmask)?;
+                    let lhs = lhs.compute_chunk(readers, bitmask, timer)?;
                     Ok(lhs.into_iter().map(|lhs| op.doit(lhs, rhs)).collect())
                 }
                 (Some(lhs), None) => {
-                    let rhs = rhs.compute_chunk(readers, bitmask)?;
+                    let rhs = rhs.compute_chunk(readers, bitmask, timer)?;
                     Ok(rhs.into_iter().map(|rhs| op.doit(lhs, rhs)).collect())
                 }
                 (Some(_), Some(_)) => Err(DecoderError::PreconditionsNotMet.into()),
@@ -104,7 +108,8 @@ impl Expr {
                     };
 
                     let mut writer = Cursor::new(raw_buffer_byte_slice);
-                    readers[*i].materialize(&mut writer, Some(bitmask))?;
+                    readers[*i].materialize(&mut writer, bitmask)?;
+                    *timer += readers[*i].segmented_execution_times();
 
                     writer.position() as usize
                 };
@@ -166,8 +171,9 @@ mod tests {
             rhs: Box::new(Expr::Index(1)),
         };
         let mut readers = vec![r1, r2];
-        let bitmask = RoaringBitmap::full();
-        let result = expr.compute_chunk(&mut readers, &bitmask).unwrap();
+        let result = expr
+            .compute_chunk(&mut readers, None, &mut SegmentedExecutionTimes::new())
+            .unwrap();
         assert_eq!(result.len(), 4);
         assert_eq!(&result[0..4], &[9.0, 9.0, 26.0, 10.0]);
     }
@@ -178,8 +184,7 @@ mod tests {
         #[allow(clippy::approx_constant)]
         let expr = Expr::Literal(3.14);
         let mut readers: Vec<GeneralChunkReader<Metadata, Cursor<Vec<u8>>>> = vec![];
-        let bitmask = RoaringBitmap::full();
-        let res = expr.compute_chunk(&mut readers, &bitmask);
+        let res = expr.compute_chunk(&mut readers, None, &mut SegmentedExecutionTimes::new());
         assert!(res.is_err());
     }
 
@@ -192,8 +197,7 @@ mod tests {
             rhs: Box::new(Expr::Literal(3.0)),
         };
         let mut readers: Vec<GeneralChunkReader<Metadata, Cursor<Vec<u8>>>> = vec![];
-        let bitmask = RoaringBitmap::full();
-        let res = expr.compute_chunk(&mut readers, &bitmask);
+        let res = expr.compute_chunk(&mut readers, None, &mut SegmentedExecutionTimes::new());
         assert!(res.is_err());
     }
 
@@ -212,8 +216,9 @@ mod tests {
             rhs: Box::new(Expr::Index(0)),
         };
         let mut readers = vec![r];
-        let bitmask = RoaringBitmap::full();
-        let result = expr.compute_chunk(&mut readers, &bitmask).unwrap();
+        let result = expr
+            .compute_chunk(&mut readers, None, &mut SegmentedExecutionTimes::new())
+            .unwrap();
         // Expect every value multiplied by 10.0.
         let expected: Vec<f64> = values.into_iter().map(|v| v * 10.0).collect();
         assert_eq!(result, expected);
@@ -234,8 +239,9 @@ mod tests {
             rhs: Box::new(Expr::Literal(2.0)),
         };
         let mut readers = vec![r];
-        let bitmask = RoaringBitmap::full();
-        let result = expr.compute_chunk(&mut readers, &bitmask).unwrap();
+        let result = expr
+            .compute_chunk(&mut readers, None, &mut SegmentedExecutionTimes::new())
+            .unwrap();
         let expected: Vec<f64> = values.into_iter().map(|v| v - 2.0).collect();
         assert_eq!(result, expected);
     }
@@ -253,7 +259,9 @@ mod tests {
         let mut bm = RoaringBitmap::new();
         bm.insert(0);
         bm.insert(2);
-        let result = expr.compute_chunk(&mut readers, &bm).unwrap();
+        let result = expr
+            .compute_chunk(&mut readers, Some(&bm), &mut SegmentedExecutionTimes::new())
+            .unwrap();
 
         // Expect only the values at indices 0 and 2.
         let expected = vec![5.0, 7.0];
