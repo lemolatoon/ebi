@@ -3,7 +3,8 @@ use either::Either;
 #[cfg(feature = "cuda")]
 use experimenter::matmul_cuda::matrix_cuda_command;
 use experimenter::{
-    get_appropriate_precision, get_compress_statistics, round_by_scale, save_json_safely,
+    flush_cache, get_appropriate_precision, get_compress_statistics, round_by_scale,
+    save_json_safely,
     tpch::{self},
     AllOutput, AllOutputInner, CompressStatistics, CompressionConfig, FilterConfig,
     FilterFamilyOutput, FilterMaterializeConfig, MaterializeConfig, MatrixResult, MaxConfig,
@@ -349,6 +350,8 @@ impl Commands {
 }
 
 fn main() -> anyhow::Result<()> {
+    // To notify the user this program requires `sudo` to run
+    flush_cache().unwrap();
     let cli = Cli::parse();
 
     if let Commands::All(args) = &cli.command {
@@ -1559,6 +1562,7 @@ fn compress_command(
             compressor_config,
         );
 
+        flush_cache()?;
         let start = std::time::Instant::now();
         encoder.encode().context("Failed to encode")?;
         let elapsed_time_nanos = start.elapsed().as_nanos().try_into().unwrap_or(u64::MAX);
@@ -1650,6 +1654,7 @@ fn filter_command(
                 filename.as_ref().display()
             ))?;
 
+        flush_cache()?;
         let start = std::time::Instant::now();
         let bitmask = decoder
             .filter(predicate, bitmask.as_ref(), chunk_id)
@@ -1750,6 +1755,7 @@ fn filter_materialize_command(
             ))?
             .into_buffered();
 
+        flush_cache()?;
         let start = std::time::Instant::now();
         decoder
             .filter_materialize(&mut decoder_output, predicate, bitmask.as_ref(), chunk_id)
@@ -1847,6 +1853,7 @@ fn materialize_command(
             ))?
             .into_buffered();
 
+        flush_cache()?;
         let start = std::time::Instant::now();
         decoder
             .materialize(&mut decoder_output, bitmask.as_ref(), chunk_id)
@@ -1935,6 +1942,7 @@ fn max_command(
                 "Failed to create decoder from input file.: {}",
                 filename.as_ref().display()
             ))?;
+        flush_cache()?;
         let start = std::time::Instant::now();
         let max_fp = decoder
             .max(bitmask.as_ref(), chunk_id)
@@ -2022,6 +2030,7 @@ fn sum_command(
                 "Failed to create decoder from input file.: {}",
                 filename.as_ref().display()
             ))?;
+        flush_cache()?;
         let start = std::time::Instant::now();
         let sum_fp = decoder
             .sum(bitmask.as_ref(), chunk_id)
