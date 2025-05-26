@@ -80,6 +80,12 @@ impl<'handle, T: FileMetadataLike, R: Read> GeneralChunkReader<'handle, T, R> {
         self.handle.is_last_chunk()
     }
 
+    /// Reset the timer explicitly. Calling this method means that you have to responsible for the timer mesurements,
+    /// since api::Decoder assumes that the timer never got reset.
+    pub fn reset_timer(&mut self) {
+        self.timer = SegmentedExecutionTimes::new();
+    }
+
     /// Returns the execution times of the method, which is measured by the previous operation.
     pub fn segmented_execution_times(&self) -> SegmentedExecutionTimes {
         self.timer

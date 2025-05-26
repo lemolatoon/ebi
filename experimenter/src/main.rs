@@ -608,6 +608,7 @@ fn main() -> anyhow::Result<()> {
 
         // without controlled precision support
         let output = embedding_command(input_dir)?;
+        println!("Embedding saved to: {}", unique_output_dir.display());
         save_embedding_json(output, &unique_output_dir)?;
 
         return Ok(());

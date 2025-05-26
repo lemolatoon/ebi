@@ -108,6 +108,7 @@ impl Expr {
                     };
 
                     let mut writer = Cursor::new(raw_buffer_byte_slice);
+                    readers[*i].reset_timer();
                     readers[*i].materialize(&mut writer, bitmask)?;
                     *timer += readers[*i].segmented_execution_times();
 
