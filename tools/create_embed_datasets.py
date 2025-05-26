@@ -7,11 +7,8 @@ from tqdm import tqdm
 
 # Metadata for datasets including dataset name and the column name to extract
 dataset_metas = [
-    # ("Cohere/wikipedia-22-12-simple-embeddings", "emb"),
-    # ("MongoDB/subset_arxiv_papers_with_embeddings", "embedding"),
+    ("MongoDB/subset_arxiv_papers_with_embeddings", "embedding"),
     ("MongoDB/airbnb_embeddings", "text_embeddings"),
-    ("MongoDB/airbnb_embeddings", "image_embeddings"),
-    # ("asahi417/seamless-align-deA-enA.speaker-embedding.metavoice", "deA.audio.speaker_embedding"),
 ]
 
 
