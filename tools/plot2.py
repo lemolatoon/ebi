@@ -15,14 +15,12 @@ from plot import (
     AveragedAllOutputHandler,
     AveragedAllOutputInner,
     AveragedStats,
-    get_color,
-    get_color_exe,
     segment_mapping,
     mapped_processing_types,
     compression_methods,
 )
 
-from common import default_compression_method_order, default_omit_methods
+from common import default_compression_method_order, default_omit_methods, get_hatch, get_hatch_exe, get_color_exe, get_color
 
 import pandas as pd
 import numpy as np
@@ -1470,69 +1468,6 @@ def default_processing_types_order():
     pts.append("Other Processing")
     return pts
 
-
-hatch_map_exe: dict[str, str] = {}
-
-
-def get_hatch_exe(label: str) -> str:
-    global hatch_map_exe
-    plt.rcParams["hatch.linewidth"] = 0.3
-    hatches = [
-        "O.",
-        "//",
-        "++",
-        "//",
-        "\\\\",
-        "||",
-        "--",
-        "++",
-        "xx",
-        "oo",
-        "OO",
-        "..",
-        "**",
-    ]
-    hatches.reverse()
-
-    if label in hatch_map_exe:
-        return hatch_map_exe[label]
-
-    next_index = len(hatch_map_exe) % len(hatches)
-    hatch_map_exe[label] = hatches[next_index]
-
-    return hatch_map_exe[label]
-
-
-hatch_map: dict[str, str] = {}
-
-
-def get_hatch(label: str) -> str:
-    global hatch_map
-    plt.rcParams["hatch.linewidth"] = 0.3
-    hatches = [
-        "O.",
-        "//",
-        "++",
-        "//",
-        "\\\\",
-        "||",
-        "--",
-        "++",
-        "xx",
-        "oo",
-        "OO",
-        "..",
-        "**",
-    ]
-    hatches.reverse()
-
-    if label in hatch_map:
-        return hatch_map[label]
-
-    next_index = len(hatch_map) % len(hatches)
-    hatch_map[label] = hatches[next_index]
-
-    return hatch_map[label]
 
 
 def plot_absolute_stacked_execution_times_for_methods(

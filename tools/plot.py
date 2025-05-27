@@ -26,6 +26,8 @@ from typing_extensions import (
 )
 from datetime import datetime
 
+from common import CompressionMethodKeys, get_color_exe, compression_methods
+
 
 class CompressionConfig(TypedDict):
     chunk_option: (
@@ -1154,22 +1156,6 @@ class AllOutputHandler:
         return AveragedAllOutputHandler(inner)
 
 
-CompressionMethodKeys = Literal[
-    "Uncompressed",
-    "RLE",
-    "Gorilla",
-    "Chimp",
-    "Chimp128",
-    "ElfOnChimp",
-    "Elf",
-    "BUFF",
-    "DeltaSprintz",
-    "Zstd",
-    "Gzip",
-    "Snappy",
-    "FFIAlp",
-]
-
 
 class SegmentLabelMapping(TypedDict):
     io_read_nanos: List[str]
@@ -1257,24 +1243,6 @@ segment_mapping: Dict[CompressionMethodKeys, SegmentLabelMapping] = {
         **default_mapping,
     },
 }  # type: ignore
-compression_methods: List[CompressionMethodKeys] = [
-    "Uncompressed",
-    "RLE",
-    "Gorilla",
-    "Chimp",
-    "Chimp128",
-    "ElfOnChimp",
-    "Elf",
-    "BUFF",
-    "DeltaSprintz",
-    "Zstd",
-    "Gzip",
-    "Snappy",
-    "FFIAlp",
-]
-skip_methods = set(["RLE"])
-for method in skip_methods:
-    compression_methods.remove(method)
 method_mapping = {
     **{method: method for method in compression_methods},
     **{f"BUFF_{i}": f"Buff_{i}" for i in [1, 3, 5, 8]},
@@ -1311,22 +1279,6 @@ def calculate_ratios(
         ratios[key_mapped] = (value / total_time) * 100  # Express as a percentage
     return ratios
 
-
-color_map_exe: dict[str, tuple[float, float, float, float]] = {}
-
-
-def get_color_exe(label: str) -> tuple[float, float, float, float]:
-    import seaborn as sns
-
-    global color_map_exe
-    if label in color_map_exe:
-        return color_map_exe[label]
-    next_index = len(color_map_exe)
-    assert next_index < 20
-    # color_map_exe[label] = matplotlib.colormaps["tab20"](next_index)
-    color_map_exe[label] = sns.color_palette("tab20", 13)[next_index]
-
-    return color_map_exe[label]
 
 
 def add_notes_to_plot(
@@ -1558,19 +1510,6 @@ def plot_boxplot(data, title, y_label, output_path, note_str: str | None = None)
     plt.savefig(output_path)
     plt.close()
 
-
-color_map: dict[str, tuple[float, float, float, float]] = {}
-
-
-def get_color(label: str) -> tuple[float, float, float, float]:
-    # Define a set of distinct colors for up to 11 methods
-    global color_map
-    if label in color_map:
-        return color_map[label]
-    next_index = len(color_map)
-    color_map[label] = matplotlib.colormaps["tab20"](next_index)
-
-    return color_map[label]
 
 
 def plot_combined_radar_chart(data_dict, title, labels, output_path):

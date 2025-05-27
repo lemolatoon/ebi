@@ -228,10 +228,10 @@ def process_tpch(df: pd.DataFrame, timer_df: pd.DataFrame, columns: list[str], t
         segment_mapping,
         normalized=True,
     )
-    ax.legend()
     fig.savefig(
         os.path.join(save_dir, f"{tag}_execution_time_stacked.png"),
-        bbox_inches='tight'
+        bbox_inches='tight',
+        dpi=300
     )
 
 
