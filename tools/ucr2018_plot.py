@@ -102,7 +102,7 @@ compression_methods_with_precision = [
 
 
 def create_df(path: str) -> pd.DataFrame:
-    assert os.path.exists(path)
+    assert os.path.exists(path), f"Path '{path}' does not exist."
 
     results = load_json_files_from_directory(path)
 
