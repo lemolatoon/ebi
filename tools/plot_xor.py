@@ -48,10 +48,10 @@ def create_df(path: str) -> pd.DataFrame:
     with open(path, "r") as f:
         all_output = cast(AllOutput, json.load(f))
     all_output: AllOutputHandler = AllOutputHandler(all_output)
-    assert "xor_dataset256x1024x1024" in all_output.datasets()
+    assert "xor_dataset_4194304" in all_output.datasets()
     # make sure there's only one dataset, otherwise we delete others
     for dataset in all_output.datasets():
-        if dataset != "xor_dataset256x1024x1024":
+        if dataset != "xor_dataset_4194304":
             del all_output.data[dataset]
     assert len(all_output.datasets()) == 1
 

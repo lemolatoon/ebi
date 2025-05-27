@@ -3,3 +3,4 @@
 /results*
 .ruff_cache
 /tpch_data
+/final

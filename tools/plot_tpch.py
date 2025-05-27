@@ -6,8 +6,10 @@ import json
 import matplotlib.pyplot as plt
 import seaborn as sns
 from common import default_compression_method_order
+from plot import get_average_execution_times_ratios, segment_mapping
+from plot2 import plot_absolute_stacked_execution_times_for_methods
 
-def average_tpch_results(data: list[dict]) -> dict:
+def average_tpch_results(data: list[dict]) -> tuple[dict, pd.DataFrame]: 
     """
     Compute average compression statistics and query elapsed time for each method.
     Ignores the 'result' field.
@@ -16,7 +18,13 @@ def average_tpch_results(data: list[dict]) -> dict:
     methods = data[0].keys()
     aggregated = {}
 
-    for method in methods:
+    segmented_exec_times_pd = {
+        "Inverse Query Elapsed Time": [],
+        "ExecTimeRatios": [],
+    }
+    index = []
+
+    for i, method in enumerate(methods):
         comp_acc = defaultdict(lambda: defaultdict(float))
         query_acc = 0
 
@@ -41,7 +49,24 @@ def average_tpch_results(data: list[dict]) -> dict:
             'query_elapsed_time': query_avg,
         }
 
-    return aggregated
+        # execute time ratios
+        index.append(method)
+        segmented_exec_times_pd["Inverse Query Elapsed Time"].append(
+            query_avg / 1e9 # Convert to seconds
+        )
+        timer = get_average_execution_times_ratios(
+                [run[method]['timer'] for run in data],
+                query_avg
+            )
+        for segment in timer.keys():
+            timer[segment] *= query_avg / 1e9  # Convert to seconds
+        segmented_exec_times_pd["ExecTimeRatios"].append(
+            timer
+        )
+
+    # Create DataFrame for execution times
+    segmented_exec_times_df = pd.DataFrame(segmented_exec_times_pd, index=index)
+    return aggregated, segmented_exec_times_df
 
 def create_dataframe(aggregated: dict) -> pd.DataFrame:
     """
@@ -70,28 +95,33 @@ def create_dataframe(aggregated: dict) -> pd.DataFrame:
 def load_result(path: str) -> pd.DataFrame:
     with open(path, 'r') as f:
         data = json.load(f)
-    avg = average_tpch_results(data)
-    return create_dataframe(avg)
+    avg, timer_df = average_tpch_results(data)
+    timer_df = timer_df.loc[default_compression_method_order()]
+    return create_dataframe(avg), timer_df
 
 def main():
     if len(sys.argv) < 2:
         print("No directory path provided")
         sys.exit(1)
+    yes = False
+    if len(sys.argv) == 3 and sys.argv[2] == "-y":
+        yes = True
+
     base_dir = sys.argv[1]
     assert os.path.isdir(base_dir)
     save_dir = os.path.join(".", "results", "tpch")
-    if os.path.exists(save_dir):
+    if not yes and os.path.exists(save_dir):
         print(f"Directory {save_dir} already exists. Please remove it first.")
         if input("Do you want to remove it? (y/n): ").strip().lower() != 'y':
             sys.exit(1)
     os.makedirs(save_dir, exist_ok=True)
     print(f"Saving results to '{save_dir}'")
     
-    df01 = load_result(f"{base_dir}/tpch_01.json")
-    df06 = load_result(f"{base_dir}/tpch_06.json")
+    df01, timer_df01 = load_result(f"{base_dir}/tpch_01.json")
+    df06, timer_df06 = load_result(f"{base_dir}/tpch_06.json")
 
-    process_h01(df01, save_dir)
-    process_h06(df06, save_dir)
+    process_h01(df01, timer_df01, save_dir)
+    process_h06(df06, timer_df06, save_dir)
 
 def plot_bar_chart(data: pd.DataFrame, metric_cols: list[str], title: str, ylabel: str, save_path: str):
     """
@@ -133,7 +163,7 @@ def plot_box_chart(data: pd.DataFrame, metric_cols: list[str], title: str, ylabe
     plt.savefig(save_path)
     plt.close()
 
-def process_tpch(df: pd.DataFrame, columns: list[str], tag: str, save_dir: str):
+def process_tpch(df: pd.DataFrame, timer_df: pd.DataFrame, columns: list[str], tag: str, save_dir: str):
     """
     Process a TPCH DataFrame and generate compression ratio, throughput and query time plots.
     """
@@ -188,6 +218,22 @@ def process_tpch(df: pd.DataFrame, columns: list[str], tag: str, save_dir: str):
         os.path.join(save_dir, f"{tag}_query_elapsed_time_bar.png"),
     )
 
+    fig, ax = plt.subplots()
+    plot_absolute_stacked_execution_times_for_methods(
+        ax,
+        timer_df,
+        "Inverse Query Elapsed Time",
+        "ExecTimeRatios",
+        "Execution Time (s)",
+        segment_mapping,
+        normalized=True,
+    )
+    ax.legend()
+    fig.savefig(
+        os.path.join(save_dir, f"{tag}_execution_time_stacked.png"),
+        bbox_inches='tight'
+    )
+
 
 tpch01_columns = [
     "l_quantity",
@@ -196,8 +242,8 @@ tpch01_columns = [
     "l_tax",
 ]
 # Define process_h01 and process_h06
-def process_h01(df: pd.DataFrame, save_dir: str):
-    process_tpch(df, tpch01_columns, "tpch_01", save_dir)
+def process_h01(df: pd.DataFrame, timer_df: pd.DataFrame, save_dir: str):
+    process_tpch(df, timer_df, tpch01_columns, "tpch_01", save_dir)
 
 
 tpch06_columns = [
@@ -205,8 +251,8 @@ tpch06_columns = [
     "l_discount",
     "l_quantity",
 ]
-def process_h06(df: pd.DataFrame, save_dir: str):
-    process_tpch(df, tpch06_columns, "tpch_06", save_dir)
+def process_h06(df: pd.DataFrame, timer_df: pd.DataFrame, save_dir: str):
+    process_tpch(df, timer_df, tpch06_columns, "tpch_06", save_dir)
 
 if __name__ == "__main__":
     main()

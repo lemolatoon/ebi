@@ -133,7 +133,7 @@ def get_average_execution_times_ratios(
     entire_time = average_elapsed_time_nanos
     averaged_execution_times["others"] = entire_time - sum(averaged_execution_times.values())
     execution_times_ratios = {
-        key: execution_times[key] / entire_time
+        key: averaged_execution_times[key] / entire_time
         for key in [*execution_times_keys, "others"]
     }
     return execution_times_ratios

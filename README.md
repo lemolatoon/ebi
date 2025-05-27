@@ -60,13 +60,7 @@ $ sudo ../target/release/experimenter tpch -i DATA_DIR -o OUT_DIR
 Results will be saved in `OUT_DIR/tpch`
 
 ### Plotting
-```bash
-$ cd tools
-$ python3 plot.py DATA_DICT/result/000.json
-$ python3 ucr2018_plot.py DATA_DICT/result/ucr2018/000
-$ python3 embedding_plot.py DATA_DICT/result/embedding/000/embedding_result.json
-$ uv run matrix_plot2.py OUTDIR/result/matrix_cuda/000 -cuda
-```
+See [tools/README.md](tools/README.md).
 
 ## License
 
