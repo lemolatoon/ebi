@@ -106,11 +106,16 @@ fn extract_columns(file: File) -> anyhow::Result<BTreeMap<String, Vec<f64>>> {
     Ok(columns)
 }
 
-pub fn tpch_command(
-    file_dir: impl AsRef<Path>,
-) -> anyhow::Result<(HashMap<String, TpchResult01>, HashMap<String, TpchResult06>)> {
+pub struct TpchCommandResult {
+    pub h01_simplified: HashMap<String, TpchResult01>,
+    pub h01: HashMap<String, TpchResult01>,
+    pub h06: HashMap<String, TpchResult06>,
+}
+
+pub fn tpch_command(file_dir: impl AsRef<Path>) -> anyhow::Result<TpchCommandResult> {
     let mut h01_result = None;
     let mut h06_result = None;
+
     for file in file_dir.as_ref().read_dir()? {
         let path = file?.path();
 
@@ -128,11 +133,18 @@ pub fn tpch_command(
             }
         }
     }
-
     anyhow::ensure!(h01_result.is_some(), "Failed to process h01.parquet file");
     anyhow::ensure!(h06_result.is_some(), "Failed to process h06.parquet file");
 
-    Ok((h01_result.unwrap(), h06_result.unwrap()))
+    let h01_parquet_path = file_dir.as_ref().join("h01.parquet");
+    let h01_simplified = process_h01_simplified(&h01_parquet_path)
+        .context("Failed to process h01.parquet with simplified method")?;
+
+    Ok(TpchCommandResult {
+        h01_simplified,
+        h01: h01_result.unwrap(),
+        h06: h06_result.unwrap(),
+    })
 }
 
 fn decoder(
@@ -431,6 +443,117 @@ pub fn process_h06(path: impl AsRef<Path>) -> anyhow::Result<HashMap<String, Tpc
             query_names,
             timer: timer.into(),
             result,
+        };
+        results.insert(method_name, result);
+    }
+
+    Ok(results)
+}
+
+fn h01_simplified_aggregations(column_to_index: &HashMap<String, usize>) -> Vec<Aggregation> {
+    vec![
+        Aggregation::sum(Expr::Index(column_to_index["l_quantity"])),
+        Aggregation::sum(Expr::Index(column_to_index["l_extendedprice"])),
+        Aggregation::sum(Expr::Index(column_to_index["l_discount"])),
+    ]
+}
+
+pub fn process_h01_simplified(
+    path: impl AsRef<Path>,
+) -> anyhow::Result<HashMap<String, TpchResult01>> {
+    let mut results = HashMap::new();
+    let file = File::open(path.as_ref())?;
+    let columns = extract_columns(file).with_context(|| {
+        format!(
+            "Failed to extract columns from file: {}",
+            path.as_ref().display()
+        )
+    })?;
+    let column_to_index = columns
+        .keys()
+        .enumerate()
+        .map(|(i, name)| (name.clone(), i))
+        .collect::<HashMap<_, _>>();
+
+    for comp_conf in tqdm::tqdm(all_configs(100)) {
+        let mut compression_statistics = HashMap::new();
+        let method_name = format!("{:?}", comp_conf.compression_scheme());
+        let mut decoders = Vec::with_capacity(columns.len());
+        for (col_name, values) in columns.iter() {
+            let decoder = decoder(values, &comp_conf, DEFAULT_CHUNK_OPTION)?;
+            compression_statistics.insert(col_name.clone(), get_compress_statistics(&decoder)?);
+            decoders.push(decoder);
+        }
+
+        let h01_simplified_aggregations = h01_simplified_aggregations(&column_to_index);
+
+        let number_of_records = decoders[0].footer().number_of_records() as usize;
+        // run aggregations
+        let mut queries_elapsed_time = Vec::new();
+        let mut query_names = Vec::new();
+        let mut timer = SegmentedExecutionTimes::new();
+        let mut result = {
+            let start = std::time::Instant::now();
+            let result = Aggregation::compute_multiple(
+                &h01_simplified_aggregations,
+                &mut decoders,
+                None,
+                &mut timer,
+            )?;
+            let elapsed_time = start.elapsed().as_nanos().try_into().unwrap_or(u64::MAX);
+            queries_elapsed_time.push(elapsed_time);
+            query_names.push(
+                ["SUM(l_quantity)", "SUM(l_extendedprice)", "SUM(l_discount)"]
+                    .into_iter()
+                    .fold(String::new(), |acc, x| acc + "\n" + x),
+            );
+            result
+        };
+        // push avg,count results manually
+
+        {
+            // result[0] is SUM(l_quantity)
+            let start = std::time::Instant::now();
+            let v =
+                AggregationResult::Scalar(result[0].scalar().unwrap() / number_of_records as f64);
+            let elapsed = start.elapsed().as_nanos().try_into().unwrap_or(u64::MAX);
+            result.push(v);
+            queries_elapsed_time.push(elapsed);
+            query_names.push("AVG(l_quantity)".to_string());
+        }
+        {
+            // result[1] is SUM(l_extendedprice)
+            let start = std::time::Instant::now();
+            let v =
+                AggregationResult::Scalar(result[1].scalar().unwrap() / number_of_records as f64);
+            let elapsed = start.elapsed().as_nanos().try_into().unwrap_or(u64::MAX);
+            result.push(v);
+            queries_elapsed_time.push(elapsed);
+            query_names.push("AVG(l_extendedprice)".to_string());
+        }
+        {
+            // result[2] is SUM(l_discount)
+            let start = std::time::Instant::now();
+            let v =
+                AggregationResult::Scalar(result[2].scalar().unwrap() / number_of_records as f64);
+            let elapsed = start.elapsed().as_nanos().try_into().unwrap_or(u64::MAX);
+            result[2] = v;
+            query_names.push("AVG(l_discount)".to_string());
+            queries_elapsed_time.push(elapsed);
+        }
+        result.push(AggregationResult::Integer(number_of_records));
+        // count(*)
+
+        let total_elapsed_time = queries_elapsed_time.iter().sum::<u64>();
+
+        let result = TpchResult01 {
+            name: "h01_simplified".to_string(),
+            compression: compression_statistics,
+            queries_elapsed_time,
+            query_names,
+            query_elapsed_time: total_elapsed_time,
+            result,
+            timer: timer.into(),
         };
         results.insert(method_name, result);
     }

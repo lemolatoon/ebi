@@ -492,14 +492,20 @@ fn main() -> anyhow::Result<()> {
         println!("Save dir: {}", unique_output_dir.display());
 
         const N_BATCH: usize = 5;
+        let mut results_01_simplified = Vec::with_capacity(N_BATCH);
         let mut results_01 = Vec::with_capacity(N_BATCH);
         let mut results_06 = Vec::with_capacity(N_BATCH);
         for _ in 0..N_BATCH {
-            let (result01, result06) = tpch::tpch_command(input_dir)?;
-            results_01.push(result01);
-            results_06.push(result06);
+            let result = tpch::tpch_command(input_dir)?;
+            results_01_simplified.push(result.h01_simplified);
+            results_01.push(result.h01);
+            results_06.push(result.h06);
         }
 
+        save_json_safely(
+            &results_01_simplified,
+            unique_output_dir.join("tpch_01_simplified.json"),
+        )?;
         save_json_safely(&results_01, unique_output_dir.join("tpch_01.json"))?;
         save_json_safely(&results_06, unique_output_dir.join("tpch_06.json"))?;
 
