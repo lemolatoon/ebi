@@ -17,8 +17,6 @@ from plot import (
     ExecutionTimesWithOthers,
     SegmentLabelMapping,
     CompressionMethodKeys,
-    compression_methods,
-    skip_methods,
     plot_absolute_stacked_execution_times_for_methods,
     plot_boxplot,
     execution_times_keys,
@@ -26,7 +24,7 @@ from plot import (
 )
 import polars as pl
 
-from common import default_compression_method_order, default_omit_methods
+from common import default_compression_method_order, default_omit_methods, compression_methods, skip_methods
 
 
 class UCR2018Config(TypedDict):
@@ -102,7 +100,7 @@ compression_methods_with_precision = [
 
 
 def create_df(path: str) -> pd.DataFrame:
-    assert os.path.exists(path)
+    assert os.path.exists(path), f"Path '{path}' does not exist."
 
     results = load_json_files_from_directory(path)
 

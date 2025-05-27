@@ -20,6 +20,8 @@ from plot import (
 import polars as pl
 import pandas as pd
 
+from plot2 import init_plt_font
+
 
 class CompressionConfig(TypedDict):
     chunk_option: (
@@ -388,5 +390,6 @@ def main2():
 
 
 if __name__ == "__main__":
+    init_plt_font()
     main()
     # main2()
