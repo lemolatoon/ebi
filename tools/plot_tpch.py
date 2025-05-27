@@ -7,7 +7,7 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 from common import default_compression_method_order
 from plot import get_average_execution_times_ratios, segment_mapping
-from plot2 import plot_absolute_stacked_execution_times_for_methods
+from plot2 import plot_absolute_stacked_execution_times_for_methods, init_plt_font
 
 def average_tpch_results(data: list[dict]) -> tuple[dict, pd.DataFrame]: 
     """
@@ -133,7 +133,7 @@ def plot_bar_chart(data: pd.DataFrame, metric_cols: list[str], title: str, ylabe
 
     plt.figure(figsize=(12, 6))
     sns.barplot(data=melted, x="method", y=ylabel, hue="Metric")
-    plt.title(title)
+    # plt.title(title)
     plt.xticks(rotation=45)
     plt.tight_layout()
     plt.savefig(save_path)
@@ -157,7 +157,7 @@ def plot_box_chart(data: pd.DataFrame, metric_cols: list[str], title: str, ylabe
 
     plt.figure(figsize=(10, 6))
     sns.boxplot(data=melted_df, x="method", y=ylabel)
-    plt.title(title)
+    # plt.title(title)
     plt.xticks(rotation=45)
     plt.tight_layout()
     plt.savefig(save_path)
@@ -255,4 +255,5 @@ def process_h06(df: pd.DataFrame, timer_df: pd.DataFrame, save_dir: str):
     process_tpch(df, timer_df, tpch06_columns, "tpch_06", save_dir)
 
 if __name__ == "__main__":
+    init_plt_font()
     main()

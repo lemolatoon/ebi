@@ -81,6 +81,7 @@ create_and_copy_plot2() {
     local json_dir=$(dirname "$json_path")
     local base=$(basename "$json_path" .json)
     uv run plot2.py "$json_path" "$XOR_JSON" "$UCR2018_DIR" "$EMBEDDING_JSON"
+    uv run plot_cd.py "$json_path"
     local out_dir="${json_dir}/${base}"
     if [ -d "$out_dir" ]; then
         cp -r "$out_dir" "$FINAL_SAVE_DIR/$dest"
@@ -113,6 +114,24 @@ run_matmul() {
     fi
 }
 
+run_embedding() {
+    uv run embedding_plot.py "$EMBEDDING_JSON"
+    if [ -d "./results/embedding" ]; then
+        cp -r "./results/embedding" "$FINAL_SAVE_DIR/embedding"
+    else
+        echo "Warning: ./results/embedding not found"
+    fi
+}
+
+run_ucr2018() {
+    uv run ucr2018_plot.py "$UCR2018_DIR"
+    if [ -d "./results/ucr2018" ]; then
+        cp -r "./results/ucr2018" "$FINAL_SAVE_DIR/ucr2018"
+    else
+        echo "Warning: ./results/ucr2018 not found"
+    fi
+}
+
 #######################################
 # Function: run_plot2_all
 #######################################
@@ -131,6 +150,8 @@ case "$MODE" in
         run_tpch
         run_matmul
         run_plot2_all
+        run_embedding
+        run_ucr2018
         ;;
     tpch)
         run_tpch
@@ -140,6 +161,8 @@ case "$MODE" in
         ;;
     plot2)
         run_plot2_all
+        run_embedding
+        run_ucr2018
         ;;
     *)
         echo "Error: unknown mode '$MODE'. Use one of all|tpch|matmul|plot2"
