@@ -1,7 +1,7 @@
 import copy
 import json
 import os
-from typing import List, Literal
+from typing import List, Literal, TypedDict
 
 from matplotlib import pyplot as plt
 import matplotlib
@@ -40,6 +40,19 @@ compression_methods: List[CompressionMethodKeys] = [
 skip_methods = set(["RLE"])
 for method in skip_methods:
     compression_methods.remove(method)
+
+class SegmentLabelMapping(TypedDict):
+    io_read_nanos: List[str]
+    io_write_nanos: List[str]
+    xor_nanos: List[str]
+    others: List[str]
+    bit_packing_nanos: List[str]
+    decompression_nanos: List[str]
+    compare_insert_nanos: List[str]
+    delta_nanos: List[str]
+    quantization_nanos: List[str]
+    sum_nanos: List[str]
+
 
 def default_omit_methods():
     return ["RLE", "Uncompressed"]

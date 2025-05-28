@@ -4,7 +4,7 @@ from statistics import fmean
 import sys
 import os
 import json
-from typing import Dict, List, Optional, TypedDict, cast
+from typing import Any, Callable, Dict, List, Optional, TypedDict, cast
 from pathlib import Path
 import pandas as pd
 
@@ -15,12 +15,13 @@ from plot import (
     AveragedAllOutputHandler,
     AveragedAllOutputInner,
     AveragedStats,
+    SegmentLabelMapping,
     segment_mapping,
     mapped_processing_types,
     compression_methods,
 )
 
-from common import default_compression_method_order, default_omit_methods, get_hatch, get_hatch_exe, get_color_exe, get_color
+from common import CompressionMethodKeys, default_compression_method_order, default_omit_methods, get_hatch, get_hatch_exe, get_color_exe, get_color
 
 import pandas as pd
 import numpy as np
@@ -1480,6 +1481,10 @@ def plot_absolute_stacked_execution_times_for_methods(
     processing_types_order: List[str] = default_processing_types_order(),
     compression_methods_order: List[str] = default_compression_method_order(),
     normalized: bool = False,
+    patch_label_mapping: Callable[
+        [Dict[CompressionMethodKeys, SegmentLabelMapping]], Any
+    ]
+    | None = None,
 ):
     """
     Plots a stacked bar chart of absolute execution times per compression method.
@@ -1501,10 +1506,13 @@ def plot_absolute_stacked_execution_times_for_methods(
     default_fontsize = 12
 
     patched_segment_mapping = copy.deepcopy(segment_mapping)
+    if patch_label_mapping is not None:
+        patch_label_mapping(patched_segment_mapping)
 
     # Compute absolute execution times based on ratios
     times_by_method = {}
 
+    methods_including_patched = []
     for method, row in df.iterrows():
         normalized_exec_time = row[ratio_column]  # Convert string dict to actual dict
 
@@ -1523,6 +1531,22 @@ def plot_absolute_stacked_execution_times_for_methods(
 
         if method_times:
             times_by_method[method] = method_times
+            methods_including_patched.append(method)
+    
+    # reorder method by compression_methods_order
+    def key_func(method):
+        if method in compression_methods_order:
+            return compression_methods_order.index(method)
+        if method in default_omit_methods():
+            return float("inf")
+        return 300 + int(method[-1])
+    methods_including_patched.sort(
+        key=key_func
+    )
+    # drop default_omit_methods() from methods_including_patched
+    methods_including_patched = [
+        method for method in methods_including_patched if method not in default_omit_methods()
+    ]
 
     # Identify unique processing types for consistent ordering
     valid_processing_types = []
@@ -1531,20 +1555,20 @@ def plot_absolute_stacked_execution_times_for_methods(
     for processing_type in processing_types_order:
         if any(
             processing_type in times_by_method[method]
-            for method in compression_methods_order
+            for method in methods_including_patched
         ):
             valid_processing_types.append(processing_type)
 
     # Stacked bar chart setup
     bar_width = 0.5
-    index = np.arange(len(times_by_method))
-    bottom = np.zeros(len(times_by_method))
+    index = np.arange(len(methods_including_patched))
+    bottom = np.zeros(len(methods_including_patched))
 
     # Plot each processing type with consistent colors
     for processing_type in valid_processing_types:
         values = [
             times_by_method[method].get(processing_type, 0)
-            for method in compression_methods_order
+            for method in methods_including_patched
         ]
         ax.bar(
             index,
@@ -1561,7 +1585,7 @@ def plot_absolute_stacked_execution_times_for_methods(
     # Configure axis labels
     ax.set_ylabel(y_label, fontsize=default_fontsize)
     ax.set_xticks(index)
-    ax.set_xticklabels(compression_methods_order, rotation=45, ha="right")
+    ax.set_xticklabels(methods_including_patched, rotation=45, ha="right")
     # ax.set_title(f"Execution Times for {dataset_name} by Compression Method")
 
 

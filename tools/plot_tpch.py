@@ -224,7 +224,7 @@ def process_tpch(df: pd.DataFrame, timer_df: pd.DataFrame, columns: list[str], t
     plot_absolute_stacked_execution_times_for_methods(
         ax,
         timer_df,
-        "Inverse Query Elapsed Time",
+        "Throughput",
         "ExecTimeRatios",
         "Execution Time (s)",
         segment_mapping,
