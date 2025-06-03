@@ -16,7 +16,7 @@
 #         plot2   Run only plot2 (AVX2/AVX512) plots
 #
 # ENVIRONMENT VARIABLES:
-#   TPCH_DIR             Directory containing TPCH data (default: ../chameleon/tpch002)
+#   TPCH_DIR             Directory containing TPCH data (default: ../chameleon/tpch003)
 #   XOR_JSON             Path to XOR JSON file (default: ../chameleon/xor/000.json)
 #   EMBEDDING_JSON       Path to EMBEDDING JSON file (default: ../chameleon/embedding/embedding_result.json)
 #   UCR2018_DIR          Directory for UCR2018 files (default: ../chameleon/ucr2018)
@@ -63,7 +63,7 @@ MODE="${2:-all}"    # default mode is "all"
 mkdir -p "$FINAL_SAVE_DIR"
 
 # Set defaults for environment variables if unset
-: "${TPCH_DIR:=../chameleon/tpch002}"
+: "${TPCH_DIR:=../chameleon/tpch003}"
 : "${XOR_JSON:=../chameleon/xor/000.json}"
 : "${EMBEDDING_JSON:=../chameleon/embedding/embedding_result.json}"
 : "${UCR2018_DIR:=../chameleon/ucr2018}"

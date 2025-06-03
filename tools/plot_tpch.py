@@ -119,9 +119,11 @@ def main():
     
     df01, timer_df01 = load_result(f"{base_dir}/tpch_01.json")
     df06, timer_df06 = load_result(f"{base_dir}/tpch_06.json")
+    df01_simplified, timer_df01_simplified = load_result(f"{base_dir}/tpch_01_simplified.json")
 
     process_h01(df01, timer_df01, save_dir)
     process_h06(df06, timer_df06, save_dir)
+    process_tpch(df01_simplified, timer_df01_simplified, tpch01_columns, "tpch_01_simplified", save_dir)
 
 def plot_bar_chart(data: pd.DataFrame, metric_cols: list[str], title: str, ylabel: str, save_path: str):
     """
@@ -222,7 +224,7 @@ def process_tpch(df: pd.DataFrame, timer_df: pd.DataFrame, columns: list[str], t
     plot_absolute_stacked_execution_times_for_methods(
         ax,
         timer_df,
-        "Inverse Query Elapsed Time",
+        "Throughput",
         "ExecTimeRatios",
         "Execution Time (s)",
         segment_mapping,

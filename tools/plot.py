@@ -26,7 +26,7 @@ from typing_extensions import (
 )
 from datetime import datetime
 
-from common import CompressionMethodKeys, get_color_exe, compression_methods
+from common import CompressionMethodKeys, SegmentLabelMapping, get_color_exe, compression_methods
 
 
 class CompressionConfig(TypedDict):
@@ -1156,18 +1156,6 @@ class AllOutputHandler:
         return AveragedAllOutputHandler(inner)
 
 
-
-class SegmentLabelMapping(TypedDict):
-    io_read_nanos: List[str]
-    io_write_nanos: List[str]
-    xor_nanos: List[str]
-    others: List[str]
-    bit_packing_nanos: List[str]
-    decompression_nanos: List[str]
-    compare_insert_nanos: List[str]
-    delta_nanos: List[str]
-    quantization_nanos: List[str]
-    sum_nanos: List[str]
 
 
 default_mapping: SegmentLabelMapping = {
