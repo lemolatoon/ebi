@@ -134,7 +134,8 @@ def plot_bar_chart(data: pd.DataFrame, metric_cols: list[str], title: str, ylabe
     melted = subset.melt(id_vars="method", var_name="Metric", value_name=ylabel)
 
     plt.figure(figsize=(12, 6))
-    sns.barplot(data=melted, x=None, y=ylabel, hue="Metric")
+    sns.barplot(data=melted, x="method", y=ylabel, hue="Metric")
+    plt.xlabel(None)
     # plt.title(title)
     plt.xticks(rotation=45)
     plt.tight_layout()
@@ -185,7 +186,7 @@ def plot_query_elapsed_time_with_overlay(
     y_base = base_df.loc[methods, "query_elapsed_time_sec"]
     y_overlay = overlay_df.loc[methods, "query_elapsed_time_sec"]
 
-    plt.figure(figsize=(12, 6))
+    plt.figure(figsize=(12, 5))
     ax = sns.barplot(
         x=methods,
         y=y_base,
