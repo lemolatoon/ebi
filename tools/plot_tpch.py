@@ -121,7 +121,7 @@ def main():
     df06, timer_df06 = load_result(f"{base_dir}/tpch_06.json")
     df01_simplified, timer_df01_simplified = load_result(f"{base_dir}/tpch_01_simplified.json")
 
-    process_h01(df01, timer_df01, save_dir)
+    process_h01(df01, df01_simplified, timer_df01, save_dir)
     process_h06(df06, timer_df06, save_dir)
     process_tpch(df01_simplified, timer_df01_simplified, tpch01_columns, "tpch_01_simplified", save_dir)
 
@@ -134,7 +134,7 @@ def plot_bar_chart(data: pd.DataFrame, metric_cols: list[str], title: str, ylabe
     melted = subset.melt(id_vars="method", var_name="Metric", value_name=ylabel)
 
     plt.figure(figsize=(12, 6))
-    sns.barplot(data=melted, x="method", y=ylabel, hue="Metric")
+    sns.barplot(data=melted, x=None, y=ylabel, hue="Metric")
     # plt.title(title)
     plt.xticks(rotation=45)
     plt.tight_layout()
@@ -164,6 +164,75 @@ def plot_box_chart(data: pd.DataFrame, metric_cols: list[str], title: str, ylabe
     plt.tight_layout()
     plt.savefig(save_path)
     plt.close()
+
+def plot_query_elapsed_time_with_overlay(
+    base_df: pd.DataFrame,
+    overlay_df: pd.DataFrame,
+    base_label: str,
+    overlay_label: str,
+    save_path: str,
+) -> None:
+    """
+    Draw a bar chart of query-elapsed time (base_df) and overlay a **horizontal**
+    dotted line for each bar showing the corresponding value from overlay_df.
+    """
+    # make sure both dataframes have the seconds column
+    for df in (base_df, overlay_df):
+        if "query_elapsed_time_sec" not in df.columns:
+            df["query_elapsed_time_sec"] = df["query_elapsed_time"] / 1e9
+
+    methods = default_compression_method_order()
+    y_base = base_df.loc[methods, "query_elapsed_time_sec"]
+    y_overlay = overlay_df.loc[methods, "query_elapsed_time_sec"]
+
+    plt.figure(figsize=(12, 6))
+    ax = sns.barplot(
+        x=methods,
+        y=y_base,
+        color="tab:blue",
+        label=base_label,
+    )
+
+    # add a horizontal dotted line across each bar
+    first = True
+    for bar, y in zip(ax.patches, y_overlay):
+        x_left = bar.get_x()
+        x_right = x_left + bar.get_width()
+        ax.hlines(
+            y,
+            xmin=x_left,
+            xmax=x_right,
+            linestyle="--",
+            linewidth=2,
+            color="black",
+            label=overlay_label if first else None,  # add legend label only once
+        )
+        first = False
+
+    ax.set_ylabel("Execution Time (s)")
+    ax.legend()
+    plt.xticks(rotation=45)
+    plt.tight_layout()
+    plt.savefig(save_path)
+    plt.close()
+
+def print_query_time(
+    df: pd.DataFrame,
+    tag: str,
+) -> None:
+    """
+    Print the query-elapsed-time Series (sorted) to stdout
+    and draw the bar chart.
+    """
+    # ensure the seconds column exists
+    if "query_elapsed_time_sec" not in df.columns:
+        df["query_elapsed_time_sec"] = df["query_elapsed_time"] / 1e9
+
+    s = df.loc[default_compression_method_order(), "query_elapsed_time_sec"]
+    s_sorted = s.sort_values()  # ascending
+    # stdout
+    print(f"\n=== {tag}: sorted query_elapsed_time_sec (s) ===")
+    print(s_sorted.to_string())
 
 def process_tpch(df: pd.DataFrame, timer_df: pd.DataFrame, columns: list[str], tag: str, save_dir: str):
     """
@@ -219,6 +288,7 @@ def process_tpch(df: pd.DataFrame, timer_df: pd.DataFrame, columns: list[str], t
         "Time (s)",
         os.path.join(save_dir, f"{tag}_query_elapsed_time_bar.png"),
     )
+    print_query_time(df, tag)
 
     fig, ax = plt.subplots()
     plot_absolute_stacked_execution_times_for_methods(
@@ -243,9 +313,24 @@ tpch01_columns = [
     "l_discount",
     "l_tax",
 ]
-# Define process_h01 and process_h06
-def process_h01(df: pd.DataFrame, timer_df: pd.DataFrame, save_dir: str):
+
+def process_h01(
+    df: pd.DataFrame,
+    overlay_df: pd.DataFrame,
+    timer_df: pd.DataFrame,
+    save_dir: str,
+) -> None:
+    """Process TPC-H Query 1 and generate the extra overlay plot."""
     process_tpch(df, timer_df, tpch01_columns, "tpch_01", save_dir)
+
+    # extra overlay plot
+    plot_query_elapsed_time_with_overlay(
+        base_df=df,
+        overlay_df=overlay_df,
+        base_label="Q1",
+        overlay_label="Q1 Simplified",
+        save_path=os.path.join(save_dir, "tpch_01_query_elapsed_time_overlay.png"),
+    )
 
 
 tpch06_columns = [
