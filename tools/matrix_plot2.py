@@ -326,7 +326,7 @@ def main():
             d["BUFF"]["sum_nanos"] = ["Sum"]
             for p in precisions:
                 d[f"BUFF_{p}"] = d["BUFF"]
-        fig, ax = plt.subplots()
+        fig, ax = plt.subplots(1, 1, figsize=(6, 4))
         plot_absolute_stacked_execution_times_for_methods(
             ax,
             timer_df,
@@ -338,7 +338,8 @@ def main():
         )
         fig.savefig(
             os.path.join(out_dir, f"{tag}_stacked.png"),
-            bbox_inches='tight'
+            bbox_inches='tight',
+            dpi=300
         )
 
 if __name__ == "__main__":
