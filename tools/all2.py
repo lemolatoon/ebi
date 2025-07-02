@@ -179,11 +179,13 @@ def setup_environment(data_tar: Path | None, ucr_tar: Path | None) -> None:
 # ---------------------------------------------------------------------------
 
 def _repo_run(cmd: Sequence[str] | str, **kw):
-    _run(cmd, cwd=EBI_DIR, **kw)
+    cwd = kw.pop("cwd", EBI_DIR)
+    _run(cmd, cwd=cwd, **kw)
 
 
 def _repo_sudo(cmd: Sequence[str] | str, **kw):
-    _sudo(cmd, cwd=EBI_DIR, **kw)
+    cwd = kw.pop("cwd", EBI_DIR)
+    _sudo(cmd, cwd=cwd, **kw)
 
 # ---------------------------------------------------------------------------
 # Benchmark functions (exact Bash parity)
@@ -217,7 +219,7 @@ def compression_and_queries_general(n: int) -> None:
 
     print(f"[General] Results base directory: {result_root}")
     for i, (cpu, mem) in enumerate(config_sets):
-        print(f"{i}  → cpu={cpu}  in_memory={in_mem}")
+        print(f"{i}  → cpu={cpu}  in_memory={mem}")
 
 
 def xor_bench(n: int) -> None:
