@@ -4,15 +4,7 @@
 This script now covers **all** setup cases, including optional archive
 extraction:
 
-* `--data-tar <path>` – tarball that contains the *general* dataset
-  (expected to un‑tar into `ebi/data/data/`; it will be renamed to
-  `ebi/data/general/`).
-* `--ucrarchive2018-tar <path>` – tarball that contains the
-  `UCRArchive_2018` directory; only extracted if that directory is not
-  already present.
-
-Other CLI flags remain unchanged:
-`--n`, `--only-setup`, `--only-matmul`, `--skip-matmul`.
+Use `--help` to see all options.
 """
 from __future__ import annotations
 
@@ -275,7 +267,7 @@ def matmul_cuda() -> None:
     env = os.environ.copy(); env.update({"RUSTFLAGS": "-C target-cpu=native", "TARGET_CPU": "native"})
     _repo_run(["cargo", "build", "--release", "--features=cuda"], env=env, cwd=EBI_DIR / "experimenter")
     _repo_sudo(["../target/release/experimenter", "matrix-cuda", "-o", "matrix_cuda"], env=env, cwd=EBI_DIR / "experimenter")
-    print(f"[MatMul] Results base directory: {(EBI_DIR/'matrix_cuda'/'result'/'matrix_cuda')}")
+    print(f"[MatMul] Results base directory: {(EBI_DIR/'experimenter'/'matrix_cuda'/'result'/'matrix_cuda')}")
 
 # ---------------------------------------------------------------------------
 # Repo‑scoped helpers & benchmarks (unchanged logic)
