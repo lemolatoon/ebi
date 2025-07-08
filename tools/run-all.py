@@ -1,8 +1,5 @@
 #!/usr/bin/env python3
-"""run_experiments.py — end‑to‑end *setup + benchmark* runner (no plotting)
-
-This script now covers **all** setup cases, including optional archive
-extraction:
+"""run-all.py — end‑to‑end *setup + benchmark* runner (no plotting)
 
 Use `--help` to see all options.
 """
