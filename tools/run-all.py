@@ -71,7 +71,7 @@ def _ensure_tool(cmd: str, installer: Sequence[str] | str) -> None:
     if shutil.which(cmd):
         return
     _header(f"[Setup] Installing {cmd}")
-    _run(installer, shell=isinstance(installer, str))
+    _run(installer)
     if not shutil.which(cmd):
         sys.exit(f"❌ Failed to install {cmd} or not in PATH.")
 
